@@ -1,0 +1,539 @@
+{
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids.",
+  "builtin_guid": "0000000000000000f000000000000000",
+  "builtin_file_ids": {
+    "46": {
+      "family": "standard",
+      "name": "Standard"
+    },
+    "45": {
+      "family": "standard",
+      "name": "Standard (Specular setup)"
+    },
+    "7": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Diffuse"
+    },
+    "10752": {
+      "family": "legacy",
+      "name": "Unlit/Texture",
+      "lighting": "unlit"
+    },
+    "10755": {
+      "family": "legacy",
+      "name": "Unlit/Color",
+      "lighting": "unlit"
+    },
+    "10750": {
+      "family": "legacy",
+      "name": "Unlit/Transparent",
+      "lighting": "unlit",
+      "alpha": "blend"
+    },
+    "10751": {
+      "family": "legacy",
+      "name": "Unlit/Transparent Cutout",
+      "lighting": "unlit",
+      "alpha": "cutout"
+    }
+  },
+  "shaders": {
+    "00795bf598b44dc4e9bd363348e77085": {
+      "family": "liltoon",
+      "name": "lts_fakeshadow",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "fakeshadow"
+    },
+    "0c762f24b85918a49812fc5690619178": {
+      "family": "liltoon",
+      "name": "lts_trans_oo",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "0e3ece1bd59542743bccadb21f68318e": {
+      "family": "liltoon",
+      "name": "ltsl_trans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "lite"
+    },
+    "14006db8206fb304aa86110d57626d40": {
+      "family": "liltoon",
+      "name": "ltspass_tess_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "pass"
+    },
+    "165365ab7100a044ca85fc8c33548a62": {
+      "family": "liltoon",
+      "name": "lts_trans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "1c12a37046f07ac4486881deaf0187ea": {
+      "family": "liltoon",
+      "name": "ltsl_trans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "lite"
+    },
+    "1e50f1bc4d1b0e34cbf16b82589f6407": {
+      "family": "liltoon",
+      "name": "ltsmulti_fur",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "multi",
+      "special": "fur"
+    },
+    "2683fad669f20ec49b8e9656954a33a8": {
+      "family": "liltoon",
+      "name": "ltspass_transparent",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "pass"
+    },
+    "2bde4bd29a2a70a4d9cf98772a6717ac": {
+      "family": "liltoon",
+      "name": "ltspass_dummy",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass",
+      "special": "dummy"
+    },
+    "33aad051c4a3a844a8f9330addb86a97": {
+      "family": "liltoon",
+      "name": "lts_furonly",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "33e950d038b8dfd4f824f3985c2abfb7": {
+      "family": "liltoon",
+      "name": "lts_overlay_one",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "overlay"
+    },
+    "34c2907eba944ed45a43970e0c11bcfd": {
+      "family": "liltoon",
+      "name": "ltsl_onetrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "lite"
+    },
+    "381af8ba8e1740a41b9768ccfb0416c2": {
+      "family": "liltoon",
+      "name": "ltsl",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "lite"
+    },
+    "3b3957e6c393b114bab6f835b4ed8f5d": {
+      "family": "liltoon",
+      "name": "lts_cutout_oo",
+      "alpha": "cutout",
+      "outline": true,
+      "variant": "full"
+    },
+    "3b4aa19949601f046a20ca8bdaee929f": {
+      "family": "liltoon",
+      "name": "lts_cutout_o",
+      "alpha": "cutout",
+      "outline": true,
+      "variant": "full"
+    },
+    "3c79b10c7e0b2784aaa4c2f8dd17d55e": {
+      "family": "liltoon",
+      "name": "lts_trans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "3eef4aee6ba0de047b0d40409ea2891c": {
+      "family": "liltoon",
+      "name": "lts_tess",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full"
+    },
+    "3fb94a39b2685ee4d9817dcaf6542d99": {
+      "family": "liltoon",
+      "name": "lts_ref_blur",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "ref"
+    },
+    "51b2dee0ab07bd84d8147601ff89e511": {
+      "family": "liltoon",
+      "name": "ltsmulti_o",
+      "alpha": "opaque",
+      "outline": true,
+      "variant": "multi"
+    },
+    "544c75f56e9af8048b29a6ace5f52091": {
+      "family": "liltoon",
+      "name": "lts_fur_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "54bc8b41278802d4a81b27fe402994e2": {
+      "family": "liltoon",
+      "name": "lts_fur_two",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "55706696b2bdb5d4d8541b89e17085c8": {
+      "family": "liltoon",
+      "name": "lts_fur",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "583a88005abb81a4ebbce757b4851a0d": {
+      "family": "liltoon",
+      "name": "ltsl_o",
+      "alpha": "opaque",
+      "outline": true,
+      "variant": "lite"
+    },
+    "59b5e58e88aae8a4ca42d1a7253e2fb2": {
+      "family": "liltoon",
+      "name": "ltspass_lite_opaque",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass"
+    },
+    "5ba517885727277409feada18effa4a6": {
+      "family": "liltoon",
+      "name": "lts_tess_cutout_o",
+      "alpha": "cutout",
+      "outline": true,
+      "variant": "full"
+    },
+    "61b4f98a5d78b4a4a9d89180fac793fc": {
+      "family": "liltoon",
+      "name": "ltspass_opaque",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass"
+    },
+    "62df797f407281640a224388953448cc": {
+      "family": "liltoon",
+      "name": "ltsl_twotrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "lite"
+    },
+    "67ed0252d63362a4ab23707a720508b7": {
+      "family": "liltoon",
+      "name": "lts_tess_onetrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "69f861c14129e724096c0955f8079012": {
+      "family": "liltoon",
+      "name": "ltsmulti_gem",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "multi",
+      "special": "gem"
+    },
+    "6a77405f7dfdc1447af58854c7f43f39": {
+      "family": "liltoon",
+      "name": "lts_twotrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "701268c07d37f5441b25b2cb99fae4b3": {
+      "family": "liltoon",
+      "name": "ltsl_onetrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "lite"
+    },
+    "7171688840c632447b22ec14e2bdef7e": {
+      "family": "liltoon",
+      "name": "lts_onetrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "7a7ac427f85673a45a3e4190fc10bc28": {
+      "family": "liltoon",
+      "name": "ltspass_tess_opaque",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass"
+    },
+    "7e398ea50f9b70045b1774e05b46a39f": {
+      "family": "liltoon",
+      "name": "lts_tess_twotrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "7e61dbad981ad4f43a03722155db1c6a": {
+      "family": "liltoon",
+      "name": "lts_tess_twotrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "7ec9f85eb7ee04943adfe19c2ba5901f": {
+      "family": "liltoon",
+      "name": "lts_furonly_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "82226adb1a0b8c4418f574cfdcf523da": {
+      "family": "liltoon",
+      "name": "ltsl_twotrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "lite"
+    },
+    "85d6126cae43b6847aff4b13f4adb8ec": {
+      "family": "liltoon",
+      "name": "lts_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "full"
+    },
+    "8773c83ab40fff24b800f74360819a6c": {
+      "family": "liltoon",
+      "name": "ltspass_lite_transparent",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "pass"
+    },
+    "8a6ef0489c3ffbf46812460af3d52bb0": {
+      "family": "liltoon",
+      "name": "ltspass_lite_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "pass"
+    },
+    "8cf5267d397b04846856f6d3d9561da0": {
+      "family": "liltoon",
+      "name": "ltsl_cutout_o",
+      "alpha": "cutout",
+      "outline": true,
+      "variant": "lite"
+    },
+    "90f83c35b0769a748abba5d0880f36d5": {
+      "family": "liltoon",
+      "name": "lts_tess_onetrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "9294844b15dca184d914a632279b24e1": {
+      "family": "liltoon",
+      "name": "ltsmulti",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "multi"
+    },
+    "94274b8ef5d3af842b9427384cba3a8f": {
+      "family": "liltoon",
+      "name": "lts_overlay",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "overlay"
+    },
+    "9b0c2630b12933248922527d4507cfa9": {
+      "family": "liltoon",
+      "name": "lts_tess_trans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "9cf054060007d784394b8b0bb703e441": {
+      "family": "liltoon",
+      "name": "lts_twotrans_o",
+      "alpha": "blend",
+      "outline": true,
+      "variant": "full"
+    },
+    "a8d94439709469942bc7dcc9156ba110": {
+      "family": "liltoon",
+      "name": "lts_gem",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "gem"
+    },
+    "ad219df2a46e841488aee6a013e84e36": {
+      "family": "liltoon",
+      "name": "ltspass_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "pass"
+    },
+    "afa1a194f5a2fd243bda3a17bca1b36e": {
+      "family": "liltoon",
+      "name": "lts_tess_trans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "b269573b9937b8340b3e9e191a3ba5a8": {
+      "family": "liltoon",
+      "name": "lts_onetrans",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "full"
+    },
+    "b957dce3d03ff5445ac989f8de643c7f": {
+      "family": "liltoon",
+      "name": "ltsl_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "lite"
+    },
+    "bbfffd5515b843c41a85067191cbf687": {
+      "family": "liltoon",
+      "name": "lts_tess_cutout",
+      "alpha": "cutout",
+      "outline": false,
+      "variant": "full"
+    },
+    "bdf24b2e925ce8a4fb0e903889a52e0e": {
+      "family": "liltoon",
+      "name": "ltspass_tess_transparent",
+      "alpha": "blend",
+      "outline": false,
+      "variant": "pass"
+    },
+    "c6d605ee23b18fc46903f38c67db701f": {
+      "family": "liltoon",
+      "name": "lts_tess_o",
+      "alpha": "opaque",
+      "outline": true,
+      "variant": "full"
+    },
+    "d28e4b78ba8368e49a44f86c0291df58": {
+      "family": "liltoon",
+      "name": "ltsl_overlay",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "lite",
+      "special": "overlay"
+    },
+    "d6e9e297d960d5341b5fe94e3356353b": {
+      "family": "liltoon",
+      "name": "ltspass_bakeramp",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass",
+      "special": "baker"
+    },
+    "d7af54cdd86902d41b8c240e06b93009": {
+      "family": "liltoon",
+      "name": "ltsmulti_ref",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "multi",
+      "special": "ref"
+    },
+    "dc9ded9f9d6f16c4e92cbb8f4269ae31": {
+      "family": "liltoon",
+      "name": "ltsl_overlay_one",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "lite",
+      "special": "overlay"
+    },
+    "dce3f3e248acc7b4daeda00daf616b4d": {
+      "family": "liltoon",
+      "name": "lts_ref",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "ref"
+    },
+    "df12117ecd77c31469c224178886498e": {
+      "family": "liltoon",
+      "name": "lts",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full"
+    },
+    "efa77a80ca0344749b4f19fdd5891cbe": {
+      "family": "liltoon",
+      "name": "lts_o",
+      "alpha": "opaque",
+      "outline": true,
+      "variant": "full"
+    },
+    "f8d9dfac6dbfaaf4c9c3aaf4bd8c955f": {
+      "family": "liltoon",
+      "name": "lts_furonly_two",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "full",
+      "special": "fur"
+    },
+    "f96a89829ccb1e54b85214550519a8d6": {
+      "family": "liltoon",
+      "name": "ltspass_baker",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass",
+      "special": "baker"
+    },
+    "fba17785d6b2c594ab6c0303c834da65": {
+      "family": "liltoon",
+      "name": "lts_oo",
+      "alpha": "opaque",
+      "outline": true,
+      "variant": "full"
+    },
+    "fd68f52288a6b0243bf6c217bf0930ea": {
+      "family": "liltoon",
+      "name": "ltspass_proponly",
+      "alpha": "opaque",
+      "outline": false,
+      "variant": "pass",
+      "special": "proponly"
+    },
+    "933532a4fcc9baf4fa0491de14d08ed7": {
+      "family": "urp",
+      "name": "Universal Render Pipeline/Lit",
+      "verified": false
+    },
+    "650dd9526735d5b46b79224bc6e94025": {
+      "family": "urp",
+      "name": "Universal Render Pipeline/Unlit",
+      "lighting": "unlit",
+      "verified": false
+    },
+    "8d2bb70cbf9db8d4da26e15b26e74248": {
+      "family": "urp",
+      "name": "Universal Render Pipeline/Simple Lit",
+      "verified": false
+    },
+    "6e4ae4064600d784cac1e41a9e6f2e59": {
+      "family": "hdrp",
+      "name": "HDRP/Lit",
+      "verified": false
+    }
+  }
+}
