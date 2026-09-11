@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
 from .unity_yaml import UnityRef, parse_documents
@@ -211,6 +211,35 @@ class NormalizedMaterial:
     @property
     def has_emission(self) -> bool:
         return self.emission_tex is not None or any(c > 0.0 for c in self.emission_color[:3])
+
+    # ---- JSON 往復（カスタムプロパティへの保存と再構築用） ----
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in ("base_color_tex", "normal_tex", "emission_tex", "metallic_tex", "occlusion_tex"):
+            ref = getattr(self, key)
+            data[key] = None if ref is None else {"guid": ref.guid, "scale": list(ref.scale), "offset": list(ref.offset)}
+        data.pop("warnings", None)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NormalizedMaterial":
+        known = {f.name for f in fields(cls)}
+        kwargs: dict[str, Any] = {}
+        for key, value in data.items():
+            if key not in known:
+                continue
+            if key.endswith("_tex"):
+                kwargs[key] = None if not value else TexRef(
+                    guid=str(value["guid"]),
+                    scale=tuple(value.get("scale", (1.0, 1.0))),
+                    offset=tuple(value.get("offset", (0.0, 0.0))),
+                )
+            elif key in ("base_color", "emission_color", "uv_scale", "uv_offset"):
+                kwargs[key] = tuple(value)
+            else:
+                kwargs[key] = value
+        kwargs.setdefault("name", "")
+        return cls(**kwargs)
 
     def extra_texture_guids(self) -> list[str]:
         """extras に入っている参考テクスチャ（MatCap 等）の GUID。"""

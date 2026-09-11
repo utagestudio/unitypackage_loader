@@ -348,6 +348,8 @@ def run_import(
         else:
             report.images.append(image.name)
 
+    mat_builder.tag_images(images, tex_infos)
+
     # --- パッケージ用コレクション ---
     scene = context.scene
     collection = bpy.data.collections.new(package_path.stem)

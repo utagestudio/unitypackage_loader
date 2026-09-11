@@ -136,6 +136,9 @@ class UNITYPKG_PT_tools(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
+        col.label(text="Materials (selected meshes)")
+        col.operator("unitypkg.rebuild_material", text="Rebuild in Another Mode", icon="NODE_MATERIAL")
+        col.separator()
         col.label(text="Outlines (selected meshes)")
         row = col.row(align=True)
         row.operator("unitypkg.add_outlines", text="Add", icon="MOD_SOLIDIFY")

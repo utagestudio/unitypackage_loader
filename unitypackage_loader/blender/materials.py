@@ -423,3 +423,44 @@ def _store_props(mat: bpy.types.Material, norm: NormalizedMaterial) -> None:
     mat["unity_shader_name"] = norm.shader_name or ""
     mat["unity_alpha_mode"] = norm.alpha_mode
     mat["unity_props"] = json.dumps(_json_ready(norm.extras), ensure_ascii=False)
+    mat["unity_normalized"] = json.dumps(_json_ready(norm.to_dict()), ensure_ascii=False)
+
+
+def tag_images(images: dict[str, bpy.types.Image | None], tex_infos: dict[str, TextureImporterInfo]) -> None:
+    """再構築時に GUID から画像を引けるように、画像側にも Unity 側の情報を残す。"""
+    for guid, image in images.items():
+        if image is None:
+            continue
+        image["unity_guid"] = guid
+        info = tex_infos.get(guid)
+        if info is not None:
+            image["unity_texture_type"] = info.texture_type
+            image["unity_clamps"] = info.clamps
+
+
+def collect_tagged_images() -> tuple[dict[str, bpy.types.Image], dict[str, TextureImporterInfo]]:
+    images: dict[str, bpy.types.Image] = {}
+    infos: dict[str, TextureImporterInfo] = {}
+    for image in bpy.data.images:
+        guid = image.get("unity_guid")
+        if not guid:
+            continue
+        images[guid] = image
+        info = TextureImporterInfo()
+        info.texture_type = int(image.get("unity_texture_type", 0))
+        if image.get("unity_clamps"):
+            info.wrap_u = info.wrap_v = 1
+        infos[guid] = info
+    return images, infos
+
+
+def rebuild_from_props(mat: bpy.types.Material, mode: str, opts: MaterialBuildOptions | None = None) -> tuple[str, list[str]]:
+    """カスタムプロパティ unity_normalized と読み込み済み画像だけでマテリアルを組み直す。"""
+    raw = mat.get("unity_normalized")
+    if not raw:
+        raise ValueError(f"{mat.name}: no Unity data stored on this material")
+    norm = NormalizedMaterial.from_dict(json.loads(raw))
+    images, infos = collect_tagged_images()
+    build_opts = opts or MaterialBuildOptions()
+    build_opts.mode = mode
+    return build_material(mat, norm, images, infos, build_opts)

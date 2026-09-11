@@ -259,3 +259,38 @@ class LocalSampleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoundTripTests(unittest.TestCase):
+    def test_normalized_to_dict_from_dict(self):
+        from unitypackage_loader.core.material import NormalizedMaterial
+
+        n = normalize_material(parse_material(LILTOON_OPAQUE, guid="m" * 32, pathname="Assets/X/Skin.mat"))
+        n.warnings.append("dropped on purpose")
+        data = n.to_dict()
+        self.assertNotIn("warnings", data)
+        self.assertEqual(data["base_color_tex"]["guid"], TEX_A)
+        restored = NormalizedMaterial.from_dict(data)
+        self.assertEqual(restored.name, n.name)
+        self.assertEqual(restored.base_color_tex, n.base_color_tex)
+        self.assertEqual(restored.normal_tex, n.normal_tex)
+        self.assertIsNone(restored.emission_tex)
+        self.assertEqual(restored.base_color, n.base_color)
+        self.assertEqual(restored.alpha_mode, n.alpha_mode)
+        self.assertEqual(restored.extras["shadow"]["strength"], 0.6)
+        self.assertEqual(restored.extras["matcap"]["tex"], TEX_E)
+        self.assertEqual(restored.extra_texture_guids(), [TEX_E])
+        self.assertEqual(restored.warnings, [])
+        # JSON 経由でも同じ（tuple → list になる）
+        import json
+
+        again = NormalizedMaterial.from_dict(json.loads(json.dumps(data)))
+        self.assertEqual(again.uv_scale, (1.0, 1.0))
+        self.assertEqual(again.base_color_tex.scale, (1.0, 1.0))
+
+    def test_from_dict_ignores_unknown_keys(self):
+        from unitypackage_loader.core.material import NormalizedMaterial
+
+        n = NormalizedMaterial.from_dict({"name": "X", "future_field": 1, "base_color_tex": None})
+        self.assertEqual(n.name, "X")
+        self.assertIsNone(n.base_color_tex)
