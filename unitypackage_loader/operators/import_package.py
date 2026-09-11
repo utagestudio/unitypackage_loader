@@ -100,7 +100,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             for prop, pref in self._PREF_DEFAULTS.items():
                 if not self.properties.is_property_set(prop):
                     setattr(self, prop, getattr(prefs, pref))
-        return ImportHelper.invoke(self, context, event)
+        # ドラッグ＆ドロップ（FileHandler 経由）で filepath が既に入っていればオプションのポップアップ、
+        # メニューからならファイルブラウザを開く
+        return self.invoke_popup(context, confirm_text="Import")
 
     def draw(self, context):
         layout = self.layout
@@ -247,11 +249,26 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+class IO_FH_unitypackage(bpy.types.FileHandler):
+    """3D ビューポートなどへの .unitypackage のドラッグ＆ドロップを受け付ける。"""
+
+    bl_idname = "IO_FH_unitypackage"
+    bl_label = "Unity Package"
+    bl_import_operator = IMPORT_SCENE_OT_unitypackage.bl_idname
+    bl_file_extensions = ".unitypackage"
+
+    @classmethod
+    def poll_drop(cls, context):
+        from bpy_extras.io_utils import poll_file_object_drop
+
+        return poll_file_object_drop(context)
+
+
 def menu_func_import(self, context):
     self.layout.operator(IMPORT_SCENE_OT_unitypackage.bl_idname, text="Unity Package (.unitypackage)")
 
 
-_classes = (IMPORT_SCENE_OT_unitypackage,)
+_classes = (IMPORT_SCENE_OT_unitypackage, IO_FH_unitypackage)
 
 
 def register() -> None:

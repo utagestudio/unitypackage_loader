@@ -111,12 +111,12 @@ Unity と 1:1 は不可能なので、**「Unity マテリアル → シェー�
 ## 2. ユーザーフロー
 
 ```
-File > Import > Unity Package (.unitypackage)
-        │
-        ▼
- ファイルブラウザ（右側にオプション）      ← §3.1
-        │  [Import]
-        ▼
+File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View にドラッグ＆ドロップ
+        │                                              │（FileHandler → 同じオペレーターを filepath 付きで invoke）
+        ▼                                              ▼
+ ファイルブラウザ（右側にオプション）      ← §3.1   オプションのポップアップ（invoke_props_dialog）
+        │  [Import]                                    │  [Import]
+        ▼                                              ▼
  パッケージ走査（索引作成、モデル候補列挙）
         │
         ├─ モデルが 1 つ & 「毎回確認」OFF → そのまま続行

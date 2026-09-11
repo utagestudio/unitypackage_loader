@@ -28,8 +28,8 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 ## 使い方
 
-1. File > Import > Unity Package (.unitypackage)
-2. 右側のオプションを必要に応じて変更して Import
+- **ドラッグ＆ドロップ**: `.unitypackage` を 3D ビューポートに落とすと、インポートオプションのポップアップが開きます。複数ファイルをまとめて落とすこともできます。
+- **メニュー**: File > Import > Unity Package (.unitypackage) からファイルブラウザで選び、右側のオプションを必要に応じて変更して Import
 
 | セクション | 項目 | 説明 |
 |---|---|---|
