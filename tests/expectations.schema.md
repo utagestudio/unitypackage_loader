@@ -6,6 +6,7 @@
 
 ```json
 {
+  "package": "<_local/ 内のパッケージファイル名。省略時は引数、無ければ _local/ の最初の .unitypackage>",
   "options": { "material_mode": "AUTO" },
   "objects": { "count": 0, "mesh_count": 0, "armature_count": 0 },
   "materials": {
@@ -37,6 +38,7 @@
 
 | キー | 意味 |
 |---|---|
+| `package` | 検証に使うパッケージ（`_local/` 内のファイル名）。コマンドライン引数があればそちらが優先 |
 | `options` | オペレーターに渡す追加プロパティ（`extract_mode` は常に一時ディレクトリへ上書きされる） |
 | `objects.count` | レポート上の新規オブジェクト数（アーマチュア込み） |
 | `materials.mapped` | .mat に対応付けできたマテリアル数 |

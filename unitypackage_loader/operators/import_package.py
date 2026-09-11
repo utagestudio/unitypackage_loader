@@ -195,7 +195,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 span = 1.0 / len(paths)
                 try:
                     prepared = prepare_package(path, build_shader_table(opts.shader_table_path))
-                    if opts.models == "ASK" and (len(prepared.models) > 1 or len(prepared.prefab_tables) > 1):
+                    ask = opts.models == "ASK" and not bpy.app.background
+                    if ask and (len(prepared.models) > 1 or len(prepared.prefab_tables) > 1):
                         select_models.set_pending(path, opts, prepared)
                         return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
                     report = run_import(

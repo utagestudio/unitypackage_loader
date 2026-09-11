@@ -25,12 +25,17 @@ LOCAL_DIR = REPO_ROOT / "_local"
 
 def _args() -> tuple[Path, Path]:
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
-    package = Path(argv[0]) if argv else next(iter(sorted(LOCAL_DIR.glob("*.unitypackage"))), None)
     expectations = Path(argv[1]) if len(argv) > 1 else LOCAL_DIR / "expectations.json"
-    if package is None or not package.is_file():
-        raise SystemExit("no package given and nothing found in _local/")
     if not expectations.is_file():
         raise SystemExit(f"expectations file not found: {expectations}")
+    if argv:
+        package = Path(argv[0])
+    else:
+        # 期待値ファイルの "package" キー（_local/ 内のファイル名）→ 無ければ _local/ の最初のパッケージ
+        named = json.loads(expectations.read_text("utf-8")).get("package")
+        package = LOCAL_DIR / named if named else next(iter(sorted(LOCAL_DIR.glob("*.unitypackage"))), None)
+    if package is None or not package.is_file():
+        raise SystemExit(f"package not found: {package}")
     return package, expectations
 
 
