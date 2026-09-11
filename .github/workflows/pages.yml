@@ -1,0 +1,72 @@
+# main への push で拡張の zip と Extension Repository の index.json を生成し、GitHub Pages に公開する。
+# 初回のみ、リポジトリの Settings > Pages > Source を "GitHub Actions" にしておくこと。
+name: Publish extension repository
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: "5.2.1"
+  BLENDER_URL: "https://download.blender.org/release/Blender5.2/blender-5.2.1-linux-x64.tar.xz"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/blender
+          curl -sSL "$BLENDER_URL" | tar -xJ --strip-components=1 -C ~/blender
+
+      - name: Install runtime libraries for headless Blender
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libegl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build extension zip and repository index
+        run: |
+          mkdir -p site
+          ~/blender/blender -b --factory-startup --command extension build \
+            --source-dir unitypackage_loader --output-dir site
+          ~/blender/blender -b --factory-startup --command extension server-generate --repo-dir=site
+          python3 tools/make_site_index.py site "${{ steps.pages.outputs.base_url }}"
+          ls -la site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

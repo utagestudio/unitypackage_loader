@@ -18,6 +18,20 @@ ln -s "$PWD/unitypackage_loader" ~/.config/blender/5.2/extensions/user_default/u
 Blender の Preferences > Get Extensions で右上メニューから "Refresh Local" を実行し、
 "Unity Package Importer" を有効にします。
 
+**Extension Repository として登録（推奨）**
+
+GitHub Pages で配布しています。Blender の Preferences > Get Extensions > Repositories の「+」から
+"Add Remote Repository" を選び、次の URL を登録すると、一覧からインストール・更新できます。
+
+```
+https://<GitHubユーザー名>.github.io/<リポジトリ名>/index.json
+```
+
+同じページ（`index.json` を除いた URL）に登録用 URL と zip のリンクを載せています。
+サイトは `.github/workflows/pages.yml` が main への push ごとに生成します（Blender の
+`extension build` と `extension server-generate` を CI 上で実行）。初回のみ、リポジトリの
+Settings > Pages > Source を "GitHub Actions" にしてください。
+
 **配布用 zip**
 
 ```sh
