@@ -54,7 +54,7 @@ Blender 標準 FBX インポーターが生成するマテリアル名は FBX �
 --- !u!21 &2100000
 Material:
   m_Name: Body
-  m_Shader: {fileID: 4800000, guid: efa77a80ca0344749b4f19fdd5891cbe, type: 3}
+  m_Shader: {fileID: 4800000, guid: efa77a80ca0344749b4f19fdd5891cbe, type: 3}   # lilToon 配布物の lts_o.shader（公開 GUID）
   m_CustomRenderQueue: -1
   m_SavedProperties:
     m_TexEnvs:
@@ -68,7 +68,7 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
 ```
 
-- 独自タグ `!u!21` とアンカー `&2100000` を除けば通常の YAML サブセット。
+- 独自タグ `!u!21` とアンカー `&2100000` を除けば通常の YAML サブセット。`!u!<classID>` と `fileID` の `2100000`（Material）`4800000`（Shader）`2800000`（Texture2D）は Unity が全プロジェクト共通で使う固定値（classID × 100000）。
 - テクスチャは **GUID 参照**。`pathname` 索引（GUID → パス）で引ける。
 - **Blender 同梱 Python に PyYAML は無い**（確認済み）。→ 依存無しの専用パーサーを書く（§4.4）。
 - 1 つの .mat に ~500 プロパティ。ほとんどが未使用（`fileID: 0`）なので、値が入っているものだけ拾う。
