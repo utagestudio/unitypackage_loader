@@ -211,3 +211,21 @@ class NormalizedMaterial:
     @property
     def has_emission(self) -> bool:
         return self.emission_tex is not None or any(c > 0.0 for c in self.emission_color[:3])
+
+    def extra_texture_guids(self) -> list[str]:
+        """extras に入っている参考テクスチャ（MatCap 等）の GUID。"""
+        found: list[str] = []
+
+        def walk(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, v in value.items():
+                    if key == "tex" and isinstance(v, str) and len(v) == 32:
+                        found.append(v)
+                    else:
+                        walk(v)
+            elif isinstance(value, (list, tuple)):
+                for v in value:
+                    walk(v)
+
+        walk(self.extras)
+        return found

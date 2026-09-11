@@ -8,9 +8,10 @@ from bpy.props import BoolProperty, EnumProperty, StringProperty
 _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]
 
 MATERIAL_MODE_ITEMS = (
-    ("AUTO", "Auto", "Unlit for toon shaders (lilToon etc.), Principled BSDF for PBR shaders"),
+    ("AUTO", "Auto", "Toon node group for toon shaders (lilToon etc.), Principled BSDF for PBR shaders"),
     ("PRINCIPLED", "Principled BSDF", "Always build a Principled BSDF material"),
-    ("UNLIT", "Unlit (Emission)", "Texture straight into an Emission shader, like a toon look"),
+    ("TOON", "Toon (Node Group)", "UnityToon node group: shadow color, MatCap, rim light and emission (EEVEE)"),
+    ("UNLIT", "Unlit (Emission)", "Texture straight into an Emission shader, no lighting"),
     ("NAMES_ONLY", "Names Only", "Keep the FBX importer's materials, only attach Unity metadata"),
 )
 EXTRACT_MODE_ITEMS = (

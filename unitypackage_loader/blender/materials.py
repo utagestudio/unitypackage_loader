@@ -12,6 +12,7 @@ from ..core.material import NormalizedMaterial, TexRef
 from ..core.meta import TextureImporterInfo
 
 MODE_PRINCIPLED = "PRINCIPLED"
+MODE_TOON = "TOON"
 MODE_UNLIT = "UNLIT"
 MODE_NAMES_ONLY = "NAMES_ONLY"
 MODE_AUTO = "AUTO"
@@ -30,7 +31,11 @@ class MaterialBuildOptions:
 def effective_mode(norm: NormalizedMaterial, mode: str) -> str:
     if mode != MODE_AUTO:
         return mode
-    return MODE_UNLIT if norm.lighting in ("toon", "unlit") else MODE_PRINCIPLED
+    if norm.lighting == "toon":
+        return MODE_TOON
+    if norm.lighting == "unlit":
+        return MODE_UNLIT
+    return MODE_PRINCIPLED
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +170,8 @@ def build_material(
 
     if mode == MODE_UNLIT:
         _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings, opts)
+    elif mode == MODE_TOON:
+        _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts)
     else:
         _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts)
     return mode, warnings
@@ -273,6 +280,128 @@ def _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings
             img = images.get(ref.guid)
             if img is not None:
                 b.image(img, ref, tex_infos.get(ref.guid), 1, label)
+
+
+def _normal_output(b, norm, mapping_out, images, tex_infos, warnings, opts, col: int):
+    """ノーマルマップがあれば Normal Map ノード、無ければ Geometry の Normal を返す。"""
+    if opts.use_normal_maps and norm.normal_tex is not None:
+        img = _image_for(norm.normal_tex, images, warnings, "normal")
+        node = b.image(img, norm.normal_tex, tex_infos.get(norm.normal_tex.guid), col, "Normal")
+        if mapping_out is not None:
+            b.link(mapping_out, node.inputs["Vector"])
+        nm = b.add("ShaderNodeNormalMap", col + 1)
+        nm.inputs["Strength"].default_value = max(0.0, norm.normal_strength)
+        b.link(node.outputs["Color"], nm.inputs["Color"])
+        return nm.outputs["Normal"]
+    geo = b.add("ShaderNodeNewGeometry", col + 1, label="Geometry normal")
+    return geo.outputs["Normal"]
+
+
+def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts):
+    from .toon_group import get_toon_group
+
+    group = b.add("ShaderNodeGroup", 3, label="UnityToon")
+    group.node_tree = get_toon_group()
+    group.width = 220
+    b.link(group.outputs["Shader"], out.inputs["Surface"])
+
+    if color_out is not None:
+        b.link(color_out, group.inputs["Base Color"])
+    else:
+        group.inputs["Base Color"].default_value = (*norm.base_color[:3], 1.0)
+    if alpha_out is not None:
+        b.link(alpha_out, group.inputs["Alpha"])
+    elif norm.alpha_mode != "opaque" and not opts.force_opaque:
+        group.inputs["Alpha"].default_value = norm.base_color[3]
+
+    normal_out = _normal_output(b, norm, mapping_out, images, tex_infos, warnings, opts, 1)
+    b.link(normal_out, group.inputs["Normal"])
+
+    extras = norm.extras
+    shadow = extras.get("shadow") or {}
+    shade = extras.get("shade") or {}
+    if shadow:
+        group.inputs["Shadow Color"].default_value = _rgba(shadow.get("color"), (0.8, 0.8, 0.8, 1.0))
+        group.inputs["Shadow Strength"].default_value = float(shadow.get("strength", 1.0))
+        group.inputs["Shadow Border"].default_value = float(shadow.get("border", 0.5))
+        group.inputs["Shadow Blur"].default_value = float(shadow.get("blur", 0.1))
+    elif shade:  # MToon: 影色は直接色、toony が高いほど境界が硬い
+        group.inputs["Shadow Color"].default_value = _rgba(shade.get("color"), (0.8, 0.8, 0.8, 1.0))
+        group.inputs["Shadow Strength"].default_value = 1.0
+        group.inputs["Shadow Border"].default_value = max(0.0, min(1.0, 0.5 - 0.5 * float(shade.get("shift", 0.0))))
+        group.inputs["Shadow Blur"].default_value = max(0.02, 1.0 - float(shade.get("toony", 0.9)))
+    else:
+        group.inputs["Shadow Strength"].default_value = 0.0
+
+    matcap = extras.get("matcap") or {}
+    matcap_img = images.get(matcap.get("tex")) if matcap.get("tex") else None
+    if matcap_img is not None:
+        geo_n = b.add("ShaderNodeVectorTransform", 0, label="MatCap UV")
+        geo_n.vector_type = "NORMAL"
+        geo_n.convert_from = "WORLD"
+        geo_n.convert_to = "CAMERA"
+        b.link(normal_out, geo_n.inputs["Vector"])
+        uv = b.add("ShaderNodeVectorMath", 1, label="×0.5 + 0.5")
+        uv.operation = "MULTIPLY_ADD"
+        uv.inputs[1].default_value = (0.5, 0.5, 0.0)
+        uv.inputs[2].default_value = (0.5, 0.5, 0.0)
+        b.link(geo_n.outputs["Vector"], uv.inputs[0])
+        tex = b.image(matcap_img, None, tex_infos.get(matcap.get("tex")), 1, "MatCap")
+        tex.extension = "EXTEND"
+        b.link(uv.outputs["Vector"], tex.inputs["Vector"])
+        mc_out = tex.outputs["Color"]
+        mc_color = _rgba(matcap.get("color"), (1.0, 1.0, 1.0, 1.0))
+        if any(abs(c - 1.0) > 1e-4 for c in mc_color[:3]):
+            tint = b.add("ShaderNodeMix", 2, label="MatCap Color")
+            tint.data_type = "RGBA"
+            tint.blend_type = "MULTIPLY"
+            _socket(tint.inputs, "Factor_Float").default_value = 1.0
+            _socket(tint.inputs, "B_Color").default_value = mc_color
+            b.link(mc_out, _socket(tint.inputs, "A_Color"))
+            mc_out = _socket(tint.outputs, "Result_Color")
+        b.link(mc_out, group.inputs["MatCap"])
+        strength = float(matcap.get("blend", 1.0)) * mc_color[3]
+        group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, strength))
+        mode = int(matcap.get("blend_mode", 0))
+        group.inputs["MatCap Mode"].default_value = float(mode if 0 <= mode <= 3 else (1 if matcap.get("additive") else 0))
+    elif matcap.get("tex"):
+        warnings.append("matcap texture could not be loaded")
+
+    rim = extras.get("rim") or {}
+    if rim:
+        rim_color = _rgba(rim.get("color"), (1.0, 1.0, 1.0, 1.0))
+        group.inputs["Rim Color"].default_value = (*rim_color[:3], 1.0)
+        group.inputs["Rim Strength"].default_value = rim_color[3] if any(c > 0 for c in rim_color[:3]) else 0.0
+        group.inputs["Rim Border"].default_value = float(rim.get("border", 0.5))
+
+    if opts.use_emission and norm.has_emission:
+        group.inputs["Emission Strength"].default_value = norm.emission_strength
+        if norm.emission_tex is not None:
+            img = _image_for(norm.emission_tex, images, warnings, "emission")
+            node = b.image(img, norm.emission_tex, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
+            if mapping_out is not None:
+                b.link(mapping_out, node.inputs["Vector"])
+            e_out = node.outputs["Color"]
+            if any(abs(c - 1.0) > 1e-4 for c in norm.emission_color[:3]):
+                mix = b.add("ShaderNodeMix", 2, label="Emission × _EmissionColor")
+                mix.data_type = "RGBA"
+                mix.blend_type = "MULTIPLY"
+                _socket(mix.inputs, "Factor_Float").default_value = 1.0
+                _socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
+                b.link(e_out, _socket(mix.inputs, "A_Color"))
+                e_out = _socket(mix.outputs, "Result_Color")
+            b.link(e_out, group.inputs["Emission"])
+        else:
+            group.inputs["Emission"].default_value = (*norm.emission_color[:3], 1.0)
+
+
+def _rgba(value, default):
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        rgba = [float(v) for v in value[:4]]
+        while len(rgba) < 4:
+            rgba.append(1.0)
+        return tuple(rgba)
+    return default
 
 
 def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mode: str, opts: MaterialBuildOptions) -> None:

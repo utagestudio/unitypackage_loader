@@ -135,6 +135,7 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
     referenced: set[str] = set()
     for norm in normalized.values():
         referenced.update(t.guid for t in norm.texture_refs())
+        referenced.update(norm.extra_texture_guids())
     missing = {g for g in referenced if pkg.get(g) is None}
 
     tables = []
