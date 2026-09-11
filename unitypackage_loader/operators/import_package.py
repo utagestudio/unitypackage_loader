@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
@@ -21,6 +22,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
 
     filename_ext = ".unitypackage"
     filter_glob: StringProperty(default="*.unitypackage", options={"HIDDEN"})
+    # 複数選択（一括インポート）
+    files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
+    directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
 
     # --- Model ---
     models: EnumProperty(name="Models", items=MODELS_ITEMS, default="ASK")
@@ -136,61 +140,109 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         box.prop(self, "import_unreferenced")
         box.prop(self, "overwrite_extracted")
 
+    def _selected_paths(self) -> list[str]:
+        if self.files and self.directory:
+            paths = [str(Path(self.directory) / f.name) for f in self.files if f.name]
+            if paths:
+                return paths
+        return [self.filepath] if self.filepath else []
+
     def execute(self, context):
         from ..blender.importer import ImportOptions, build_shader_table, prepare_package, run_import
+        from ..core.report import ImportReport
 
         prefs = get_prefs(context)
-        opts = ImportOptions(
-            models=self.models,
-            material_mode=self.material_mode,
-            force_opaque=self.force_opaque,
-            backface_culling=self.backface_culling,
-            use_normal_maps=self.use_normal_maps,
-            use_emission=self.use_emission,
-            reuse_existing=self.reuse_existing,
-            store_props=self.store_props,
-            extract_mode=self.extract_mode,
-            extract_path=self.extract_path,
-            pack_images=self.pack_images,
-            import_unreferenced=self.import_unreferenced,
-            overwrite_extracted=self.overwrite_extracted,
-            fbx_importer=self.fbx_importer,
-            use_anim=self.use_anim,
-            ignore_leaf_bones=self.ignore_leaf_bones,
-            global_scale=self.global_scale,
-            blend_materials=self.blend_materials,
-            outlines=self.outlines,
-            outline_width_scale=self.outline_width_scale,
-            shader_table_path=prefs.shader_table_path if prefs else "",
-        )
+        paths = self._selected_paths()
+        if not paths:
+            self.report({"ERROR"}, "No package selected")
+            return {"CANCELLED"}
+        batch = len(paths) > 1
+
+        def make_opts() -> ImportOptions:
+            return ImportOptions(
+                # 一括インポート時はダイアログを出さず全モデルを読む
+                models="ALL" if (batch and self.models == "ASK") else self.models,
+                material_mode=self.material_mode,
+                force_opaque=self.force_opaque,
+                backface_culling=self.backface_culling,
+                use_normal_maps=self.use_normal_maps,
+                use_emission=self.use_emission,
+                reuse_existing=self.reuse_existing,
+                store_props=self.store_props,
+                extract_mode=self.extract_mode,
+                extract_path=self.extract_path,
+                pack_images=self.pack_images,
+                import_unreferenced=self.import_unreferenced,
+                overwrite_extracted=self.overwrite_extracted,
+                fbx_importer=self.fbx_importer,
+                use_anim=self.use_anim,
+                ignore_leaf_bones=self.ignore_leaf_bones,
+                global_scale=self.global_scale,
+                blend_materials=self.blend_materials,
+                outlines=self.outlines,
+                outline_width_scale=self.outline_width_scale,
+                shader_table_path=prefs.shader_table_path if prefs else "",
+            )
+
         wm = context.window_manager
         wm.progress_begin(0, 100)
+        reports: list[ImportReport] = []
+        failures: list[str] = []
         try:
-            prepared = prepare_package(self.filepath, build_shader_table(opts.shader_table_path))
-            if opts.models == "ASK" and len(prepared.models) > 1:
-                select_models.set_pending(self.filepath, opts, prepared)
-                return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
-            report = run_import(
-                context,
-                self.filepath,
-                opts,
-                progress=lambda f, msg: wm.progress_update(int(f * 100)),
-                prepared=prepared,
-            )
-        except PackageError as exc:
-            self.report({"ERROR"}, str(exc))
-            return {"CANCELLED"}
-        except Exception as exc:  # noqa: BLE001
-            traceback.print_exc()
-            self.report({"ERROR"}, f"Import failed: {exc!r}")
-            return {"CANCELLED"}
+            for index, path in enumerate(paths):
+                opts = make_opts()
+                base = index / len(paths)
+                span = 1.0 / len(paths)
+                try:
+                    prepared = prepare_package(path, build_shader_table(opts.shader_table_path))
+                    if opts.models == "ASK" and len(prepared.models) > 1:
+                        select_models.set_pending(path, opts, prepared)
+                        return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
+                    report = run_import(
+                        context,
+                        path,
+                        opts,
+                        progress=lambda f, msg: wm.progress_update(int((base + span * f) * 100)),
+                        prepared=prepared,
+                    )
+                    reports.append(report)
+                except PackageError as exc:
+                    failures.append(f"{Path(path).name}: {exc}")
+                    if not batch:
+                        self.report({"ERROR"}, str(exc))
+                        return {"CANCELLED"}
+                except Exception as exc:  # noqa: BLE001
+                    traceback.print_exc()
+                    failures.append(f"{Path(path).name}: {exc!r}")
+                    if not batch:
+                        self.report({"ERROR"}, f"Import failed: {exc!r}")
+                        return {"CANCELLED"}
         finally:
             wm.progress_end()
 
         if prefs is None or prefs.verbose_log:
-            print(report.as_text())
-        level = "WARNING" if report.warnings else "INFO"
-        self.report({level}, report.summary())
+            for report in reports:
+                print(report.as_text())
+            for f in failures:
+                print("[Unity Package Importer] failed:", f)
+
+        if not reports:
+            self.report({"ERROR"}, "; ".join(failures) or "Nothing imported")
+            return {"CANCELLED"}
+        if batch:
+            objects = sum(len(r.objects) for r in reports)
+            materials = sum(len(r.materials) for r in reports)
+            mapped = sum(r.mapped_count for r in reports)
+            warnings = sum(len(r.warnings) for r in reports) + len(failures)
+            summary = f"Imported {len(reports)} packages: {objects} objects, {materials} materials ({mapped} mapped)"
+            if failures:
+                summary += f", {len(failures)} package(s) failed"
+            if warnings:
+                summary += f". {warnings} warning(s) — see the system console"
+            self.report({"WARNING" if warnings else "INFO"}, summary)
+        else:
+            report = reports[0]
+            self.report({"WARNING" if report.warnings else "INFO"}, report.summary())
         return {"FINISHED"}
 
 
