@@ -10,7 +10,7 @@ import traceback
 from dataclasses import dataclass
 
 import bpy
-from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
 from ..core.package import PackageError
 
@@ -60,6 +60,14 @@ class UNITYPKG_UL_models(bpy.types.UIList):
         right.label(text=item.materials_text)
 
 
+def _prefab_items(self, context):
+    items = [("", "All (first wins)", "Merge every prefab; the first one by path takes precedence")]
+    if _pending is not None:
+        for pathname in sorted(_pending.prepared.prefab_tables):
+            items.append((pathname, pathname.rsplit("/", 1)[-1], pathname))
+    return items
+
+
 class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
     bl_idname = "import_scene.unitypackage_select"
     bl_label = "Select Models to Import"
@@ -71,6 +79,11 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
     package_name: StringProperty()
     summary_materials: StringProperty()
     summary_textures: StringProperty()
+    prefab: EnumProperty(
+        name="Prefab",
+        items=_prefab_items,
+        description="Prefab whose renderer material assignments are used when the model's own mapping is missing or shared",
+    )
 
     def invoke(self, context, event):
         if _pending is None:
@@ -91,6 +104,11 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         self.package_name = prepared.path.name
         total = len(prepared.unity_mats)
         self.summary_materials = f"Materials: {total} found in package"
+        if len(prepared.prefab_tables) > 1 and not _pending.opts.prefab:
+            # 複数 prefab があるときは最初のものを既定にし、ユーザーが変えられるようにする
+            self.prefab = sorted(prepared.prefab_tables)[0]
+        elif _pending.opts.prefab in prepared.prefab_tables:
+            self.prefab = _pending.opts.prefab
         ref, missing = len(prepared.referenced_textures), len(prepared.missing_textures)
         self.summary_textures = f"Textures: {ref} referenced" + (f", {missing} missing from package" if missing else "")
         return context.window_manager.invoke_props_dialog(self, width=620)
@@ -106,6 +124,8 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         col = layout.column(align=True)
         col.label(text=self.summary_materials, icon="MATERIAL")
         col.label(text=self.summary_textures, icon="TEXTURE")
+        if _pending is not None and len(_pending.prepared.prefab_tables) > 1:
+            layout.prop(self, "prefab")
 
     def execute(self, context):
         from ..blender.importer import run_import
@@ -119,6 +139,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             return {"CANCELLED"}
         opts = _pending.opts
         opts.model_guids = selected
+        opts.prefab = self.prefab
         wm = context.window_manager
         wm.progress_begin(0, 100)
         try:

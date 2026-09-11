@@ -193,6 +193,11 @@ class NormalizeTests(unittest.TestCase):
         n = normalize_material(parse_material(URP_TRANSPARENT))
         self.assertEqual((n.family, n.alpha_mode), ("urp", "blend"))
         self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 0.5))
+        self.assertFalse(any("unverified" in w for w in n.warnings))  # URP Lit は実パッケージで GUID 確認済み
+
+    def test_unverified_table_entry_warns(self):
+        n = normalize_material(parse_material(URP_TRANSPARENT.replace("933532a4fcc9baf4fa0491de14d08ed7", "6e4ae4064600d784cac1e41a9e6f2e59")))
+        self.assertEqual(n.family, "hdrp")
         self.assertTrue(any("unverified" in w for w in n.warnings))
 
     def test_unknown_toon_hint(self):
@@ -248,8 +253,10 @@ class LocalSampleTests(unittest.TestCase):
             self.assertTrue(mats)
             for mat in mats.values():
                 n = normalize_material(mat)
-                self.assertIsNotNone(n.base_color_tex, f"{mat.name}: no base color texture")
+                # 単色マテリアル（テクスチャ無し）も正当なので、正規化が通ることと値域だけ確認する
                 self.assertIn(n.alpha_mode, ("opaque", "cutout", "blend"))
+                self.assertEqual(len(n.base_color), 4)
+                self.assertTrue(0.0 <= n.roughness <= 1.0)
             for model in pkg.models():
                 info = ModelImporterInfo.from_meta(model.meta_text or "")
                 if info.external_materials:

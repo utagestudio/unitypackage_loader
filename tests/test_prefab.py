@@ -99,3 +99,18 @@ class PrefabMappingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlotAssignmentTests(unittest.TestCase):
+    def test_slot_assignments(self):
+        from unitypackage_loader.core.mapping import slot_assignments
+
+        mats = {
+            MAT_A: parse_material(LILTOON_OPAQUE, guid=MAT_A),
+            MAT_B: parse_material(LILTOON_TRANS, guid=MAT_B),
+        }
+        table = parse_prefab_materials(PREFAB)
+        object_slots = {"Body.001": ["pink", "pink"], "Prop": ["pink", "pink"], "Unknown": ["pink"]}
+        result = slot_assignments(object_slots, table, mats)
+        self.assertEqual(result, {("Body.001", 0): MAT_A, ("Body.001", 1): MAT_B, ("Prop", 0): MAT_B})
+        self.assertEqual(slot_assignments(object_slots, None, mats), {})

@@ -10,7 +10,7 @@ from .material import UnityMaterial
 from .meta import ModelImporterInfo, strip_numeric_suffix
 from .prefab import RendererMaterials
 
-__all__ = ["MaterialResolution", "resolve_materials"]
+__all__ = ["MaterialResolution", "resolve_materials", "slot_assignments"]
 
 Method = Literal["external", "name", "prefab", "none"]
 
@@ -99,5 +99,28 @@ def _from_prefab(
     best = max(votes, key=votes.get)
     warning = None
     if len(votes) > 1:
-        warning = f"prefab assigns different materials to slots sharing {fbx_name!r}; used the most common one"
+        warning = (
+            f"prefab assigns {len(votes)} different materials to slots sharing {fbx_name!r}; "
+            "slots are split per prefab assignment"
+        )
     return best, warning
+
+
+def slot_assignments(
+    object_slots: dict[str, list[str]],
+    prefab_table: dict[str, RendererMaterials] | None,
+    materials: dict[str, UnityMaterial],
+) -> dict[tuple[str, int], str]:
+    """prefab が (オブジェクト名, スロット番号) ごとに指す .mat GUID。パッケージ内に無い GUID は除く。"""
+    result: dict[tuple[str, int], str] = {}
+    if not prefab_table:
+        return result
+    for obj_name, slots in object_slots.items():
+        rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
+        if rm is None:
+            continue
+        for index in range(min(len(slots), len(rm.materials))):
+            guid = rm.materials[index]
+            if guid and guid in materials:
+                result[(obj_name, index)] = guid
+    return result

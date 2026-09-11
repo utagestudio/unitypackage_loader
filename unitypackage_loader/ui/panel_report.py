@@ -57,7 +57,7 @@ class UNITYPKG_PT_report(bpy.types.Panel):
         box.label(text=report.package, icon="PACKAGE")
         col = box.column(align=True)
         col.label(text=f"Objects: {len(report.objects)}")
-        col.label(text=f"Materials: {len(report.materials)}  (mapped {report.mapped_count})")
+        col.label(text=f"Materials: {len(report.active_materials)}  (mapped {report.mapped_count})")
         col.label(text=f"Textures: {len(report.images)}")
         if report.models:
             col.label(text=f"Models: {len(report.models)}")
@@ -86,7 +86,7 @@ class UNITYPKG_PT_report_materials(bpy.types.Panel):
             layout.label(text="No materials were imported")
             return
         col = layout.column(align=True)
-        for m in report.materials:
+        for m in report.active_materials:
             row = col.row(align=True)
             if m.guid is None and m.method not in ("reused", "kept"):
                 row.label(text=m.blender_name, icon="ERROR")

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import bpy
 
-from ..core.mapping import resolve_materials
+from ..core.mapping import resolve_materials, slot_assignments
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
@@ -56,6 +56,7 @@ class ImportOptions:
     blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
     outline_width_scale: float = 0.01
+    prefab: str = ""  # マテリアル割り当てに使う prefab の pathname（空なら全 prefab を先勝ちで統合）
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -86,12 +87,22 @@ class PreparedPackage:
     models: list[ModelSummary]
     referenced_textures: set[str]
     missing_textures: set[str]
-    prefab_table: dict[str, RendererMaterials] = field(default_factory=dict)
+    prefab_tables: dict[str, dict[str, RendererMaterials]] = field(default_factory=dict)  # pathname → 表
     warnings: list[str] = field(default_factory=list)
 
     @property
     def supported_models(self) -> list[ModelSummary]:
         return [m for m in self.models if m.supported]
+
+    @property
+    def prefab_table(self) -> dict[str, RendererMaterials]:
+        return self.table_for("")
+
+    def table_for(self, prefab_pathname: str) -> dict[str, RendererMaterials]:
+        """指定 prefab の表。未指定・不明なら全 prefab をパス順に先勝ちで統合したもの。"""
+        if prefab_pathname and prefab_pathname in self.prefab_tables:
+            return self.prefab_tables[prefab_pathname]
+        return merge_prefab_tables([self.prefab_tables[k] for k in sorted(self.prefab_tables)])
 
 
 def build_shader_table(extra_path: str = "") -> ShaderTable:
@@ -141,14 +152,16 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
         referenced.update(norm.extra_texture_guids())
     missing = {g for g in referenced if pkg.get(g) is None}
 
-    tables = []
+    prefab_tables: dict[str, dict[str, RendererMaterials]] = {}
     for entry in pkg.prefabs():
         try:
-            tables.append(parse_prefab_materials(pkg.read_text(entry.guid)))
+            table = parse_prefab_materials(pkg.read_text(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
-    prefab_table = merge_prefab_tables(tables)
-    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_table, warnings)
+            continue
+        if table:
+            prefab_tables[entry.pathname] = table
+    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +382,9 @@ def run_import(
         store_props=opts.store_props,
     )
 
+    prefab_table = prepared.table_for(opts.prefab)
+    built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
+
     try:
         for index, summary in enumerate(models):
             model = summary.entry
@@ -389,8 +405,9 @@ def run_import(
                 if o.type == "MESH"
             }
             resolution = resolve_materials(
-                fbx_names, model_info, unity_mats, model.pathname, prepared.prefab_table, object_slots
+                fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots
             )
+            assignments = slot_assignments(object_slots, prefab_table, unity_mats)
 
             keep_blend_materials = model.ext == ".blend" and opts.blend_materials == "KEEP"
             for bmat in new_materials:
@@ -424,28 +441,24 @@ def run_import(
                     report.warn(f"material {bmat.name!r}: no matching .mat in package")
                     continue
 
-                norm = normalized[res.guid]
-                mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
-                try:
-                    mode, warnings = mat_builder.build_material(bmat, norm, images, tex_infos, build_opts)
-                except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
-                    mrep.warnings.append(f"node build failed: {exc!r}")
-                    report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
-                    continue
-                mrep.mode = mode
-                mrep.warnings.extend(warnings)
-                for w in warnings:
-                    report.warn(f"material {bmat.name!r}: {w}")
-                mrep.textures = [
-                    f"{role}={pkg.get(t.guid).pathname if pkg.get(t.guid) else t.guid}"
-                    for role, t in (
-                        ("base", norm.base_color_tex),
-                        ("normal", norm.normal_tex),
-                        ("emission", norm.emission_tex),
-                        ("metallic", norm.metallic_tex),
-                    )
-                    if t is not None
-                ]
+                _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
+                built_by_guid.setdefault(res.guid, bmat)
+
+            # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
+            if assignments and not (model.ext == ".blend" and opts.blend_materials == "KEEP"):
+                split = _split_slots_by_prefab(
+                    new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
+                    images, tex_infos, build_opts, pkg, report,
+                )
+                if split:
+                    report.split_slots += split
+                    # 差し替えで使われなくなった FBX マテリアルは片付ける
+                    for bmat in new_materials:
+                        if bmat.users == 0:
+                            for mrep in report.materials:
+                                if mrep.blender_name == bmat.name and mrep.method != "replaced":
+                                    mrep.method = "replaced"
+                            bpy.data.materials.remove(bmat)
             if opts.outlines:
                 added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
                 if added:
@@ -458,6 +471,66 @@ def run_import(
     step(1.0, "Done")
     LAST_REPORT = report
     return report
+
+
+def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:
+    norm = normalized[guid]
+    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+    try:
+        mode, warnings = mat_builder.build_material(bmat, norm, images, tex_infos, build_opts)
+    except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
+        mrep.warnings.append(f"node build failed: {exc!r}")
+        report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
+        return
+    mrep.mode = mode
+    mrep.warnings.extend(warnings)
+    for w in warnings:
+        if w.startswith("shader table entry"):
+            report.warn(w)  # シェーダー単位の注意なので 1 回だけ
+        else:
+            report.warn(f"material {bmat.name!r}: {w}")
+    mrep.textures = [
+        f"{role}={pkg.get(t.guid).pathname if pkg.get(t.guid) else t.guid}"
+        for role, t in (
+            ("base", norm.base_color_tex),
+            ("normal", norm.normal_tex),
+            ("emission", norm.emission_tex),
+            ("metallic", norm.metallic_tex),
+        )
+        if t is not None
+    ]
+
+
+def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normalized, built_by_guid,
+                           images, tex_infos, build_opts, pkg, report) -> int:
+    """(オブジェクト, スロット) ごとに prefab の .mat を割り当てる。差し替えたスロット数を返す。"""
+    by_name = {o.name: o for o in objects if o.type == "MESH"}
+    count = 0
+    for (obj_name, index), guid in assignments.items():
+        obj = by_name.get(obj_name)
+        if obj is None or index >= len(obj.material_slots):
+            continue
+        slot = obj.material_slots[index]
+        current = slot.material
+        current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
+        if current_guid == guid:
+            continue
+        mat = built_by_guid.get(guid)
+        if mat is None:
+            umat = unity_mats[guid]
+            mat = bpy.data.materials.new(umat.name or guid[:8])
+            mrep = MaterialReport(
+                blender_name=mat.name,
+                fbx_name=current.name if current is not None else "",
+                guid=guid,
+                method="prefab-split",
+            )
+            report.materials.append(mrep)
+            _build_and_report(mat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
+            built_by_guid[guid] = mat
+        slot.material = mat
+        count += 1
+    return count
 
 
 def _replace_material(objects, old: bpy.types.Material, new: bpy.types.Material) -> None:

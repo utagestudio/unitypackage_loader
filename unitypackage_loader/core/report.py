@@ -28,6 +28,7 @@ class ImportReport:
     images: list[str] = field(default_factory=list)
     extract_root: str = ""
     outlines: int = 0
+    split_slots: int = 0  # prefab の割り当てに従って差し替えたマテリアルスロット数
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -37,14 +38,20 @@ class ImportReport:
 
     @property
     def mapped_count(self) -> int:
-        return sum(1 for m in self.materials if m.guid)
+        return sum(1 for m in self.materials if m.guid and m.method != "replaced")
+
+    @property
+    def active_materials(self) -> list[MaterialReport]:
+        return [m for m in self.materials if m.method != "replaced"]
 
     def summary(self) -> str:
         parts = [
             f"Imported {len(self.objects)} objects",
-            f"{len(self.materials)} materials ({self.mapped_count} mapped)",
+            f"{len(self.active_materials)} materials ({self.mapped_count} mapped)",
             f"{len(self.images)} textures",
         ]
+        if self.split_slots:
+            parts.append(f"{self.split_slots} slots assigned from prefab")
         if self.outlines:
             parts.append(f"{self.outlines} outlines")
         text = ", ".join(parts)
