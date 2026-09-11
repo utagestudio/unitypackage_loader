@@ -42,7 +42,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
    `FBX 内マテリアル名 → .mat の GUID` の対応表。サンプルでは全マテリアルがここに登録されており、これが正解データ。
    - Unity は同名マテリアルを `Body.001` `.002` のように連番化して登録している場合がある（FBX 内の実マテリアルには連番が無い）。→ **完全一致 → 連番サフィックス除去で再検索** の 2 段で解決する。
 2. **フォールバック A: 名前一致** — `.mat` の `m_Name` と FBX マテリアル名が同じものを探す（externalObjects が空のパッケージ向け）。
-3. **フォールバック B: prefab の `SkinnedMeshRenderer.m_Materials`** — サンプルでは prefab はネストプレハブで material override を持たないため使われないが、他パッケージでは主情報源になり得る。Phase 2。
+3. **フォールバック B: prefab の `MeshRenderer` / `SkinnedMeshRenderer` の `m_Materials`** — prefab 内の同名 GameObject が同じスロットに持つ .mat を採用する（複数候補は多数決＋警告）。ネストされた PrefabInstance の上書き（`m_Modifications`）は対象 fileID が FBX 内部 ID のため名前に結び付けられず対象外。
 
 Blender 標準 FBX インポーターが生成するマテリアル名は FBX 内の名前そのまま（サンプルで検証済み）。よって **Blender のマテリアル名 → externalObjects → .mat** で引ける。
 
@@ -92,7 +92,7 @@ Material:
 ## 1. スコープ
 
 ### 読み込む
-- モデル: `.fbx`（Blender 標準インポーターに委譲）。Phase 2 で `.obj` `.dae` `.blend`（パッケージに同梱されることがある）。
+- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
@@ -468,7 +468,7 @@ def run(ctx, filepath, opts) -> Report:
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | **1 (MVP)** | Extension 雛形、tar 索引、Unity YAML パーサー、externalObjects マッピング、lilToon + generic プロファイル、Principled / Unlit 生成、テクスチャ展開、Info バー報告 | `_local/` のサンプルが 1 操作でテクスチャ付きで読める |
-| **2** | モデル選択ダイアログ、N パネルレポート、Standard/URP/HDRP・MToon・Poiyomi プロファイル、prefab 経由マッピング、`.obj`/`.blend` 同梱対応、未参照画像の読み込み、Preferences | 手持ちの他パッケージ数種で検証 |
+| **2** | モデル選択ダイアログ、N パネルレポート、Standard/URP/HDRP・MToon・Poiyomi プロファイル、prefab 経由マッピング、`.obj`/`.gltf`/`.dae`/`.blend` 同梱対応、未参照画像の読み込み、Preferences | 実装済み。合成パッケージ（`tests/make_synthetic_package.py`）と手元のサンプルで検証。他の実パッケージでの検証は入手次第 |
 | **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Outline を extras から再現）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | |
 
 ---
