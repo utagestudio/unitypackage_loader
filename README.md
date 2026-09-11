@@ -61,6 +61,10 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 の順で解決します。どれにも当たらないマテリアルはインポーターが作ったまま残し、警告に出します。
 
+FBX 内では少数のマテリアルを共有し、Unity 側で prefab がパーツごとに別の .mat を割り当てているパッケージでは、
+prefab の割り当てに従ってスロット単位で Blender マテリアルを分割します。prefab が複数ある場合（車体色違いなど）は
+選択ダイアログでどの prefab を使うか選べます。
+
 ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます）。
 
 ### マテリアルの対応方針
