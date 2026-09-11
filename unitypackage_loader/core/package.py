@@ -23,6 +23,7 @@ __all__ = [
     "MODEL_EXTS",
     "TEXTURE_EXTS",
     "MATERIAL_EXTS",
+    "PREFAB_EXTS",
 ]
 
 MODEL_EXTS = frozenset({".fbx", ".obj", ".dae", ".blend", ".gltf", ".glb"})
@@ -30,10 +31,11 @@ TEXTURE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff", ".bmp", ".exr", ".hdr", ".psd", ".webp"}
 )
 MATERIAL_EXTS = frozenset({".mat"})
+PREFAB_EXTS = frozenset({".prefab"})
 
 # scan 時に実体をメモリへ載せておく拡張子と上限サイズ
-_CACHE_EXTS = frozenset({".mat"})
-_CACHE_MAX_SIZE = 1 << 20  # 1 MiB
+_CACHE_EXTS = frozenset({".mat", ".prefab"})
+_CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 
 ProgressFn = Callable[[float, str], None]
 
@@ -61,7 +63,7 @@ class AssetEntry:
 
     @property
     def kind(self) -> str:
-        """``model`` / ``material`` / ``texture`` / ``folder`` / ``other``"""
+        """``model`` / ``material`` / ``texture`` / ``prefab`` / ``folder`` / ``other``"""
         if not self.has_asset:
             return "folder"
         ext = self.ext
@@ -71,6 +73,8 @@ class AssetEntry:
             return "material"
         if ext in TEXTURE_EXTS:
             return "texture"
+        if ext in PREFAB_EXTS:
+            return "prefab"
         return "other"
 
 
@@ -160,6 +164,9 @@ class UnityPackage:
 
     def textures(self) -> list[AssetEntry]:
         return self.by_kind("texture")
+
+    def prefabs(self) -> list[AssetEntry]:
+        return self.by_kind("prefab")
 
     def get(self, guid: str) -> AssetEntry | None:
         self._require_scan()

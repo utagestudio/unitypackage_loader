@@ -4,8 +4,8 @@
 
     blender -b --factory-startup --python tests/make_synthetic_package.py -- <出力パス.unitypackage>
 
-内容: FBX 2 つ（Cube / Sphere）、OBJ 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
-ノーマルマップ設定）、externalObjects 付きの .meta。
+内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
+ノーマルマップ設定）、externalObjects 付きの .meta、Cone に .mat を割り当てる prefab。
 """
 
 from __future__ import annotations
@@ -88,6 +88,22 @@ def model_meta(guid: str, materials: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def prefab_yaml(game_object: str, mat_guid: str) -> str:
+    return f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_Name: {game_object}
+  m_Component:
+  - component: {{fileID: 101}}
+--- !u!23 &101
+MeshRenderer:
+  m_GameObject: {{fileID: 100}}
+  m_Materials:
+  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}
+"""
+
+
 def texture_meta(guid: str, normal: bool) -> str:
     return f"""fileFormatVersion: 2
 guid: {guid}
@@ -110,6 +126,8 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
         bpy.ops.mesh.primitive_cube_add()
     elif kind == "sphere":
         bpy.ops.mesh.primitive_uv_sphere_add()
+    elif kind == "cone":
+        bpy.ops.mesh.primitive_cone_add()
     else:
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
@@ -158,6 +176,15 @@ def main() -> None:
             mtl = path.with_suffix(".mtl")
             if mtl.is_file():
                 add(f"Assets/Synthetic/Models/{kind.capitalize()}.mtl", mtl.read_bytes(), None)
+
+    # externalObjects も名前一致も無く、prefab の Renderer だけが .mat を指しているモデル
+    path = tmp / "cone.fbx"
+    export_model("cone", "ConeFbxMat", path)
+    cone_path = "Assets/Synthetic/Models/Cone.fbx"
+    add(cone_path, path.read_bytes(), model_meta(guid_of(cone_path), {}))
+    prefab_path = "Assets/Synthetic/Prefabs/Cone.prefab"
+    add(prefab_path, prefab_yaml("SyntheticCone", mat_guids["CylinderMat"]).encode(),
+        f"fileFormatVersion: 2\nguid: {guid_of(prefab_path)}\nPrefabImporter:\n  externalObjects: {{}}\n")
 
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():

@@ -15,6 +15,7 @@ from ..core.mapping import resolve_materials
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
+from ..core.prefab import RendererMaterials, merge_prefab_tables, parse_prefab_materials
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -80,6 +81,7 @@ class PreparedPackage:
     models: list[ModelSummary]
     referenced_textures: set[str]
     missing_textures: set[str]
+    prefab_table: dict[str, RendererMaterials] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -132,7 +134,15 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
     for norm in normalized.values():
         referenced.update(t.guid for t in norm.texture_refs())
     missing = {g for g in referenced if pkg.get(g) is None}
-    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, warnings)
+
+    tables = []
+    for entry in pkg.prefabs():
+        try:
+            tables.append(parse_prefab_materials(pkg.read_text(entry.guid)))
+        except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
+            warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
+    prefab_table = merge_prefab_tables(tables)
+    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_table, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -322,12 +332,22 @@ def run_import(
 
             new_materials: list[bpy.types.Material] = new["materials"]
             fbx_names = [m.name for m in new_materials]
-            resolution = resolve_materials(fbx_names, model_info, unity_mats, model.pathname)
+            object_slots = {
+                o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
+                for o in new["objects"]
+                if o.type == "MESH"
+            }
+            resolution = resolve_materials(
+                fbx_names, model_info, unity_mats, model.pathname, prepared.prefab_table, object_slots
+            )
 
             for bmat in new_materials:
                 res = resolution[bmat.name]
                 mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
                 report.materials.append(mrep)
+                if res.warning:
+                    mrep.warnings.append(res.warning)
+                    report.warn(f"material {bmat.name!r}: {res.warning}")
 
                 if opts.reuse_existing:
                     base = strip_numeric_suffix(bmat.name)
