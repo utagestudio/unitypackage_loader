@@ -156,11 +156,16 @@ class ShaderProfile:
 
 def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tuple[ShaderProfile, ShaderInfo | None]:
     """GUID 表 → プロパティ指紋 → generic の順にプロファイルを決める。"""
-    from . import liltoon, standard  # 循環 import 回避
+    from . import liltoon, mtoon, poiyomi, standard  # 循環 import 回避
 
     table = table or default_table()
     info = table.lookup(mat)
-    profiles: list[ShaderProfile] = [liltoon.LilToonProfile(), standard.StandardProfile()]
+    profiles: list[ShaderProfile] = [
+        liltoon.LilToonProfile(),
+        mtoon.MToonProfile(),
+        poiyomi.PoiyomiProfile(),
+        standard.StandardProfile(),
+    ]
     if info is not None:
         for profile in profiles:
             if profile.family == info.family or info.family in getattr(profile, "aliases", ()):

@@ -1,5 +1,5 @@
 {
-  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids.",
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository.",
   "builtin_guid": "0000000000000000f000000000000000",
   "builtin_file_ids": {
     "46": {
@@ -534,6 +534,18 @@
       "family": "hdrp",
       "name": "HDRP/Lit",
       "verified": false
+    },
+    "1a97144e4ad27a04aafd70f7b915cedb": {
+      "family": "mtoon",
+      "name": "VRM/MToon"
+    },
+    "e0edbf68d81d1f340ae8b110086b7063": {
+      "family": "mtoon",
+      "name": "VRM10/MToon10"
+    },
+    "0781c64b7f2a1604ea6aa7e252080372": {
+      "family": "mtoon",
+      "name": "VRM10/Universal Render Pipeline/MToon10"
     }
   }
 }
