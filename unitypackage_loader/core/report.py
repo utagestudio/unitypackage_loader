@@ -27,6 +27,7 @@ class ImportReport:
     materials: list[MaterialReport] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     extract_root: str = ""
+    outlines: int = 0
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -44,6 +45,8 @@ class ImportReport:
             f"{len(self.materials)} materials ({self.mapped_count} mapped)",
             f"{len(self.images)} textures",
         ]
+        if self.outlines:
+            parts.append(f"{self.outlines} outlines")
         text = ", ".join(parts)
         if self.warnings:
             text += f". {len(self.warnings)} warning(s) — see the system console"

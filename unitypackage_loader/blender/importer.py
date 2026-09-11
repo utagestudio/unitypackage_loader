@@ -20,6 +20,7 @@ from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
 from . import materials as mat_builder
+from . import outline as outline_builder
 from .textures import load_image
 
 _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_loader
@@ -53,6 +54,8 @@ class ImportOptions:
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
     blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
+    outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
+    outline_width_scale: float = 0.01
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -441,6 +444,10 @@ def run_import(
                     )
                     if t is not None
                 ]
+            if opts.outlines:
+                added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
+                if added:
+                    report.outlines += added
     finally:
         if prev_active is not None:
             view_layer.active_layer_collection = prev_active

@@ -50,6 +50,12 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         default=False,
         description="If a material with the same name already exists in the file, use it instead of building a new one",
     )
+    outlines: BoolProperty(
+        name="Outlines (Solidify)",
+        default=False,
+        description="Add a Solidify outline to meshes whose Unity material has outline settings",
+    )
+    outline_width_scale: FloatProperty(name="Outline Width Scale", default=0.01, min=0.0, soft_max=0.1, precision=4)
     blend_materials: EnumProperty(
         name="Bundled .blend Materials",
         items=(
@@ -114,6 +120,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         sub.prop(self, "backface_culling")
         sub.prop(self, "use_normal_maps")
         sub.prop(self, "use_emission")
+        sub.prop(self, "outlines")
+        if self.outlines:
+            sub.prop(self, "outline_width_scale")
         box.prop(self, "reuse_existing")
         box.prop(self, "blend_materials")
         box.prop(self, "store_props")
@@ -150,6 +159,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             ignore_leaf_bones=self.ignore_leaf_bones,
             global_scale=self.global_scale,
             blend_materials=self.blend_materials,
+            outlines=self.outlines,
+            outline_width_scale=self.outline_width_scale,
             shader_table_path=prefs.shader_table_path if prefs else "",
         )
         wm = context.window_manager

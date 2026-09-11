@@ -127,12 +127,28 @@ class UNITYPKG_PT_report_warnings(bpy.types.Panel):
             col.label(text=f"… and {rest} more (use Copy Log)")
 
 
+class UNITYPKG_PT_tools(bpy.types.Panel):
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Unity Package"
+    bl_label = "Tools"
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        col.label(text="Outlines (selected meshes)")
+        row = col.row(align=True)
+        row.operator("unitypkg.add_outlines", text="Add", icon="MOD_SOLIDIFY")
+        row.operator("unitypkg.remove_outlines", text="Remove", icon="X")
+
+
 _classes = (
     UNITYPKG_OT_copy_report,
     UNITYPKG_OT_open_extract_folder,
     UNITYPKG_PT_report,
     UNITYPKG_PT_report_materials,
     UNITYPKG_PT_report_warnings,
+    UNITYPKG_PT_tools,
 )
 
 
