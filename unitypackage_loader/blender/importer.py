@@ -393,8 +393,11 @@ def run_import(
                 report.materials.append(mrep)
                 if keep_blend_materials:
                     mrep.method = "kept"
-                    if opts.store_props and res.guid:
-                        mat_builder._store_props(bmat, normalized[res.guid])
+                    if res.guid:
+                        norm = normalized[res.guid]
+                        mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                        if opts.store_props:
+                            mat_builder._store_props(bmat, norm)
                     continue
                 if res.warning:
                     mrep.warnings.append(res.warning)
