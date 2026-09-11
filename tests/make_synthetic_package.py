@@ -1,0 +1,178 @@
+"""検証用の合成 unitypackage を Blender で生成する。
+
+実在アセットを使わずにダイアログや複数モデル・非 FBX 形式の動作を確認するためのもの。
+
+    blender -b --factory-startup --python tests/make_synthetic_package.py -- <出力パス.unitypackage>
+
+内容: FBX 2 つ（Cube / Sphere）、OBJ 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
+ノーマルマップ設定）、externalObjects 付きの .meta。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import struct
+import sys
+import tarfile
+import tempfile
+import zlib
+from pathlib import Path
+
+import bpy
+
+
+def guid_of(name: str) -> str:
+    return hashlib.md5(name.encode()).hexdigest()
+
+
+def png_bytes(size: int, rgb: tuple[int, int, int]) -> bytes:
+    raw = b"".join(b"\x00" + bytes(rgb) * size for _ in range(size))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def mat_yaml(name: str, tex_guid: str, normal_guid: str | None, color, mode: int) -> str:
+    normal_ref = f"{{fileID: 2800000, guid: {normal_guid}, type: 3}}" if normal_guid else "{fileID: 0}"
+    return f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_Name: {name}
+  m_Shader: {{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}}
+  m_ValidKeywords: []
+  m_CustomRenderQueue: -1
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MainTex:
+        m_Texture: {{fileID: 2800000, guid: {tex_guid}, type: 3}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    - _BumpMap:
+        m_Texture: {normal_ref}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    m_Floats:
+    - _Mode: {mode}
+    - _Cutoff: 0.5
+    - _Metallic: 0.1
+    - _Glossiness: 0.4
+    - _BumpScale: 1
+    m_Colors:
+    - _Color: {{r: {color[0]}, g: {color[1]}, b: {color[2]}, a: 1}}
+    - _EmissionColor: {{r: 0, g: 0, b: 0, a: 1}}
+"""
+
+
+def model_meta(guid: str, materials: dict[str, str]) -> str:
+    lines = [f"fileFormatVersion: 2", f"guid: {guid}", "ModelImporter:", "  serializedVersion: 22200", "  externalObjects:"]
+    for name, mat_guid in materials.items():
+        lines += [
+            "  - first:",
+            "      type: UnityEngine:Material",
+            "      assembly: UnityEngine.CoreModule",
+            f"      name: {name}",
+            f"    second: {{fileID: 2100000, guid: {mat_guid}, type: 2}}",
+        ]
+    lines += ["  materials:", "    materialImportMode: 2", "  meshes:", "    globalScale: 1", "    useFileScale: 1"]
+    return "\n".join(lines) + "\n"
+
+
+def texture_meta(guid: str, normal: bool) -> str:
+    return f"""fileFormatVersion: 2
+guid: {guid}
+TextureImporter:
+  serializedVersion: 13
+  mipmaps:
+    sRGBTexture: {0 if normal else 1}
+  textureSettings:
+    wrapU: 0
+    wrapV: 0
+  alphaUsage: 1
+  alphaIsTransparency: 0
+  textureType: {1 if normal else 0}
+"""
+
+
+def export_model(kind: str, mat_name: str, path: Path) -> None:
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    if kind == "cube":
+        bpy.ops.mesh.primitive_cube_add()
+    elif kind == "sphere":
+        bpy.ops.mesh.primitive_uv_sphere_add()
+    else:
+        bpy.ops.mesh.primitive_cylinder_add()
+    obj = bpy.context.active_object
+    obj.name = f"Synthetic{kind.capitalize()}"
+    mat = bpy.data.materials.new(mat_name)
+    obj.data.materials.append(mat)
+    if path.suffix == ".fbx":
+        bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False)
+    else:
+        bpy.ops.wm.obj_export(filepath=str(path), export_materials=True)
+
+
+def main() -> None:
+    argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    out = Path(argv[0]) if argv else Path(__file__).resolve().parent.parent / "_local" / "synthetic_multi.unitypackage"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="synthetic_pkg_"))
+
+    entries: dict[str, tuple[str, bytes | None, str | None]] = {}  # guid -> (pathname, asset, meta)
+
+    def add(pathname: str, asset: bytes | None, meta: str | None) -> str:
+        guid = guid_of(pathname)
+        entries[guid] = (pathname, asset, meta)
+        return guid
+
+    add("Assets/Synthetic", None, "fileFormatVersion: 2\nguid: %s\nfolderAsset: yes\n" % guid_of("Assets/Synthetic"))
+    tex_a = add("Assets/Synthetic/Textures/ColorA.png", png_bytes(8, (200, 80, 80)), texture_meta(guid_of("Assets/Synthetic/Textures/ColorA.png"), False))
+    tex_n = add("Assets/Synthetic/Textures/Normal.png", png_bytes(8, (128, 128, 255)), texture_meta(guid_of("Assets/Synthetic/Textures/Normal.png"), True))
+
+    mats = {
+        "CubeMat": (tex_a, tex_n, (1, 1, 1), 0),
+        "SphereMat": (tex_a, None, (0.5, 0.8, 1.0), 1),
+        "CylinderMat": (tex_a, None, (1, 1, 0.5), 3),
+    }
+    mat_guids = {}
+    for name, (t, n, color, mode) in mats.items():
+        pathname = f"Assets/Synthetic/Materials/{name}.mat"
+        mat_guids[name] = add(pathname, mat_yaml(name, t, n, color, mode).encode(), f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+
+    for kind, mat_name, ext in (("cube", "CubeMat", ".fbx"), ("sphere", "SphereMat", ".fbx"), ("cylinder", "CylinderMat", ".obj")):
+        path = tmp / f"{kind}{ext}"
+        export_model(kind, mat_name, path)
+        pathname = f"Assets/Synthetic/Models/{kind.capitalize()}{ext}"
+        add(pathname, path.read_bytes(), model_meta(guid_of(pathname), {mat_name: mat_guids[mat_name]}))
+        if ext == ".obj":
+            mtl = path.with_suffix(".mtl")
+            if mtl.is_file():
+                add(f"Assets/Synthetic/Models/{kind.capitalize()}.mtl", mtl.read_bytes(), None)
+
+    with tarfile.open(out, "w:gz") as tar:
+        for guid, (pathname, asset, meta) in entries.items():
+            def put(name: str, data: bytes) -> None:
+                info = tarfile.TarInfo(f"{guid}/{name}")
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+            put("pathname", (pathname + "\n").encode())
+            if asset is not None:
+                put("asset", asset)
+            if meta is not None:
+                put("asset.meta", meta.encode())
+    print(f"wrote {out} ({out.stat().st_size} bytes, {len(entries)} entries)")
+
+
+if __name__ == "__main__":
+    main()

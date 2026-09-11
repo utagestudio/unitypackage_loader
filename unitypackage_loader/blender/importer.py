@@ -1,4 +1,8 @@
-"""インポート全体のオーケストレーション。"""
+"""インポート全体のオーケストレーション。
+
+``prepare_package`` でパッケージを走査・解析し（モデル選択ダイアログにも使う）、
+``run_import`` で実際の展開・FBX 読み込み・マテリアル構築を行う。
+"""
 
 from __future__ import annotations
 
@@ -9,9 +13,10 @@ import bpy
 
 from ..core.mapping import resolve_materials
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
-from ..core.meta import ModelImporterInfo, TextureImporterInfo, parse_meta, strip_numeric_suffix
-from ..core.package import PackageError, UnityPackage
-from ..core.profiles import normalize_material
+from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
+from ..core.package import AssetEntry, PackageError, UnityPackage
+from ..core.profiles import ShaderTable, normalize_material
+from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
 from . import materials as mat_builder
 from .textures import load_image
@@ -21,10 +26,14 @@ _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_load
 # 直近のインポート結果（N パネル表示用）
 LAST_REPORT: ImportReport | None = None
 
+# 現時点で読み込めるモデル形式
+SUPPORTED_MODEL_EXTS = frozenset({".fbx"})
+
 
 @dataclass
 class ImportOptions:
-    models: str = "ALL"  # ALL / FIRST
+    models: str = "ASK"  # ASK / ALL / FIRST
+    model_guids: list[str] | None = None  # 明示的に選ばれたモデル（ダイアログ経由）
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
     backface_culling: bool = True
@@ -41,11 +50,89 @@ class ImportOptions:
     use_anim: bool = False
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
+    shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
 
-class ImportCancelled(RuntimeError):
-    pass
+# ---------------------------------------------------------------------------
+# 事前解析
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ModelSummary:
+    entry: AssetEntry
+    material_count: int  # externalObjects に登録されたマテリアル数
+    resolved_count: int  # そのうちパッケージ内の .mat に対応付けできた数
+    supported: bool
+
+    @property
+    def guid(self) -> str:
+        return self.entry.guid
+
+
+@dataclass
+class PreparedPackage:
+    path: Path
+    pkg: UnityPackage
+    unity_mats: dict[str, UnityMaterial]
+    normalized: dict[str, NormalizedMaterial]
+    models: list[ModelSummary]
+    referenced_textures: set[str]
+    missing_textures: set[str]
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def supported_models(self) -> list[ModelSummary]:
+        return [m for m in self.models if m.supported]
+
+
+def build_shader_table(extra_path: str = "") -> ShaderTable:
+    table = default_table()
+    if extra_path:
+        path = Path(bpy.path.abspath(extra_path))
+        if path.is_file():
+            merged = ShaderTable()
+            extra = ShaderTable(path)
+            merged.by_guid.update(extra.by_guid)
+            merged.by_builtin_id.update(extra.by_builtin_id)
+            return merged
+    return table
+
+
+def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> PreparedPackage:
+    path = Path(filepath)
+    pkg = UnityPackage(path)
+    pkg.scan()
+    table = shader_table or default_table()
+    warnings: list[str] = []
+
+    unity_mats: dict[str, UnityMaterial] = {}
+    normalized: dict[str, NormalizedMaterial] = {}
+    for entry in pkg.materials():
+        try:
+            umat = parse_material(pkg.read_text(entry.guid), entry.guid, entry.pathname)
+        except (MaterialParseError, ValueError) as exc:
+            warnings.append(f"could not parse {entry.pathname}: {exc}")
+            continue
+        unity_mats[entry.guid] = umat
+        normalized[entry.guid] = normalize_material(umat, table)
+
+    models: list[ModelSummary] = []
+    for entry in pkg.models():
+        info = ModelImporterInfo.from_meta(entry.meta_text) if entry.meta_text else ModelImporterInfo()
+        names = list(info.external_materials)
+        resolution = resolve_materials(names, info, unity_mats, entry.pathname)
+        resolved = sum(1 for r in resolution.values() if r.guid)
+        models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
+    if not models:
+        raise PackageError("the package contains no model files (.fbx/.obj/.dae/.blend)")
+
+    referenced: set[str] = set()
+    for norm in normalized.values():
+        referenced.update(t.guid for t in norm.texture_refs())
+    missing = {g for g in referenced if pkg.get(g) is None}
+    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +209,28 @@ def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
         raise RuntimeError(f"FBX import failed for {path.name}: {result}")
 
 
+def _select_models(prepared: PreparedPackage, opts: ImportOptions) -> list[ModelSummary]:
+    supported = prepared.supported_models
+    if opts.model_guids is not None:
+        wanted = set(opts.model_guids)
+        return [m for m in supported if m.guid in wanted]
+    if opts.models == "FIRST":
+        return supported[:1]
+    return supported
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
 
-def run_import(context, filepath: str, opts: ImportOptions, progress=None) -> ImportReport:
+def run_import(
+    context,
+    filepath: str,
+    opts: ImportOptions,
+    progress=None,
+    prepared: PreparedPackage | None = None,
+) -> ImportReport:
     global LAST_REPORT
     package_path = Path(filepath)
     report = ImportReport(package=package_path.name)
@@ -137,50 +240,34 @@ def run_import(context, filepath: str, opts: ImportOptions, progress=None) -> Im
             progress(fraction, message)
 
     step(0.0, "Scanning package")
-    pkg = UnityPackage(package_path)
-    pkg.scan()
+    if prepared is None:
+        prepared = prepare_package(filepath, build_shader_table(opts.shader_table_path))
+    pkg = prepared.pkg
+    for w in prepared.warnings:
+        report.warn(w)
+    for m in prepared.models:
+        if not m.supported:
+            report.warn(f"model format not supported yet, skipped: {m.entry.pathname}")
 
-    models = pkg.models()
+    models = _select_models(prepared, opts)
     if not models:
-        raise PackageError("the package contains no model files (.fbx/.obj/.dae/.blend)")
-    supported = [m for m in models if m.ext == ".fbx"]
-    skipped = [m for m in models if m.ext != ".fbx"]
-    for m in skipped:
-        report.warn(f"model format not supported yet, skipped: {m.pathname}")
-    if not supported:
-        raise PackageError("no FBX models in the package (other formats are not supported yet)")
-    if opts.models == "FIRST":
-        supported = supported[:1]
+        raise PackageError("no importable models selected (only FBX is supported so far)")
 
-    # --- .mat の解析と正規化 ---
-    step(0.1, "Parsing materials")
-    unity_mats: dict[str, UnityMaterial] = {}
-    normalized: dict[str, NormalizedMaterial] = {}
-    for entry in pkg.materials():
-        try:
-            umat = parse_material(pkg.read_text(entry.guid), entry.guid, entry.pathname)
-        except (MaterialParseError, ValueError) as exc:
-            report.warn(f"could not parse {entry.pathname}: {exc}")
-            continue
-        unity_mats[entry.guid] = umat
-        normalized[entry.guid] = normalize_material(umat)
+    unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
     # --- 必要なテクスチャを決めて展開 ---
-    needed_tex: set[str] = set()
-    for norm in normalized.values():
-        needed_tex.update(t.guid for t in norm.texture_refs())
+    needed_tex = set(prepared.referenced_textures)
     if opts.import_unreferenced:
         needed_tex.update(e.guid for e in pkg.textures())
-    missing_tex = {g for g in needed_tex if pkg.get(g) is None}
-    for g in sorted(missing_tex):
+    for g in sorted(prepared.missing_textures):
         report.warn(f"texture {g} is referenced but not included in the package")
-    needed_tex -= missing_tex
+    needed_tex -= prepared.missing_textures
 
     extract_root = resolve_extract_root(opts, package_path)
     report.extract_root = str(extract_root)
     step(0.2, "Extracting files")
     paths = pkg.extract(
-        [m.guid for m in supported] + sorted(needed_tex),
+        [m.guid for m in models] + sorted(needed_tex),
         extract_root,
         overwrite=opts.overwrite_extracted,
         progress=lambda f, n: step(0.2 + 0.3 * f, f"Extracting {n}"),
@@ -222,8 +309,9 @@ def run_import(context, filepath: str, opts: ImportOptions, progress=None) -> Im
     )
 
     try:
-        for index, model in enumerate(supported):
-            step(0.55 + 0.4 * index / len(supported), f"Importing {model.name}")
+        for index, summary in enumerate(models):
+            model = summary.entry
+            step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
             model_info = ModelImporterInfo.from_meta(model.meta_text) if model.meta_text else ModelImporterInfo()
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}

@@ -9,7 +9,8 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
-from ..ui.preferences import EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, get_prefs
+from ..ui.preferences import EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, get_prefs
+from . import select_models
 
 
 class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
@@ -22,14 +23,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     filter_glob: StringProperty(default="*.unitypackage", options={"HIDDEN"})
 
     # --- Model ---
-    models: EnumProperty(
-        name="Models",
-        items=(
-            ("ALL", "All", "Import every FBX in the package"),
-            ("FIRST", "First Only", "Import only the first FBX found"),
-        ),
-        default="ALL",
-    )
+    models: EnumProperty(name="Models", items=MODELS_ITEMS, default="ASK")
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -75,6 +69,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
 
     # Preferences の既定値を反映するプロパティ（ユーザーが明示的に変えたものは上書きしない）
     _PREF_DEFAULTS = {
+        "models": "default_models",
         "material_mode": "default_material_mode",
         "extract_mode": "default_extract_mode",
         "extract_path": "default_extract_path",
@@ -124,8 +119,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         box.prop(self, "overwrite_extracted")
 
     def execute(self, context):
-        from ..blender.importer import ImportOptions, run_import
+        from ..blender.importer import ImportOptions, build_shader_table, prepare_package, run_import
 
+        prefs = get_prefs(context)
         opts = ImportOptions(
             models=self.models,
             material_mode=self.material_mode,
@@ -144,15 +140,21 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             use_anim=self.use_anim,
             ignore_leaf_bones=self.ignore_leaf_bones,
             global_scale=self.global_scale,
+            shader_table_path=prefs.shader_table_path if prefs else "",
         )
         wm = context.window_manager
         wm.progress_begin(0, 100)
         try:
+            prepared = prepare_package(self.filepath, build_shader_table(opts.shader_table_path))
+            if opts.models == "ASK" and len(prepared.models) > 1:
+                select_models.set_pending(self.filepath, opts, prepared)
+                return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
             report = run_import(
                 context,
                 self.filepath,
                 opts,
                 progress=lambda f, msg: wm.progress_update(int(f * 100)),
+                prepared=prepared,
             )
         except PackageError as exc:
             self.report({"ERROR"}, str(exc))
@@ -164,7 +166,6 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         finally:
             wm.progress_end()
 
-        prefs = get_prefs(context)
         if prefs is None or prefs.verbose_log:
             print(report.as_text())
         level = "WARNING" if report.warnings else "INFO"
