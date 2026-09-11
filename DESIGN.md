@@ -145,7 +145,7 @@ File > Import > Unity Package (.unitypackage)
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Material mode | Enum: `Auto` / `Principled BSDF` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS）→ Unlit、PBR 系（Standard, URP Lit, HDRP Lit）→ Principled |
+| Material mode | Enum: `Auto` / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS）→ Toon、PBR 系（Standard, URP Lit, HDRP Lit）→ Principled |
 | Transparency | Enum: `Auto` / `Force opaque` = `Auto` | Unity 側の Cutout/Fade/Transparent 判定を `surface_render_method` に反映 |
 | Backface culling | Bool = ON | `_Cull` に従う |
 | Normal maps | Bool = ON | |
@@ -180,6 +180,17 @@ _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿�
                                                         [Transparent BSDF] ─┘
 ```
 ノーマルマップは効果が無いので接続せず、画像だけ読み込んで未接続ノードとして置く（オプション）。
+
+**Toon (Node Group)** — ノードグループ `UnityToon`（`blender/toon_group.py`）
+```
+[TexImage base] × _Color ─▶ Base Color ─┐
+[Normal Map | Geometry.Normal] ─▶ Normal ─┤ UnityToon ─▶ Output
+[MatCap tex via view-space normal UV] ──▶ MatCap ─┘
+  Shadow Color/Strength/Border/Blur, MatCap Strength/Mode, Rim Color/Strength/Border, Emission は extras から入力値として設定
+```
+グループ内部: Diffuse BSDF → Shader to RGB → RGB to BW でライティング量を取り、Map Range（border ± blur/2）で影係数に。
+Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻す。MatCap は 4 種のブレンドを Compare で選択。
+リムは Layer Weight(Facing) を Map Range。最後に Emission シェーダー + Alpha で Transparent と Mix。EEVEE 向け（Cycles は Shader to RGB 非対応）。
 
 **Names only** — マテリアルは FBX インポーターが作ったまま。マッピング結果とカスタムプロパティだけ付与。
 
@@ -230,6 +241,7 @@ _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿�
 | `unity_material_path` | `Assets/...` パス |
 | `unity_shader_guid` / `unity_shader_family` | シェーダー GUID と判定したファミリー名 |
 | `unity_props` | 中間表現に落とせなかった値（JSON 文字列）。例: `_ShadowColor`, `_OutlineWidth`, MatCap 参照 |
+| `unity_normalized` | NormalizedMaterial 全体（JSON）。再構築オペレーターが使う。画像側には `unity_guid` / `unity_texture_type` / `unity_clamps` |
 
 ---
 
@@ -469,7 +481,7 @@ def run(ctx, filepath, opts) -> Report:
 |---|---|---|
 | **1 (MVP)** | Extension 雛形、tar 索引、Unity YAML パーサー、externalObjects マッピング、lilToon + generic プロファイル、Principled / Unlit 生成、テクスチャ展開、Info バー報告 | `_local/` のサンプルが 1 操作でテクスチャ付きで読める |
 | **2** | モデル選択ダイアログ、N パネルレポート、Standard/URP/HDRP・MToon・Poiyomi プロファイル、prefab 経由マッピング、`.obj`/`.gltf`/`.dae`/`.blend` 同梱対応、未参照画像の読み込み、Preferences | 実装済み。合成パッケージ（`tests/make_synthetic_package.py`）と手元のサンプルで検証。他の実パッケージでの検証は入手次第 |
-| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Outline を extras から再現）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | |
+| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Emission を extras から再現）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | 実装済み。手元のサンプルと合成パッケージで検証 |
 
 ---
 

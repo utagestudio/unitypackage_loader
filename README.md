@@ -35,9 +35,10 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 |---|---|---|
 | Model | Models | `Ask`（複数モデルがあれば選択ダイアログ）/ `All` / `First Only` |
 | | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
-| Materials | Material Mode | `Auto`（トゥーン系は Unlit、PBR 系は Principled）/ `Principled BSDF` / `Unlit (Emission)` / `Names Only` |
+| Materials | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
 | | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
+| | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
 | | Bundled .blend Materials | 同梱 .blend のマテリアルを `Keep`（既定）/ `Rebuild` |
 | | Store Unity Properties | GUID や影色などをカスタムプロパティに保存 |
@@ -60,12 +61,21 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 の順で解決します。どれにも当たらないマテリアルはインポーターが作ったまま残し、警告に出します。
 
+ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます）。
+
 ### マテリアルの対応方針
 
 Unity のシェーダーと Blender のノードは 1:1 に対応しないため、
 `.mat` → シェーダー非依存の中間表現 → Blender ノード の 2 段変換にしています。
-中間表現に落とせない値（lilToon の影色・アウトライン・MatCap など）は
-マテリアルのカスタムプロパティ `unity_props`（JSON）に保存され、後から手動再現の参考にできます。
+
+- **Toon (Node Group)**: ノードグループ `UnityToon` で影色（境界・ぼかし・強さ）、MatCap（Normal / Add / Screen / Multiply）、
+  リムライト、エミッション、アルファを再現します。ライティングに Shader to RGB を使うため EEVEE 向けです（Cycles では影が付きません）。
+- **Principled BSDF**: ベースカラー、ノーマル、エミッション、Metallic / Roughness を接続します。
+- **Unlit (Emission)**: テクスチャを Emission に直結する、ライティング無しの最も単純な構成です。
+
+中間表現そのものはカスタムプロパティ `unity_normalized`（JSON）に、Blender で使わなかった値は `unity_props` に保存されます。
+サイドバーの Tools パネルの "Rebuild in Another Mode" を使うと、元パッケージが無くても選択メッシュのマテリアルを別モードで組み直せます。
+同じパネルからアウトラインの追加・削除もできます。
 
 ## 開発
 
