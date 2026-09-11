@@ -30,3 +30,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# --- セッション用の非公開メモ ---
+CLAUDE.local.md
