@@ -158,7 +158,7 @@ File > Import > Unity Package (.unitypackage)
 |---|---|---|
 | Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現 |
 | Pack into .blend | Bool = OFF | |
-| Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用） |
+| Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
 | Overwrite extracted files | Bool = OFF | 既に展開済みならスキップ |
 
 ### 3.2 マテリアルモード別の生成ノード
@@ -272,7 +272,7 @@ unitypackage_loader/
     └─ integration_import.py     # blender -b --python で実行、_local/ のサンプルで検証
 ```
 
-`core/` を bpy 非依存にするのが要点。パーサーとマッピングは通常の pytest で回せる。
+`core/` を bpy 非依存にするのが要点。パーサーとマッピングは標準ライブラリの unittest で回せる（`python3 -m unittest discover -s tests -t .`。追加依存無し）。
 
 ### 4.2 データフロー
 
@@ -381,7 +381,7 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 | `_Color` | base_color |
 | `_BumpMap`（`_UseBumpMap == 1` のときのみ）、`_BumpScale` | normal_tex / normal_strength |
 | `_EmissionMap`, `_EmissionColor`（`_UseEmission == 1` のときのみ） | emission |
-| `_Metallic`, `_Smoothness`（`_UseReflection == 1` のとき。0 なら metallic 0 / roughness 0.5 固定） | metallic / roughness |
+| `_Metallic`, `_Smoothness`（`_UseReflection == 1` のとき。0 なら反射無しとみなし metallic 0 / roughness 1.0） | metallic / roughness |
 | `_Cull` (0 Off / 1 Front / 2 Back) | cull_backface |
 | `_TransparentMode` (0 Normal / 1 OnePass / 2 TwoPass)、`_SrcBlend/_DstBlend`、`m_CustomRenderQueue`、シェーダー名の `Cutout`/`Transparent` | alpha_mode。判定: DstBlend==10(OneMinusSrcAlpha) or queue≥3000 → blend、queue 2450〜2999 or `_Cutoff`>0.001 and `_AlphaMaskMode`>0 → cutout、それ以外 opaque |
 | `_Cutoff` | alpha_cutoff |
@@ -458,7 +458,7 @@ def run(ctx, filepath, opts) -> Report:
 
 - `tests/test_unity_yaml.py`: リポジトリ同梱の **合成フィクスチャ**（手書きの最小 .mat / .meta）でパーサーを検証。`_BaseMap` の GUID、`_Cutoff`、`_Color` を assert。加えて `_local/` にサンプルがあれば、その全 .mat / .meta をパースして例外ゼロを確認（無ければ skip）。
 - `tests/test_mapping.py`: externalObjects の `.001` 解決、名前一致フォールバック。
-- `tests/integration_import.py`（`blender -b --python`）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
+- `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - 見た目の確認は、`_local/` に置いた参考 .blend と並べて比較する手動項目とする。
 
 ---
