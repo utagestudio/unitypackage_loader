@@ -14,11 +14,17 @@ except ImportError:  # pragma: no cover - テスト実行時
 
 def register() -> None:
     from .operators import import_package
+    from .ui import panel_report, preferences
 
+    preferences.register()
     import_package.register()
+    panel_report.register()
 
 
 def unregister() -> None:
     from .operators import import_package
+    from .ui import panel_report, preferences
 
+    panel_report.unregister()
     import_package.unregister()
+    preferences.unregister()

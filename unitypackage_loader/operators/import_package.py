@@ -9,6 +9,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
+from ..ui.preferences import EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, get_prefs
 
 
 class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
@@ -43,16 +44,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
 
     # --- Materials ---
-    material_mode: EnumProperty(
-        name="Material Mode",
-        items=(
-            ("AUTO", "Auto", "Unlit for toon shaders (lilToon etc.), Principled BSDF for PBR shaders"),
-            ("PRINCIPLED", "Principled BSDF", "Always build a Principled BSDF material"),
-            ("UNLIT", "Unlit (Emission)", "Texture straight into an Emission shader, like a toon look"),
-            ("NAMES_ONLY", "Names Only", "Keep the FBX importer's materials, only attach Unity metadata"),
-        ),
-        default="AUTO",
-    )
+    material_mode: EnumProperty(name="Material Mode", items=MATERIAL_MODE_ITEMS, default="AUTO")
     force_opaque: BoolProperty(
         name="Force Opaque", default=False, description="Ignore Unity cutout/transparent settings"
     )
@@ -71,15 +63,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     )
 
     # --- Textures ---
-    extract_mode: EnumProperty(
-        name="Extract To",
-        items=(
-            ("BESIDE_BLEND", "Beside .blend", "<blend dir>/textures/<package>/ (falls back to cache if unsaved)"),
-            ("CACHE", "Add-on Cache", "The extension's user cache directory"),
-            ("CUSTOM", "Custom Path", "The directory given below"),
-        ),
-        default="BESIDE_BLEND",
-    )
+    extract_mode: EnumProperty(name="Extract To", items=EXTRACT_MODE_ITEMS, default="BESIDE_BLEND")
     extract_path: StringProperty(name="Path", subtype="DIR_PATH", default="")
     pack_images: BoolProperty(name="Pack Into .blend", default=False)
     import_unreferenced: BoolProperty(
@@ -88,6 +72,22 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         description="Also load textures that no material references (masks etc.)",
     )
     overwrite_extracted: BoolProperty(name="Overwrite Extracted Files", default=False)
+
+    # Preferences の既定値を反映するプロパティ（ユーザーが明示的に変えたものは上書きしない）
+    _PREF_DEFAULTS = {
+        "material_mode": "default_material_mode",
+        "extract_mode": "default_extract_mode",
+        "extract_path": "default_extract_path",
+        "import_unreferenced": "default_import_unreferenced",
+    }
+
+    def invoke(self, context, event):
+        prefs = get_prefs(context)
+        if prefs is not None:
+            for prop, pref in self._PREF_DEFAULTS.items():
+                if not self.properties.is_property_set(prop):
+                    setattr(self, prop, getattr(prefs, pref))
+        return ImportHelper.invoke(self, context, event)
 
     def draw(self, context):
         layout = self.layout
@@ -164,7 +164,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         finally:
             wm.progress_end()
 
-        print(report.as_text())
+        prefs = get_prefs(context)
+        if prefs is None or prefs.verbose_log:
+            print(report.as_text())
         level = "WARNING" if report.warnings else "INFO"
         self.report({level}, report.summary())
         return {"FINISHED"}
