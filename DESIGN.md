@@ -86,7 +86,7 @@ Material:
 
 ### 0.6 参考 .blend（制作元ファイル）のマテリアル構成
 
-参考用に入手できた制作元 .blend での見え方は **「画像テクスチャ → Emission シェーダー（ライティング無し）＋透過は Transparent と Mix」** の非常に単純な構成（メインテクスチャのみ使用、blend=HASHED）。
+参考にしたアニメ調モデルの Blender 側セットアップは **「画像テクスチャ → Emission シェーダー（ライティング無し）＋透過は Transparent と Mix」** の非常に単純な構成（メインテクスチャのみ使用、blend=HASHED）。
 アニメ調モデルでは Principled より Emission ベースの方が意図に近い。→ マテリアル生成モードに **「Unlit（Emission）」を用意し、トゥーン系シェーダー検出時のデフォルトにする**（§3.2）。
 
 ---
@@ -209,7 +209,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 ```
 ┌ Import from Avatar_v1.0.unitypackage ─────────────────┐
 │ Models                                                 │
-│  [x] Assets/Avatar/FBX/Avatar_v1.0.fbx   14.1 MB  7 mat│
+│  [x] Assets/Avatar/FBX/Avatar_v1.0.fbx   12.3 MB  5 mat│
 │  [ ] Assets/Avatar/Prefabs/Avatar_LOD.fbx ...          │
 │                                                        │
 │ Materials: 7 found (7 resolved, 0 unresolved)          │

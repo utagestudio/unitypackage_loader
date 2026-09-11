@@ -112,3 +112,13 @@ unitypackage_loader/         Extension 本体
   ui/                        Preferences とサイドバーのレポートパネル
 tests/                       単体テスト、統合テスト、合成パッケージ生成
 ```
+
+## ライセンス
+
+GPL-3.0-or-later（[LICENSE](LICENSE)）。Blender の Extension として配布するための要件に合わせています。
+
+`unitypackage_loader/core/profiles/shader_guids.json` のシェーダー GUID は、公開リポジトリの
+[lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) と [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)（いずれも MIT License）の
+`.shader.meta` から収集した識別子です。シェーダーのコードは含みません。
+lilToon、MToon、Poiyomi、Unity などの名称は各権利者の商標または製品名です。
+このアドオンは Unity Technologies および各シェーダー作者とは無関係です。
