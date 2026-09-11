@@ -1,0 +1,75 @@
+"""インポート結果のレポート（Info バー要約・詳細ログ）。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class MaterialReport:
+    blender_name: str
+    fbx_name: str
+    guid: str | None
+    method: str  # external / name / none / skipped
+    family: str = ""
+    shader_name: str = ""
+    alpha_mode: str = ""
+    mode: str = ""  # PRINCIPLED / UNLIT / NAMES_ONLY
+    textures: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ImportReport:
+    package: str
+    models: list[str] = field(default_factory=list)
+    objects: list[str] = field(default_factory=list)
+    materials: list[MaterialReport] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
+    extract_root: str = ""
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def warn(self, message: str) -> None:
+        if message not in self.warnings:
+            self.warnings.append(message)
+
+    @property
+    def mapped_count(self) -> int:
+        return sum(1 for m in self.materials if m.guid)
+
+    def summary(self) -> str:
+        parts = [
+            f"Imported {len(self.objects)} objects",
+            f"{len(self.materials)} materials ({self.mapped_count} mapped)",
+            f"{len(self.images)} textures",
+        ]
+        text = ", ".join(parts)
+        if self.warnings:
+            text += f". {len(self.warnings)} warning(s) — see the system console"
+        return text
+
+    def as_text(self) -> str:
+        lines = [f"[Unity Package Importer] {self.package}", f"  extract root: {self.extract_root}"]
+        lines.append(f"  models ({len(self.models)}):")
+        lines += [f"    - {m}" for m in self.models]
+        lines.append(f"  objects ({len(self.objects)}):")
+        lines += [f"    - {o}" for o in self.objects]
+        lines.append(f"  materials ({len(self.materials)}, {self.mapped_count} mapped):")
+        for m in self.materials:
+            guid = m.guid or "-"
+            lines.append(
+                f"    - {m.blender_name}  <- {m.fbx_name}  [{m.method}] {m.family}/{m.shader_name or '-'}"
+                f" alpha={m.alpha_mode or '-'} mode={m.mode or '-'} guid={guid}"
+            )
+            lines += [f"        tex: {t}" for t in m.textures]
+            lines += [f"        ! {w}" for w in m.warnings]
+        lines.append(f"  images ({len(self.images)}):")
+        lines += [f"    - {i}" for i in self.images]
+        if self.warnings:
+            lines.append(f"  warnings ({len(self.warnings)}):")
+            lines += [f"    ! {w}" for w in self.warnings]
+        if self.errors:
+            lines.append(f"  errors ({len(self.errors)}):")
+            lines += [f"    X {e}" for e in self.errors]
+        return "\n".join(lines)

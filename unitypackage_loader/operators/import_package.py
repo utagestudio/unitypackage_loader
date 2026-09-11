@@ -1,23 +1,172 @@
-"""File > Import > Unity Package オペレーター（雛形）。"""
+"""File > Import > Unity Package オペレーター。"""
 
 from __future__ import annotations
 
+import traceback
+
 import bpy
-from bpy.props import StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
+
+from ..core.package import PackageError
 
 
 class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.unitypackage"
     bl_label = "Import Unity Package"
     bl_description = "Import meshes, materials and textures from a .unitypackage"
-    bl_options = {"REGISTER", "UNDO"}
+    bl_options = {"REGISTER", "UNDO", "PRESET"}
 
     filename_ext = ".unitypackage"
     filter_glob: StringProperty(default="*.unitypackage", options={"HIDDEN"})
 
+    # --- Model ---
+    models: EnumProperty(
+        name="Models",
+        items=(
+            ("ALL", "All", "Import every FBX in the package"),
+            ("FIRST", "First Only", "Import only the first FBX found"),
+        ),
+        default="ALL",
+    )
+    fbx_importer: EnumProperty(
+        name="FBX Importer",
+        items=(
+            ("AUTO", "Auto", "Use the new FBX importer when available"),
+            ("NEW", "New (C++)", "bpy.ops.wm.fbx_import"),
+            ("LEGACY", "Legacy (Python)", "bpy.ops.import_scene.fbx"),
+        ),
+        default="AUTO",
+    )
+    global_scale: FloatProperty(name="Scale", default=1.0, min=0.001, max=1000.0)
+    use_anim: BoolProperty(name="Import Animation", default=False)
+    ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
+
+    # --- Materials ---
+    material_mode: EnumProperty(
+        name="Material Mode",
+        items=(
+            ("AUTO", "Auto", "Unlit for toon shaders (lilToon etc.), Principled BSDF for PBR shaders"),
+            ("PRINCIPLED", "Principled BSDF", "Always build a Principled BSDF material"),
+            ("UNLIT", "Unlit (Emission)", "Texture straight into an Emission shader, like a toon look"),
+            ("NAMES_ONLY", "Names Only", "Keep the FBX importer's materials, only attach Unity metadata"),
+        ),
+        default="AUTO",
+    )
+    force_opaque: BoolProperty(
+        name="Force Opaque", default=False, description="Ignore Unity cutout/transparent settings"
+    )
+    backface_culling: BoolProperty(name="Backface Culling", default=True, description="Follow Unity's _Cull setting")
+    use_normal_maps: BoolProperty(name="Normal Maps", default=True)
+    use_emission: BoolProperty(name="Emission", default=True)
+    reuse_existing: BoolProperty(
+        name="Reuse Existing Materials",
+        default=False,
+        description="If a material with the same name already exists in the file, use it instead of building a new one",
+    )
+    store_props: BoolProperty(
+        name="Store Unity Properties",
+        default=True,
+        description="Save GUIDs and unmapped shader values as custom properties on the material",
+    )
+
+    # --- Textures ---
+    extract_mode: EnumProperty(
+        name="Extract To",
+        items=(
+            ("BESIDE_BLEND", "Beside .blend", "<blend dir>/textures/<package>/ (falls back to cache if unsaved)"),
+            ("CACHE", "Add-on Cache", "The extension's user cache directory"),
+            ("CUSTOM", "Custom Path", "The directory given below"),
+        ),
+        default="BESIDE_BLEND",
+    )
+    extract_path: StringProperty(name="Path", subtype="DIR_PATH", default="")
+    pack_images: BoolProperty(name="Pack Into .blend", default=False)
+    import_unreferenced: BoolProperty(
+        name="Import Unreferenced Images",
+        default=False,
+        description="Also load textures that no material references (masks etc.)",
+    )
+    overwrite_extracted: BoolProperty(name="Overwrite Extracted Files", default=False)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        box = layout.box()
+        box.label(text="Model", icon="MESH_DATA")
+        box.prop(self, "models")
+        box.prop(self, "fbx_importer")
+        box.prop(self, "global_scale")
+        box.prop(self, "use_anim")
+        box.prop(self, "ignore_leaf_bones")
+
+        box = layout.box()
+        box.label(text="Materials", icon="MATERIAL")
+        box.prop(self, "material_mode")
+        sub = box.column()
+        sub.active = self.material_mode != "NAMES_ONLY"
+        sub.prop(self, "force_opaque")
+        sub.prop(self, "backface_culling")
+        sub.prop(self, "use_normal_maps")
+        sub.prop(self, "use_emission")
+        box.prop(self, "reuse_existing")
+        box.prop(self, "store_props")
+
+        box = layout.box()
+        box.label(text="Textures", icon="TEXTURE")
+        box.prop(self, "extract_mode")
+        if self.extract_mode == "CUSTOM":
+            box.prop(self, "extract_path")
+        box.prop(self, "pack_images")
+        box.prop(self, "import_unreferenced")
+        box.prop(self, "overwrite_extracted")
+
     def execute(self, context):
-        self.report({"INFO"}, f"Selected: {self.filepath}")
+        from ..blender.importer import ImportOptions, run_import
+
+        opts = ImportOptions(
+            models=self.models,
+            material_mode=self.material_mode,
+            force_opaque=self.force_opaque,
+            backface_culling=self.backface_culling,
+            use_normal_maps=self.use_normal_maps,
+            use_emission=self.use_emission,
+            reuse_existing=self.reuse_existing,
+            store_props=self.store_props,
+            extract_mode=self.extract_mode,
+            extract_path=self.extract_path,
+            pack_images=self.pack_images,
+            import_unreferenced=self.import_unreferenced,
+            overwrite_extracted=self.overwrite_extracted,
+            fbx_importer=self.fbx_importer,
+            use_anim=self.use_anim,
+            ignore_leaf_bones=self.ignore_leaf_bones,
+            global_scale=self.global_scale,
+        )
+        wm = context.window_manager
+        wm.progress_begin(0, 100)
+        try:
+            report = run_import(
+                context,
+                self.filepath,
+                opts,
+                progress=lambda f, msg: wm.progress_update(int(f * 100)),
+            )
+        except PackageError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Import failed: {exc!r}")
+            return {"CANCELLED"}
+        finally:
+            wm.progress_end()
+
+        print(report.as_text())
+        level = "WARNING" if report.warnings else "INFO"
+        self.report({level}, report.summary())
         return {"FINISHED"}
 
 
