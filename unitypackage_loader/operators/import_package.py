@@ -50,6 +50,14 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         default=False,
         description="If a material with the same name already exists in the file, use it instead of building a new one",
     )
+    blend_materials: EnumProperty(
+        name="Bundled .blend Materials",
+        items=(
+            ("KEEP", "Keep", "Leave materials from bundled .blend files untouched (only attach Unity metadata)"),
+            ("REBUILD", "Rebuild", "Rebuild them from the Unity .mat like other models"),
+        ),
+        default="KEEP",
+    )
     store_props: BoolProperty(
         name="Store Unity Properties",
         default=True,
@@ -107,6 +115,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         sub.prop(self, "use_normal_maps")
         sub.prop(self, "use_emission")
         box.prop(self, "reuse_existing")
+        box.prop(self, "blend_materials")
         box.prop(self, "store_props")
 
         box = layout.box()
@@ -140,6 +149,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             use_anim=self.use_anim,
             ignore_leaf_bones=self.ignore_leaf_bones,
             global_scale=self.global_scale,
+            blend_materials=self.blend_materials,
             shader_table_path=prefs.shader_table_path if prefs else "",
         )
         wm = context.window_manager

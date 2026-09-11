@@ -27,8 +27,9 @@ _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_load
 # 直近のインポート結果（N パネル表示用）
 LAST_REPORT: ImportReport | None = None
 
-# 現時点で読み込めるモデル形式
-SUPPORTED_MODEL_EXTS = frozenset({".fbx"})
+# 読み込めるモデル形式と、同じフォルダから一緒に展開する付随ファイル
+SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".dae", ".blend"})
+_SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 
 
 @dataclass
@@ -51,6 +52,7 @@ class ImportOptions:
     use_anim: bool = False
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
+    blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -128,7 +130,7 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
         resolved = sum(1 for r in resolution.values() if r.guid)
         models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
     if not models:
-        raise PackageError("the package contains no model files (.fbx/.obj/.dae/.blend)")
+        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.dae/.blend)")
 
     referenced: set[str] = set()
     for norm in normalized.values():
@@ -192,6 +194,19 @@ def _find_layer_collection(layer_coll, target):
     return None
 
 
+def _sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
+    """OBJ の .mtl、glTF の .bin など、モデルと同じフォルダに置くべきファイルの GUID。"""
+    exts = _SIDECAR_EXTS.get(model.ext)
+    if not exts:
+        return []
+    folder = model.pathname.rsplit("/", 1)[0]
+    return [
+        e.guid
+        for e in pkg.entries.values()
+        if e.has_asset and e.ext in exts and e.pathname.rsplit("/", 1)[0] == folder
+    ]
+
+
 def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
     use_new = hasattr(bpy.ops.wm, "fbx_import") and opts.fbx_importer in ("AUTO", "NEW")
     if use_new:
@@ -217,6 +232,35 @@ def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
         result = bpy.ops.import_scene.fbx(**kwargs)
     if "FINISHED" not in result:
         raise RuntimeError(f"FBX import failed for {path.name}: {result}")
+
+
+def _import_blend(context, path: Path, collection: bpy.types.Collection) -> None:
+    """同梱 .blend の全オブジェクトを append してコレクションに入れる。"""
+    with bpy.data.libraries.load(str(path), link=False) as (data_from, data_to):
+        data_to.objects = list(data_from.objects)
+    for obj in data_to.objects:
+        if obj is not None:
+            collection.objects.link(obj)
+
+
+def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, collection) -> None:
+    ext = model.ext
+    if ext == ".fbx":
+        _import_fbx(context, path, opts)
+        return
+    if ext == ".obj":
+        result = bpy.ops.wm.obj_import(filepath=str(path), global_scale=opts.global_scale)
+    elif ext in (".gltf", ".glb"):
+        result = bpy.ops.import_scene.gltf(filepath=str(path))
+    elif ext == ".dae":
+        result = bpy.ops.wm.collada_import(filepath=str(path))
+    elif ext == ".blend":
+        _import_blend(context, path, collection)
+        return
+    else:
+        raise RuntimeError(f"unsupported model format: {model.pathname}")
+    if "FINISHED" not in result:
+        raise RuntimeError(f"import failed for {path.name}: {result}")
 
 
 def _select_models(prepared: PreparedPackage, opts: ImportOptions) -> list[ModelSummary]:
@@ -261,7 +305,7 @@ def run_import(
 
     models = _select_models(prepared, opts)
     if not models:
-        raise PackageError("no importable models selected (only FBX is supported so far)")
+        raise PackageError("no importable models selected")
 
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
@@ -276,8 +320,9 @@ def run_import(
     extract_root = resolve_extract_root(opts, package_path)
     report.extract_root = str(extract_root)
     step(0.2, "Extracting files")
+    sidecars = [g for m in models for g in _sidecar_guids(pkg, m.entry)]
     paths = pkg.extract(
-        [m.guid for m in models] + sorted(needed_tex),
+        [m.guid for m in models] + sidecars + sorted(needed_tex),
         extract_root,
         overwrite=opts.overwrite_extracted,
         progress=lambda f, n: step(0.2 + 0.3 * f, f"Extracting {n}"),
@@ -325,7 +370,7 @@ def run_import(
             model_info = ModelImporterInfo.from_meta(model.meta_text) if model.meta_text else ModelImporterInfo()
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}
-            _import_fbx(context, paths[model.guid], opts)
+            _import_model(context, paths[model.guid], model, opts, collection)
             new = _new_since(before)
             report.models.append(model.pathname)
             report.objects.extend(o.name for o in new["objects"])
@@ -341,10 +386,16 @@ def run_import(
                 fbx_names, model_info, unity_mats, model.pathname, prepared.prefab_table, object_slots
             )
 
+            keep_blend_materials = model.ext == ".blend" and opts.blend_materials == "KEEP"
             for bmat in new_materials:
                 res = resolution[bmat.name]
                 mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
                 report.materials.append(mrep)
+                if keep_blend_materials:
+                    mrep.method = "kept"
+                    if opts.store_props and res.guid:
+                        mat_builder._store_props(bmat, normalized[res.guid])
+                    continue
                 if res.warning:
                     mrep.warnings.append(res.warning)
                     report.warn(f"material {bmat.name!r}: {res.warning}")

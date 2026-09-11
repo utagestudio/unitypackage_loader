@@ -4,7 +4,7 @@
 
     blender -b --factory-startup --python tests/make_synthetic_package.py -- <出力パス.unitypackage>
 
-内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
+内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone に .mat を割り当てる prefab。
 """
 
@@ -128,6 +128,8 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
         bpy.ops.mesh.primitive_uv_sphere_add()
     elif kind == "cone":
         bpy.ops.mesh.primitive_cone_add()
+    elif kind == "torus":
+        bpy.ops.mesh.primitive_torus_add()
     else:
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
@@ -136,6 +138,10 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
     obj.data.materials.append(mat)
     if path.suffix == ".fbx":
         bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False)
+    elif path.suffix == ".blend":
+        # 既にノードが組まれたマテリアルを持つ .blend（KEEP の確認用）
+        mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.2, 0.9, 0.3, 1.0)
+        bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True)
     else:
         bpy.ops.wm.obj_export(filepath=str(path), export_materials=True)
 
@@ -176,6 +182,12 @@ def main() -> None:
             mtl = path.with_suffix(".mtl")
             if mtl.is_file():
                 add(f"Assets/Synthetic/Models/{kind.capitalize()}.mtl", mtl.read_bytes(), None)
+
+    # 同梱 .blend（マテリアルは既に設定済み。externalObjects は CubeMat を指す）
+    path = tmp / "torus.blend"
+    export_model("torus", "TorusBlendMat", path)
+    blend_path = "Assets/Synthetic/Models/Torus.blend"
+    add(blend_path, path.read_bytes(), model_meta(guid_of(blend_path), {"TorusBlendMat": mat_guids["CubeMat"]}))
 
     # externalObjects も名前一致も無く、prefab の Renderer だけが .mat を指しているモデル
     path = tmp / "cone.fbx"
