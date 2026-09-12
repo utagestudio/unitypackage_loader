@@ -1,4 +1,4 @@
-# main への push で拡張の zip と Extension Repository の index.json を生成し、GitHub Pages に公開する。
+# main への push で拡張の zip と Extension Repository の index.json を生成し、web/ の紹介ページと一緒に GitHub Pages に公開する。
 # 初回のみ、リポジトリの Settings > Pages > Source を "GitHub Actions" にしておくこと。
 name: Publish extension repository
 
@@ -54,7 +54,7 @@ jobs:
           ~/blender/blender -b --factory-startup --command extension build \
             --source-dir unitypackage_loader --output-dir site
           ~/blender/blender -b --factory-startup --command extension server-generate --repo-dir=site
-          python3 tools/make_site_index.py site "${{ steps.pages.outputs.base_url }}"
+          python3 tools/build_site.py site "${{ steps.pages.outputs.base_url }}"
           ls -la site
 
       - uses: actions/upload-pages-artifact@v3
