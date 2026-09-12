@@ -6,7 +6,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
 - Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
-- What is imported: FBX / OBJ / glTF / Collada / bundled .blend files, `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP; others on a best-effort basis using generic rules), and referenced textures
+- What is imported: FBX / OBJ / glTF / Collada / bundled .blend files, `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
 - What is not imported: shader source code, C# scripts, animations, prefab hierarchies, Expression menus, etc.
 
 ## Installation
@@ -138,6 +138,7 @@ GPL-3.0-or-later ([LICENSE](LICENSE)), in line with the requirements for distrib
 
 The shader GUIDs in `unitypackage_loader/core/profiles/shader_guids.json` are identifiers collected from the `.shader.meta`
 files of the public repositories [lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) and [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)
-(both MIT License). No shader code is included.
-lilToon, MToon, Poiyomi, Unity, and other names are trademarks or product names of their respective owners.
-This add-on is not affiliated with Unity Technologies or any of the shader authors.
+(both MIT License), and from the VRChat SDK's Mobile shaders (`Sample Assets/Shaders/Mobile`) as mirrored in public repositories.
+No shader code is included.
+lilToon, MToon, Poiyomi, VRChat, Unity, and other names are trademarks or product names of their respective owners.
+This add-on is not affiliated with Unity Technologies, VRChat Inc., or any of the shader authors.
