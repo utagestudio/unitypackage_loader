@@ -8,6 +8,7 @@
 {
   "package": "<_local/ 内のパッケージファイル名。省略時は引数、無ければ _local/ の最初の .unitypackage>",
   "options": { "material_mode": "AUTO" },
+  "enable_addons": ["bl_ext.blender_org.vrm"],
   "objects": { "count": 0, "mesh_count": 0, "armature_count": 0 },
   "materials": {
     "count": 0,
@@ -40,9 +41,10 @@
 |---|---|
 | `package` | 検証に使うパッケージ（`_local/` 内のファイル名）。コマンドライン引数があればそちらが優先 |
 | `options` | オペレーターに渡す追加プロパティ（`extract_mode` は常に一時ディレクトリへ上書きされる） |
+| `enable_addons` | factory 設定の後に有効化する add-on のモジュール名。未導入ならテスト全体をスキップする（VRM add-on への委譲を検証する場合に使う） |
 | `objects.count` | レポート上の新規オブジェクト数（アーマチュア込み） |
 | `materials.mapped` | .mat に対応付けできたマテリアル数 |
-| `materials.methods` | 使われた解決手段の集合（`external` / `name` / `none` / `reused`） |
+| `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated`） |
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
