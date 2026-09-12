@@ -52,7 +52,23 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
 - Blender API は 4.2 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
   新 FBX インポーター `wm.fbx_import` を優先し、無ければ `import_scene.fbx`。
-- ドキュメント（README.md / DESIGN.md）は実装と乖離させない。仕様を変えたら同じ作業内で更新する。
+- ドキュメント（README.md / README_ja.md / DESIGN.md）は実装と乖離させない。仕様を変えたら同じ作業内で更新する。
+- **バージョン番号の運用**（`unitypackage_loader/blender_manifest.toml` の `version`）は下記「バージョン番号のルール」に従う。
+  ソースコードに関わるコミットごとに `-dev.<dev>` を上げるので、コードを変えたコミットには manifest の変更も含める。
+
+## バージョン番号のルール
+
+形式は `<major>.<minor>.<fix>(-dev.<dev>)`。
+
+- **major**: 大きな仕様変更を含むバージョンアップ。
+- **minor**: 通常の機能開発によるバージョンアップ。
+- **fix**: バグ修正など。
+- **開発の始め方**: 着手前に、その開発が major / minor / fix のどれを上げるものかを検討し、先立って当該番号を上げて `-dev.1` を付ける
+  （例: `1.0.0` から機能開発を始めるなら最初のコミットで `1.1.0-dev.1`）。以後、開発コミットごとに `-dev.<dev>` を 1 ずつ上げる。
+- **main へのマージ**: ユーザーが機能開発の内容に問題ないと判断し main にマージすると決めた時点で、`-dev.<dev>` を外したバージョンにする
+  （例: `1.1.0-dev.7` → `1.1.0`）。この判断はユーザーが行う。
+- **上げない場合**: バージョンを変えるのはプログラムのソースコード（`unitypackage_loader/` 配下）に関わる改変のときだけ。
+  GitHub Pages、README、DESIGN.md、CLAUDE.md、テストのみ、CI 設定のみといったドキュメント・周辺の改変では変更しない。
 
 ## コマンド
 
@@ -78,5 +94,5 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 
 ## リリース
 
-- バージョンは `unitypackage_loader/blender_manifest.toml` の `version`（semantic versioning。開発版は `1.0.0-dev.N`）。
+- バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し GitHub Pages に公開する。
