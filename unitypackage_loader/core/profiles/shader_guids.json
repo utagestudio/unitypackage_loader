@@ -609,6 +609,53 @@
       "lighting": "pbr",
       "variant": "bumped_specular",
       "verified": false
+    },
+    "9200bec112b65ec4fbbbd33fa89c20f4": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Additive",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "additive"
+    },
+    "8b39b95ac85682040beff730e0cfc77a": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Alpha Blended",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "alpha"
+    },
+    "d5b89f0c74ccf5049ba803c14a090378": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Multiply",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "multiply"
+    },
+    "44c1b7c3827912f45b473dbe106c1ecf": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Worlds/Supersampled UI",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "ui"
+    },
+    "5f8fef09682fab74fb7a29d783391edb": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Sprites/Default",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "ui",
+      "verified": false
+    },
+    "9ae8ad653e1d98940bbc79866b9170f3": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Sprites/Diffuse",
+      "lighting": "pbr",
+      "alpha": "blend",
+      "variant": "ui",
+      "verified": false
     }
   }
 }

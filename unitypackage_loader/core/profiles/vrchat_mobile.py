@@ -181,6 +181,24 @@ class VRChatMobileProfile(ShaderProfile):
         if mat.tex("_MatCap"):
             n.extras["matcap"] = {"tex": _guid(mat, "_MatCap"), "additive": False, "strength": 1.0}
 
+    def _particle(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/Particles/*: _MainTex だけの Unlit 半透明・両面。Additive / Multiply はアルファブレンドで近似。"""
+        n.lighting = "unlit"
+        n.alpha_mode = "blend"
+        n.alpha_from_texture = True
+        n.cull_backface = False
+        blend = str((info.extra or {}).get("blend", "alpha")) if info is not None else "alpha"
+        n.extras["blend"] = blend
+        if blend != "alpha":
+            n.warnings.append(f"{blend} particle blending approximated as alpha blend")
+
+    def _ui(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/Worlds/Supersampled UI, VRChat/Sprites/*: _MainTex × _Color の半透明・両面。"""
+        n.base_color = mat.color("_Color")
+        n.alpha_mode = "blend"
+        n.alpha_from_texture = True
+        n.cull_backface = False
+
 
 def _guid(mat: UnityMaterial, name: str) -> str | None:
     ref = mat.tex(name)

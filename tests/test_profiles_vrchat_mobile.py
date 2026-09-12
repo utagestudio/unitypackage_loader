@@ -16,6 +16,9 @@ MATCAP_LIT = "3ad043b7f9839cb48a75a9238d433dec"
 DIFFUSE = "2dcd9e0568e0a6f45b92c60ba2eb16a0"
 BUMPED_DIFFUSE = "f8c1f8ac363df824899534a0b30eef00"
 BUMPED_SPECULAR = "528d55c4e8adab14b974ca665ed1b996"
+PARTICLE_ADD = "9200bec112b65ec4fbbbd33fa89c20f4"
+PARTICLE_ALPHA = "8b39b95ac85682040beff730e0cfc77a"
+UI = "44c1b7c3827912f45b473dbe106c1ecf"
 
 
 def shader(guid: str) -> str:
@@ -203,3 +206,24 @@ class SimpleLitTests(unittest.TestCase):
         self.assertEqual(n.normal_tex.guid, TEX_N)
         self.assertAlmostEqual(n.roughness, 0.75)  # 1 - _Shininess
         self.assertEqual(n.extras["specular"]["color"], (0.5, 0.5, 1.0, 1.0))
+
+
+class TransparentTests(unittest.TestCase):
+    def test_particle_alpha_blended(self):
+        n = normalize_material(parse_material(mat_yaml("Smoke", shader(PARTICLE_ALPHA), tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], colors=[("_Color", (0, 0, 0, 1))])))
+        self.assertEqual((n.lighting, n.alpha_mode, n.cull_backface), ("unlit", "blend", False))
+        self.assertTrue(n.alpha_from_texture)
+        self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 1.0))  # パーティクルは _Color を持たない
+        self.assertEqual(n.extras["blend"], "alpha")
+        self.assertEqual(n.warnings, [])
+
+    def test_particle_additive_warns(self):
+        n = normalize_material(parse_material(mat_yaml("Glow", shader(PARTICLE_ADD), tex=[("_MainTex", TEX_A, (1, 1), (0, 0))])))
+        self.assertEqual(n.alpha_mode, "blend")
+        self.assertEqual(n.extras["blend"], "additive")
+        self.assertTrue(any("additive" in w for w in n.warnings))
+
+    def test_ui_uses_color(self):
+        n = normalize_material(parse_material(mat_yaml("Panel", shader(UI), tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], colors=[("_Color", (1, 1, 1, 0.5))])))
+        self.assertEqual((n.lighting, n.alpha_mode, n.cull_backface), ("unlit", "blend", False))
+        self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 0.5))
