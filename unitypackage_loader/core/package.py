@@ -12,6 +12,7 @@ tar.gz はランダムアクセスできないため、
 from __future__ import annotations
 
 import os
+import shutil
 import tarfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -147,10 +148,31 @@ def _reject_symlinks(dest_root: Path, target: Path) -> None:
             raise PackageError(f"refusing to write through a symbolic link: {current}")
 
 
+def _free_disk_space(dest_root: Path) -> int | None:
+    """``dest_root``（未作成なら最も近い既存の親）のあるボリュームの空き容量。取れなければ None。"""
+    probe = dest_root
+    while not probe.exists():
+        if probe.parent == probe:
+            return None
+        probe = probe.parent
+    try:
+        return shutil.disk_usage(probe).free
+    except OSError:
+        return None
+
+
 def _open_for_write(target: Path):
     # 最終要素がリンクなら追従しない（対応 OS のみ）。Windows では O_BINARY が必要
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     return os.fdopen(os.open(target, flags, 0o644), "wb")
+
+
+def _human_size(size: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GiB"
 
 
 class UnityPackage:
@@ -275,10 +297,13 @@ class UnityPackage:
         *,
         overwrite: bool = False,
         progress: ProgressFn | None = None,
+        max_total_size: int = 0,
     ) -> dict[str, Path]:
         """指定 GUID の ``asset`` を ``dest_root/<pathname>`` に書き出し、GUID → パスを返す。
 
         既に同じサイズのファイルがあれば ``overwrite=False`` のとき書き出しをスキップする。
+        書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せていても実際に書く量）が
+        ``max_total_size``（0 は無制限）を超えるか、展開先の空き容量に収まらなければ何も書かずに ``PackageError``。
         """
         self._require_scan()
         dest_root = Path(dest_root)
@@ -300,6 +325,18 @@ class UnityPackage:
 
         if not pending:
             return result
+
+        total = sum(wanted[g].size for g in pending)
+        if max_total_size and total > max_total_size:
+            raise PackageError(
+                f"extracting {len(pending)} files needs {_human_size(total)}, "
+                f"more than the {_human_size(max_total_size)} limit set in the add-on preferences"
+            )
+        free = _free_disk_space(dest_root)
+        if free is not None and total > free:
+            raise PackageError(
+                f"not enough free disk space in {dest_root}: need {_human_size(total)}, {_human_size(free)} available"
+            )
 
         done = 0
         with tarfile.open(self.path, "r:*") as tar:

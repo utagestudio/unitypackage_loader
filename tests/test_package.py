@@ -1,4 +1,5 @@
 import io
+import shutil
 import tarfile
 import tempfile
 import unittest
@@ -235,6 +236,42 @@ class SizeLimitTests(unittest.TestCase):
         with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 512):
             paths = pkg.extract([GUID_FBX], Path(self.tmp.name) / "out")
         self.assertEqual(paths[GUID_FBX].stat().st_size, len(b"Kaydara-fake" * 100))
+
+
+class ExtractBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "example.unitypackage"
+        build_package(self.path)
+        self.pkg = UnityPackage(self.path)
+        self.dest = Path(self.tmp.name) / "out"
+
+    def test_total_size_limit(self):
+        fbx_size = len(b"Kaydara-fake" * 10)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, max_total_size=fbx_size)
+        self.assertFalse(self.dest.exists(), "nothing must be written when over the limit")
+        # 上限ちょうどは許可。既に展開済みのものは合計に含めない
+        paths = self.pkg.extract([GUID_FBX], self.dest, max_total_size=fbx_size)
+        self.assertTrue(paths[GUID_FBX].is_file())
+        self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, max_total_size=len(b"\x89PNG-fake"))
+        # 0 は無制限
+        self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, overwrite=True, max_total_size=0)
+
+    def test_free_disk_space_is_checked_before_writing(self):
+        usage = shutil.disk_usage(self.tmp.name)._replace(free=4)
+        with mock.patch.object(package_module.shutil, "disk_usage", return_value=usage) as du:
+            with self.assertRaises(PackageError):
+                self.pkg.extract([GUID_TEX], self.dest)
+            # 展開先が未作成でも、既存の親で空きを調べる
+            du.assert_called_once_with(Path(self.tmp.name))
+        self.assertFalse(self.dest.exists())
+
+    def test_disk_usage_failure_does_not_block(self):
+        with mock.patch.object(package_module.shutil, "disk_usage", side_effect=OSError("no statvfs")):
+            paths = self.pkg.extract([GUID_TEX], self.dest)
+        self.assertTrue(paths[GUID_TEX].is_file())
 
 
 class LocalSampleTests(unittest.TestCase):

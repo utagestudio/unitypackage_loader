@@ -71,6 +71,8 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 既定値は Preferences（Edit > Preferences > Add-ons > Unity Package Importer）で変更できます。
 独自シェーダーの GUID 表（`shader_guids.json` と同じ書式の JSON）を追加登録することもできます。
+"Max Extract Size"（既定 8 GiB、0 で無制限）を超える量を 1 つのパッケージから展開しようとした場合や、展開先の空き容量に
+収まらない場合は、何も書かずにインポートを中止します。
 
 ### セキュリティ上の注意
 
