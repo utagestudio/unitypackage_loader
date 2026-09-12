@@ -264,3 +264,23 @@ class NormalizedMaterial:
 
         walk(self.extras)
         return found
+
+
+MATCAP_NORMAL, MATCAP_ADD, MATCAP_SCREEN, MATCAP_MULTIPLY = 0, 1, 2, 3
+
+
+def matcap_blend_mode(matcap: dict[str, Any]) -> int:
+    """extras["matcap"] から Toon ノードグループの MatCap Mode（0..3）を決める。
+
+    ブレンドモードを数値で持つのは lilToon だけで、MToon と VRChat Mobile は
+    additive フラグで渡してくる。blend_mode が無い場合や範囲外の場合はそちらを見る。
+    """
+    mode = matcap.get("blend_mode")
+    if mode is not None:
+        try:
+            mode = int(mode)
+        except (TypeError, ValueError):
+            mode = None
+    if mode is None or not MATCAP_NORMAL <= mode <= MATCAP_MULTIPLY:
+        mode = MATCAP_ADD if matcap.get("additive") else MATCAP_NORMAL
+    return mode
