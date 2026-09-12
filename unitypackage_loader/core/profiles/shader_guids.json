@@ -552,6 +552,12 @@
       "name": "VRChat/Mobile/Toon Lit",
       "lighting": "unlit",
       "variant": "toon_lit"
+    },
+    "0b7113dea2069fc4e8943843eff19f70": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Standard Lite",
+      "lighting": "pbr",
+      "variant": "standard_lite"
     }
   }
 }
