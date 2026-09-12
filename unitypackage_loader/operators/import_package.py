@@ -38,6 +38,15 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         default="AUTO",
     )
     global_scale: FloatProperty(name="Scale", default=1.0, min=0.001, max=1000.0)
+    use_vrm_addon: BoolProperty(
+        name="VRM via VRM Add-on",
+        default=True,
+        description=(
+            "Import .vrm models with the 'VRM format' add-on when it is installed "
+            "(MToon, humanoid and spring bones are reproduced by the add-on). "
+            "Otherwise the glTF importer is used and materials are rebuilt from .mat files"
+        ),
+    )
     use_anim: BoolProperty(name="Import Animation", default=False)
     ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
 
@@ -116,6 +125,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         box.prop(self, "global_scale")
         box.prop(self, "use_anim")
         box.prop(self, "ignore_leaf_bones")
+        box.prop(self, "use_vrm_addon")
 
         box = layout.box()
         box.label(text="Materials", icon="MATERIAL")
@@ -181,6 +191,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 ignore_leaf_bones=self.ignore_leaf_bones,
                 global_scale=self.global_scale,
                 blend_materials=self.blend_materials,
+                use_vrm_addon=self.use_vrm_addon,
                 outlines=self.outlines,
                 outline_width_scale=self.outline_width_scale,
                 shader_table_path=prefs.shader_table_path if prefs else "",

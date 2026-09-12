@@ -10,7 +10,7 @@ class MaterialReport:
     blender_name: str
     fbx_name: str
     guid: str | None
-    method: str  # external / name / none / skipped
+    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split
     family: str = ""
     shader_name: str = ""
     alpha_mode: str = ""
