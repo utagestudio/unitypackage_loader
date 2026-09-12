@@ -156,14 +156,16 @@ class ShaderProfile:
 
 def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tuple[ShaderProfile, ShaderInfo | None]:
     """GUID 表 → プロパティ指紋 → generic の順にプロファイルを決める。"""
-    from . import liltoon, mtoon, poiyomi, standard  # 循環 import 回避
+    from . import liltoon, mtoon, poiyomi, standard, vrchat_mobile  # 循環 import 回避
 
     table = table or default_table()
     info = table.lookup(mat)
+    # 指紋判定の順序: VRChat Mobile は Standard の残骸プロパティを持つことが多いので Standard より先に置く
     profiles: list[ShaderProfile] = [
         liltoon.LilToonProfile(),
         mtoon.MToonProfile(),
         poiyomi.PoiyomiProfile(),
+        vrchat_mobile.VRChatMobileProfile(),
         standard.StandardProfile(),
     ]
     if info is not None:

@@ -1,5 +1,5 @@
 {
-  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository.",
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py.",
   "builtin_guid": "0000000000000000f000000000000000",
   "builtin_file_ids": {
     "46": {
@@ -546,6 +546,12 @@
     "0781c64b7f2a1604ea6aa7e252080372": {
       "family": "mtoon",
       "name": "VRM10/Universal Render Pipeline/MToon10"
+    },
+    "affc81f3d164d734d8f13053effb1c5c": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Lit",
+      "lighting": "unlit",
+      "variant": "toon_lit"
     }
   }
 }
