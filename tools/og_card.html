@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<!-- OGP 画像（1200×630）の元。ローカルの Chrome でレンダリングして web/assets/og.png にする:
+     google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,630 --screenshot=web/assets/og.png tools/og_card.html
+     フォントは Google Fonts から読むので、オンラインで実行すること。 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body { background: #ffffff; color: #3a322c; font-family: "Nunito", system-ui, sans-serif; position: relative; }
+  .blob { position: absolute; border-radius: 50%; pointer-events: none; }
+  .b1 { width: 760px; height: 760px; right: -260px; top: -300px; background: radial-gradient(closest-side, #ffe3cc, rgba(255,227,204,0) 72%); }
+  .b2 { width: 420px; height: 420px; left: -120px; bottom: -220px; background: radial-gradient(closest-side, #ffd2b0, rgba(255,210,176,0) 72%); }
+  .card { position: absolute; inset: 0; padding: 72px 80px; display: grid; grid-template-columns: 1fr 360px; align-items: center; gap: 40px; }
+  .logo { display: flex; align-items: center; gap: 18px; font-weight: 800; font-size: 28px; margin-bottom: 28px; }
+  .logo svg { width: 56px; height: 56px; }
+  h1 { margin: 0 0 22px; font-size: 58px; line-height: 1.08; font-weight: 800; letter-spacing: -0.015em; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, #ad5410, #f07f2a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p { margin: 0; font-size: 24px; line-height: 1.4; color: #7d7169; max-width: 640px; font-weight: 700; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; margin-top: 26px; background: #fff5ec; color: #ad5410; font-weight: 800; font-size: 22px; padding: 10px 22px; border-radius: 999px; }
+  .pill::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: #f07f2a; }
+  .art { position: relative; width: 360px; height: 360px; }
+  .art .box { position: absolute; inset: 30px; border-radius: 76px; background: linear-gradient(135deg, #ffc26a, #f07f2a); box-shadow: 0 30px 60px -30px rgba(173,84,16,.5); }
+  .art svg.arrow { position: absolute; inset: 30px; width: 300px; height: 300px; }
+  .art .dot { position: absolute; width: 74px; height: 74px; border-radius: 50%; background: #4fc4a8; right: 14px; top: 14px; }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="card">
+    <div>
+      <div class="logo">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc26a"/><stop offset="1" stop-color="#f07f2a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="16" fill="url(#g)"/><path d="M32 22v20M24 34l8 8 8-8" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="14" r="7" fill="#4fc4a8"/></svg>
+        Unitypackage Importer
+      </div>
+      <h1>Bring your .unitypackage into Blender, <em>materials and all.</em></h1>
+      <p>Meshes, textures and Unity material settings rebuilt as Blender nodes. lilToon, MToon, Poiyomi, Standard, URP, HDRP.</p>
+      <span class="pill">Free Blender extension · 4.2 and later</span>
+    </div>
+    <div class="art">
+      <div class="box"></div>
+      <svg class="arrow" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 18v26M22 34l10 10 10-10" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="dot"></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unitypackage Importer for Blender（日本語）</title>
+<meta name="description" content=".unitypackage を Blender に直接読み込む無料の Extension。アーマチュアとシェイプキー付きのメッシュ、テクスチャ、Unity 側のマテリアル設定を Blender のノードに変換します。lilToon / MToon / Poiyomi / Standard / URP / HDRP に対応。">
+<link rel="canonical" href="{{BASE_URL}}/ja/">
+<link rel="alternate" hreflang="en" href="{{BASE_URL}}/">
+<link rel="alternate" hreflang="ja" href="{{BASE_URL}}/ja/">
+<link rel="alternate" hreflang="x-default" href="{{BASE_URL}}/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Unitypackage Importer">
+<meta property="og:title" content="Unitypackage Importer for Blender">
+<meta property="og:description" content=".unitypackage をマテリアルごと Blender へ。Blender 4.2 以降向けの無料 Extension。">
+<meta property="og:url" content="{{BASE_URL}}/ja/">
+<meta property="og:image" content="{{BASE_URL}}/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Unitypackage Importer for Blender: .unitypackage をマテリアルごと Blender へ。">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Unitypackage Importer for Blender">
+<meta name="twitter:description" content=".unitypackage をマテリアルごと Blender へ。Blender 4.2 以降向けの無料 Extension。">
+<meta name="twitter:image" content="{{BASE_URL}}/assets/og.png">
+<meta name="theme-color" content="#f07f2a">
+<link rel="icon" href="../assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&family=Zen+Maru+Gothic:wght@400;700;900&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&family=Zen+Maru+Gothic:wght@400;700;900&display=swap"></noscript>
+<link rel="stylesheet" href="../assets/site.css">
+<script>
+  (function () {
+    try {
+      var q = new URLSearchParams(location.search).get("theme");
+      var t = (q === "dark" || q === "light") ? q : localStorage.getItem("theme");
+      if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Unitypackage Importer",
+  "alternateName": "Unity Package Importer for Blender",
+  "applicationCategory": "DesignApplication",
+  "applicationSubCategory": "Blender extension",
+  "operatingSystem": "Windows, macOS, Linux",
+  "softwareRequirements": "Blender 4.2 以降",
+  "softwareVersion": "{{VERSION}}",
+  "downloadUrl": "{{ZIP_URL}}",
+  "url": "{{BASE_URL}}/ja/",
+  "image": "{{BASE_URL}}/assets/og.png",
+  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "JPY" },
+  "author": { "@type": "Organization", "name": "utagestudio", "url": "https://github.com/utagestudio" },
+  "codeRepository": "https://github.com/utagestudio/unitypackage_loader",
+  "inLanguage": ["ja", "en"],
+  "description": ".unitypackage を Blender に直接読み込む無料の Extension。アーマチュアとシェイプキー付きのメッシュ、テクスチャ、Unity 側のマテリアル設定を Blender のノードに変換します。"
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="../assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
+    <nav class="nav" aria-label="セクション">
+      <a href="#features">機能</a>
+      <a href="#shaders">シェーダー</a>
+      <a href="#install">導入</a>
+      <a href="#security">安全性</a>
+      <a class="gh" href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>
+      <a class="lang" href="../" hreflang="en" lang="en">English</a>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="ライトとダークの表示を切り替える">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <span class="eyebrow">無料の Blender Extension · 4.2 以降</span>
+        <h1><span class="nb">.unitypackage を</span><wbr><em>マテリアルごと</em><wbr><span class="nb">Blender へ。</span></h1>
+        <p class="lede">パッケージをビューポートにドラッグ＆ドロップするだけ。アーマチュアとシェイプキー付きのメッシュが入り、テクスチャが展開され、Unity 側のマテリアル設定が Blender のノードとして組み直されます。Unity プロジェクトは要りません。</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>
+            Blender に追加
+          </a>
+          <a class="btn btn-secondary" href="https://github.com/utagestudio/unitypackage_loader">GitHub で見る</a>
+        </div>
+        <div class="hero-meta">
+          <span>バージョン {{VERSION}}</span>
+          <span>GPL-3.0</span>
+          <span>Windows / macOS / Linux</span>
+        </div>
+      </div>
+      <figure class="shot">
+        <div class="frame"><img src="../assets/shot-hero.webp" width="1920" height="1010" alt="Blender で .unitypackage から読み込んだアバターと、14 個のマテリアルが VRM10/MToon10 に解決されたことを示すサイドバー" loading="eager"></div>
+        <figcaption>パッケージ 1 つを 1 回読み込んだ状態。サイドバーに各マテリアルと、対応付いたシェーダーが並びます。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">読み込まれるもの</span>
+        <h2>残す価値のあるものを、<wbr>1 回のインポートで</h2>
+        <p>アドオンは Unity と同じ手順でパッケージを読み、Blender が実際に使えるものだけを組み立てます。対応付けできない値もカスタムプロパティに保存するので、情報は失われません。</p>
+      </div>
+      <div class="cards">
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></div>
+          <h3>メッシュ</h3>
+          <p>FBX / OBJ / glTF / VRM / Collada のモデルを、アーマチュアとシェイプキー付きのまま読み込みます。同梱の .blend も、明示的に有効にしたときだけアペンドできます。</p>
+          <ul>
+            <li>新しい FBX インポーターがあれば優先</li>
+            <li>VRM は VRM アドオンがあればそちらに委譲</li>
+            <li>パッケージごとに 1 つのコレクション</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18"/><circle cx="8.5" cy="10" r="1.2" fill="currentColor"/><circle cx="12" cy="7.5" r="1.2" fill="currentColor"/><circle cx="8" cy="14.5" r="1.2" fill="currentColor"/></svg></div>
+          <h3>マテリアル</h3>
+          <p>各 .mat をメッシュに対応付け、シェーダープロファイルを通して Toon ノードグループか Principled BSDF に変換します。影色、MatCap、リムライト、エミッション、アルファが引き継がれます。</p>
+          <ul>
+            <li>.meta、名前、prefab のスロットの順で対応付け</li>
+            <li>prefab が .mat を差し替えている場合はスロット単位で分割</li>
+            <li>元パッケージ無しで、後から別モードに再構築可能</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5-8 8"/></svg></div>
+          <h3>テクスチャ</h3>
+          <p>マテリアルが参照する画像だけを、.blend の隣かアドオンのキャッシュに展開します。.blend にパックすることも、参照されていないマスクやアイコンを一緒に読み込むこともできます。</p>
+          <ul>
+            <li>Cutout / Transparent の設定を引き継ぎ</li>
+            <li>ノーマルマップやマスクは Non-Color で読み込み</li>
+            <li>書き出す前にサイズ上限と空き容量を確認</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="shaders">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">シェーダープロファイル</span>
+        <h2>アバターで<wbr>実際に使われる<wbr>シェーダーのために</h2>
+        <p>プロファイルは、どの Unity プロパティが重要で、Blender のどこに繋ぐべきかを知っています。シェーダー GUID、次にプロパティの指紋の順で選ぶので、名前を変えたり再配布されたシェーダーでも解決できます。</p>
+      </div>
+      <div class="shaders">
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>lilToon</b><span>影色、影の境界とぼかし、MatCap、リムライト、エミッション、アウトライン</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>MToon</b><span>VRM のトゥーンシェーダー。シェード色と MatCap を含む</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>Poiyomi</b><span>影の強さを含むトゥーン設定、エミッションの有効判定、反射設定に応じたメタリック、アウトライン</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>Standard</b><span>ビルトインの PBR。アルベド、メタリック、スムースネス、ノーマル、エミッション</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>URP Lit</b><span>Standard と同じ PBR の対応付けに加え、Surface Type と Alpha Clip を判定</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>HDRP Lit</b><span>Standard と同じ PBR の対応付けに加え、Surface Type を判定</span></div></div>
+        <div class="shader"><span class="tag tag-full">専用</span><div><b>VRChat Mobile</b><span>Quest 向け: Toon Lit、Standard Lite、Toon Standard、Bumped Specular、MatCap Lit</span></div></div>
+        <div class="shader"><span class="tag tag-generic">汎用</span><div><b>その他のシェーダー</b><span>一般的なプロパティ名から可能な範囲で変換。独自シェーダー用の GUID 表も登録できます。</span></div></div>
+      </div>
+      <div class="legend">
+        <span><span class="tag tag-full">専用</span>実物のマテリアルで検証した専用の対応付け</span>
+        <span><span class="tag tag-generic">汎用</span>どのシェーダーにも効く規則。結果はシェーダー次第</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="modes">
+    <div class="wrap">
+      <div class="split">
+        <div>
+          <div class="section-head">
+            <span class="eyebrow">マテリアルモード</span>
+            <h2>トゥーンはトゥーンに、<wbr>PBR は PBR に</h2>
+            <p>Auto はシェーダーからマテリアルごとにモードを選びます。インポート時に固定することも、後からサイドバーで選択メッシュを別モードに再構築することもできます。</p>
+          </div>
+          <div class="modes">
+            <div class="mode default"><span class="name" data-default="既定">Auto</span><span>トゥーン系は Toon ノードグループ、PBR 系は Principled</span></div>
+            <div class="mode"><span class="name">Toon（ノードグループ）</span><span>境界とぼかし付きの影色、MatCap のブレンドモード、リムライト、エミッション、アルファ。EEVEE 専用</span></div>
+            <div class="mode"><span class="name">Principled BSDF</span><span>ベースカラー、ノーマル、エミッション、メタリックとラフネス。Cycles でも描画可能</span></div>
+            <div class="mode"><span class="name">Unlit（Emission）</span><span>テクスチャをそのままエミッションへ。ライティング無し</span></div>
+            <div class="mode"><span class="name">名前のみ</span><span>正しい名前の空マテリアルだけを作り、あとは自分で組む</span></div>
+          </div>
+        </div>
+        <figure class="shot">
+          <div class="frame"><img src="../assets/shot-modes.webp" width="1200" height="789" alt="同じアバターを 2 体並べた比較。左は Toon ノードグループ、右は Principled BSDF で組み直したもの" loading="lazy"></div>
+          <figcaption>同じメッシュを 2 体。左が Toon ノードグループ、右が保存済みの Unity 情報から Principled BSDF に組み直したもので、元パッケージは使っていません。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="split reverse">
+        <figure class="shot">
+          <div class="frame"><img src="../assets/shot-nodes.webp" width="1100" height="1274" alt="ベースカラー・ノーマル・MatCap・エミッションのテクスチャが UnityToon ノードグループに繋がったシェーダーエディター" loading="lazy"></div>
+          <figcaption>インポート後のマテリアル 1 つ分。パッケージ内のテクスチャが <code>UnityToon</code> グループに繋がり、影色・MatCap・リムライト・エミッションを担います。</figcaption>
+        </figure>
+        <div>
+          <div class="section-head">
+            <span class="eyebrow">仕組み</span>
+            <h2>2 段階で、推測しない</h2>
+            <p>Unity のシェーダーと Blender のノードは 1 対 1 に対応しないので、直接変換はしません。</p>
+          </div>
+          <ol class="steps-inline">
+            <li><span class="n">1</span><span><b>パッケージを 1 度だけ読む。</b>tar.gz を索引化し、必要な GUID だけを展開します。YAML はアドオン専用のパーサーがメモリ上で読みます。</span></li>
+            <li><span class="n">2</span><span><b>マテリアルを正規化する。</b>シェーダープロファイルが生の .mat プロパティを、シェーダーに依存しない記述（色、マップ、影、MatCap、リム、アルファ）に変換します。</span></li>
+            <li><span class="n">3</span><span><b>ノードを組む。</b>その記述から Toon グループか Principled のツリーを作ります。記述自体もマテリアルに保存されるので、パッケージ無しで別モードに再構築できます。</span></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="install">
+    <div class="wrap">
+      <div class="install">
+        <div class="section-head" style="margin-bottom:0">
+          <span class="eyebrow">導入</span>
+          <h2>3 ステップ。<wbr>以後の更新は自動で届く</h2>
+          <p>このサイトを Extension Repository として 1 度登録すれば、Blender がアドオンを一覧に出し、更新も管理してくれます。</p>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <h3>リポジトリを追加</h3>
+            <p>Blender で 編集 &gt; プリファレンス &gt; エクステンション入手 &gt; リポジトリ を開き、<b>+</b> から <b>リモートリポジトリを追加</b> を選んで、この URL を貼り付けます。</p>
+            <div class="repo-url">
+              <code id="repo-url">{{BASE_URL}}/index.json</code>
+              <button class="btn btn-primary copy-btn" type="button" data-copy="{{BASE_URL}}/index.json" data-copied-label="コピーしました">コピー</button>
+            </div>
+          </div>
+          <div class="step">
+            <h3>Extension をインストール</h3>
+            <p>エクステンション入手で <b>Unity Package Importer</b> を検索してインストールします。ファイルから入れたい場合は <a href="{{ZIP_URL}}">バージョン {{VERSION}} の zip</a> をダウンロードし、「ディスクからインストール」を使います。</p>
+          </div>
+          <div class="step">
+            <h3>パッケージをドロップ</h3>
+            <p><code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unity Package を選びます。ポップアップでオプションを調整してインポート。複数ファイルを一度にドロップしても構いません。</p>
+          </div>
+        </div>
+        <div class="shots">
+          <figure class="shot">
+            <div class="frame"><img src="../assets/shot-menu.webp" width="520" height="487" alt="Blender のファイル > インポートメニューに Unity Package (.unitypackage) の項目が並んでいるところ" loading="lazy"></div>
+            <figcaption>ファイル &gt; インポート に項目が追加されます。ビューポートへのドラッグ＆ドロップでも同じオプションが開きます。</figcaption>
+          </figure>
+          <figure class="shot">
+            <div class="frame"><img src="../assets/shot-dialog.webp" width="620" height="1284" alt="モデル・マテリアル・テクスチャの節に分かれたインポートオプションのポップアップ" loading="lazy"></div>
+            <figcaption>オプションはモデル・マテリアル・テクスチャの 3 節。既定値はアドオンのプリファレンスで変えられます。</figcaption>
+          </figure>
+        </div>
+        <p class="alt">各オプションの既定値はアドオンのプリファレンスで変えられます。サイドバー（N キー）の「Unity Package」タブに、読み込んだ内容、マテリアルごとの解決結果、警告が表示されます。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="security">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">安全性</span>
+        <h2>自分で作っていない<wbr>パッケージを開くために</h2>
+        <p>アバターはいろいろな人の手を経て届きます。アドオンはすべてのパッケージを信頼できない入力として扱います。</p>
+      </div>
+      <div class="trust">
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <h3>パッケージ内のコードは一切実行しない</h3>
+          <p>C# スクリプト、シェーダー、その他のアセットは無視します。ディスクに書き出すのはモデルファイルと、マテリアルが参照するテクスチャだけ。.mat / .meta / .prefab はテキストとしてメモリ上で解析します。</p>
+        </article>
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+          <h3>同梱の .blend は既定で開かない</h3>
+          <p>.blend は、Auto Run が有効なときに Blender が実行する Python を含めます。他人のパッケージの .blend をアペンドするのは、インポートごとの明示的な選択で、ドキュメントにも記載しています。</p>
+        </article>
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
+          <h3>アーカイブ処理は堅牢化済み</h3>
+          <p>パスを検証し、シンボリックリンクは辿らず、大きすぎるメタデータは無視し、展開する合計サイズを上限と空き容量に対して書き出し前に確認します。</p>
+        </article>
+        <article class="card">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></div>
+          <h3>Blender が解析する部分は Blender が守る</h3>
+          <p>FBX、glTF、画像のデコードは Blender 自身が行います。Blender は最新の LTS に保ち、出所不明のパッケージは別のインストールやサンドボックスで開いてください。</p>
+        </article>
+      </div>
+      <p class="alt" style="margin-top:18px">詳細は <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/README_ja.md">README（日本語）</a> にあります。</p>
+    </div>
+  </section>
+
+  <section class="section" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">範囲</span>
+        <h2>読み込まないもの</h2>
+        <p>目的は Blender で正しく見えるメッシュであって、Blender の中に Unity プロジェクトを作ることではありません。次のものは Unity 側に残ります。</p>
+      </div>
+      <ul class="plain-list">
+        <li>シェーダー本体（マテリアルは変換しますが、シェーダーは変換しません）</li>
+        <li>C# スクリプトとコンポーネント</li>
+        <li>アニメーションと Animator Controller</li>
+        <li>prefab の階層（prefab はマテリアル割り当ての参照にだけ使います）</li>
+        <li>VRChat の Expression メニューとパラメーター</li>
+        <li>物理、コライダー、揺れもの</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>
+      <a href="https://github.com/utagestudio/unitypackage_loader/issues">Issues</a>
+      <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/README_ja.md">README（日本語）</a>
+      <a href="{{ZIP_URL}}">zip をダウンロード（{{VERSION}}）</a>
+      <a href="../" hreflang="en" lang="en">English</a>
+    </div>
+    <div class="fine">
+      <p>Unitypackage Importer は utagestudio が作った GPL-3.0-or-later のフリーソフトウェアです。バージョン {{VERSION}}、サイト生成日 {{DATE}}。</p>
+      <p>Unity Technologies、Blender Foundation、VRChat Inc. とは無関係であり、承認も受けていません。Unity は Unity Technologies の商標、Blender は Blender Foundation の商標です。各シェーダー名はそれぞれの作者に帰属します。</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js" defer></script>
+</body>
+</html>

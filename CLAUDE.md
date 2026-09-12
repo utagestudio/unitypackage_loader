@@ -36,7 +36,8 @@ unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.2
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "Unity Package" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
-tools/                    GitHub Pages 用 index.html 生成
+tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、スクリーンショット撮影（shoot_screenshots.py）
+web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
 .github/workflows/        Pages への Extension Repository 公開
 _local/                   検証用データ置き場（gitignore。詳細は CLAUDE.local.md）
 ```
@@ -96,4 +97,17 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 ## リリース
 
 - バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
-- main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し GitHub Pages に公開する。
+- main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
+- 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
+  OGP 画像は `tools/og_card.html` を Chrome でレンダリングして `web/assets/og.png` に置く（コマンドは同ファイル冒頭）。
+  ページの画面写真（`web/assets/shot-*.webp`）は `tools/shoot_screenshots.py` で撮る。他アドオンが写り込まないよう
+  `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/` に置き、追跡ファイルには名前を書かない。
+
+```sh
+blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> main    # hero / nodes / modes
+blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> dialog  # インポートのポップアップ
+blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> menu    # File > Import メニュー
+```
+
+  ポップアップとメニューはモーダルで閉じられないため、撮ったら Blender を終了する（別々に起動する）。
+  スプラッシュ画面を出さないために、引数に空の .blend を渡すこと。切り出しと WebP 化は ImageMagick の `convert` で行う。
