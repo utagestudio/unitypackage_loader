@@ -334,7 +334,9 @@ class UnityPackage:
 - `tarfile.open(path, "r:gz")` をストリームで 1 回走査。`pathname` と `asset.meta` は即読み。`asset` はサイズだけ記録。
 - 2 パス目は必要 GUID 集合に絞って `extractfile`。数 GB のパッケージでも展開量は必要分だけ。
 - `pathname` の 1 行目のみ使用（2 行目に `00` が入る形式がある）。
-- パス正規化: `Assets/` 始まりでないもの、`..` を含むものは拒否（安全性）。
+- パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる
+  コロン（ドライブ文字・NTFS 代替データストリーム）、制御文字、`<>"|?*`、予約デバイス名（`CON` `NUL` `COM1` 等。拡張子付きも）、
+  末尾のドット / 空白を拒否する。規則は展開する OS に依らず同じ（Linux で展開した結果を Windows で開くケースがあるため）。
 - 進捗: `wm.progress_begin/update/end`。
 
 ### 4.4 `core/unity_yaml.py` — Unity YAML サブセットパーサー

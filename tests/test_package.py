@@ -122,6 +122,37 @@ class SafePathTests(unittest.TestCase):
             with self.assertRaises(PackageError):
                 safe_relative_path(bad)
 
+    def test_rejects_windows_drive_and_streams(self):
+        # PureWindowsPath("D:/dest") / "C:/evil.txt" は C:\evil.txt になるため、コロンは全て拒否する
+        for bad in ("C:/evil.txt", "C:\\evil.txt", "Assets/C:/x.png", "Assets/name.png:stream", "Assets/a:b/c.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_rejects_reserved_device_names(self):
+        for bad in ("CON", "Assets/nul", "Assets/COM1.png", "Assets/lpt9.tar.gz", "Assets/Aux/x.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+        # 予約名を含むだけの名前は許可する
+        for ok in ("Assets/CONSOLE.png", "Assets/COM10.png", "Assets/nul_mask.png", "Assets/Auxiliary/x.png"):
+            with self.subTest(ok=ok):
+                safe_relative_path(ok)
+
+    def test_rejects_control_and_special_chars(self):
+        for bad in ("Assets/a\x00b.png", "Assets/a\x1bb.png", "Assets/a\x7f.png", "Assets/a\nb.png",
+                    "Assets/a?.png", "Assets/a*.png", "Assets/<a>.png", "Assets/a|b.png", 'Assets/a"b.png'):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_rejects_trailing_dot_or_space(self):
+        for bad in ("Assets/a. /b.png", "Assets/a./b.png", "Assets/b.png.", "Assets/b.png ", "Assets /b.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_accepts_unicode_and_dots(self):
+        for ok in ("Assets/日本語/テクスチャ.png", "Assets/.hidden/x.png", "Assets/a.b.c.png", "Assets/a b/c d.png", "Assets/./x.png"):
+            with self.subTest(ok=ok):
+                safe_relative_path(ok)
+
 
 class LocalSampleTests(unittest.TestCase):
     def test_scan_local_packages(self):

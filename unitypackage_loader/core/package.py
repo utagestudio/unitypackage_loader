@@ -89,13 +89,42 @@ def _split_member(name: str) -> tuple[str, str] | None:
     return guid.lower(), part
 
 
+# Windows で特別な意味を持つ文字・名前。展開先の OS に関係なく拒否する
+# （Linux で展開したファイルを含む .blend を Windows で開く、といったケースがあるため）。
+_INVALID_PATH_CHARS = frozenset('<>:"|?*') | frozenset(chr(c) for c in range(0x20)) | {"\x7f"}
+_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _check_path_component(part: str, pathname: str) -> None:
+    """パスの 1 要素が展開先のファイル名として安全か確認する。"""
+    if part in ("..", ""):
+        raise PackageError(f"unsafe pathname in package: {pathname!r}")
+    # コロンはドライブ文字（C:）と NTFS 代替データストリーム（name:stream）の両方を塞ぐ
+    if any(c in _INVALID_PATH_CHARS for c in part):
+        raise PackageError(f"pathname contains characters not allowed in file names: {pathname!r}")
+    if part[-1] in (".", " "):
+        raise PackageError(f"pathname component ends with a dot or space: {pathname!r}")
+    # 予約デバイス名は拡張子が付いていても（CON.txt）デバイスとして解釈される
+    if part.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
+        raise PackageError(f"pathname uses a reserved device name: {pathname!r}")
+
+
 def safe_relative_path(pathname: str) -> PurePosixPath:
-    """展開先に使える相対パスへ正規化する。``..`` や絶対パスは拒否。"""
+    """展開先に使える相対パスへ正規化する。
+
+    ``..``、絶対パス、空要素に加え、Windows で展開先の外に出るか異常なファイルになる
+    ドライブ文字・代替データストリーム（コロン）、制御文字、予約デバイス名、末尾のドット / 空白も拒否する。
+    規則は OS に依らず同じ。
+    """
     p = PurePosixPath(pathname.replace("\\", "/"))
-    if p.is_absolute() or any(part in ("..", "") for part in p.parts):
+    if p.is_absolute():
         raise PackageError(f"unsafe pathname in package: {pathname!r}")
     if not p.parts:
         raise PackageError("empty pathname in package")
+    for part in p.parts:
+        _check_path_component(part, pathname)
     return p
 
 
