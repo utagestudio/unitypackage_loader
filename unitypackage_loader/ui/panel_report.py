@@ -5,6 +5,7 @@ from __future__ import annotations
 import bpy
 
 from ..blender import importer
+from ..core.report import sanitize_display
 
 _MAX_WARNINGS = 12
 
@@ -54,7 +55,7 @@ class UNITYPKG_PT_report(bpy.types.Panel):
             return
 
         box = layout.box()
-        box.label(text=report.package, icon="PACKAGE")
+        box.label(text=sanitize_display(report.package), icon="PACKAGE")
         col = box.column(align=True)
         col.label(text=f"Objects: {len(report.objects)}")
         col.label(text=f"Materials: {len(report.active_materials)}  (mapped {report.mapped_count})")
@@ -89,14 +90,14 @@ class UNITYPKG_PT_report_materials(bpy.types.Panel):
         for m in report.active_materials:
             row = col.row(align=True)
             if m.guid is None and m.method not in ("reused", "kept", "delegated"):
-                row.label(text=m.blender_name, icon="ERROR")
+                row.label(text=sanitize_display(m.blender_name), icon="ERROR")
                 row.label(text="unresolved")
             else:
-                row.label(text=m.blender_name, icon="CHECKMARK" if not m.warnings else "INFO")
+                row.label(text=sanitize_display(m.blender_name), icon="CHECKMARK" if not m.warnings else "INFO")
                 detail = m.shader_name or m.family or m.method
                 if m.alpha_mode and m.alpha_mode != "opaque":
                     detail += f" · {m.alpha_mode}"
-                row.label(text=detail)
+                row.label(text=sanitize_display(detail))
 
 
 class UNITYPKG_PT_report_warnings(bpy.types.Panel):
@@ -119,9 +120,9 @@ class UNITYPKG_PT_report_warnings(bpy.types.Panel):
         report = importer.LAST_REPORT
         col = layout.column(align=True)
         for e in report.errors:
-            col.label(text=e, icon="CANCEL")
+            col.label(text=sanitize_display(e), icon="CANCEL")
         for w in report.warnings[:_MAX_WARNINGS]:
-            col.label(text=w, icon="ERROR")
+            col.label(text=sanitize_display(w), icon="ERROR")
         rest = len(report.warnings) - _MAX_WARNINGS
         if rest > 0:
             col.label(text=f"… and {rest} more (use Copy Log)")
