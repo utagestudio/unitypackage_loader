@@ -11,6 +11,7 @@ tar.gz はランダムアクセスできないため、
 
 from __future__ import annotations
 
+import os
 import tarfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -126,6 +127,26 @@ def safe_relative_path(pathname: str) -> PurePosixPath:
     for part in p.parts:
         _check_path_component(part, pathname)
     return p
+
+
+def _reject_symlinks(dest_root: Path, target: Path) -> None:
+    """``dest_root`` から ``target`` までの各要素がシンボリックリンクでないことを確認する。
+
+    展開先配下に既にリンクがあると（別パッケージの展開物や手作業で置かれたもの）、
+    そこを経由して展開先の外へ書けてしまうため、リンクを見つけたら書かずに失敗させる。
+    ``dest_root`` 自体はユーザーが選んだ場所なのでリンクでもよい。
+    """
+    current = dest_root
+    for part in target.relative_to(dest_root).parts:
+        current = current / part
+        if current.is_symlink():
+            raise PackageError(f"refusing to write through a symbolic link: {current}")
+
+
+def _open_for_write(target: Path):
+    # 最終要素がリンクなら追従しない（対応 OS のみ）。Windows では O_BINARY が必要
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
 class UnityPackage:
@@ -251,6 +272,7 @@ class UnityPackage:
         pending: dict[str, Path] = {}
         for guid, entry in wanted.items():
             target = dest_root / safe_relative_path(entry.pathname)
+            _reject_symlinks(dest_root, target)
             result[guid] = target
             if not overwrite and target.is_file() and target.stat().st_size == entry.size:
                 continue
@@ -267,8 +289,9 @@ class UnityPackage:
                     continue
                 target = pending.pop(split[0])
                 target.parent.mkdir(parents=True, exist_ok=True)
+                _reject_symlinks(dest_root, target)  # mkdir 後にもう一度（途中の要素が作られた直後の状態で確認）
                 src = tar.extractfile(member)
-                with open(target, "wb") as dst:
+                with _open_for_write(target) as dst:
                     while chunk := src.read(1 << 20):
                         dst.write(chunk)
                 done += 1

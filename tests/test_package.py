@@ -96,6 +96,40 @@ class SyntheticPackageTests(unittest.TestCase):
         self.pkg.extract([GUID_TEX], dest)
         self.assertEqual(paths[GUID_TEX].stat().st_mtime_ns, before)
 
+    def test_extract_refuses_symlinked_directory(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        dest = Path(self.tmp.name) / "out_dir_link"
+        (dest / "Assets").mkdir(parents=True)
+        # 展開先配下の中間ディレクトリが外側へのリンク
+        (dest / "Assets" / "Example").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest)
+        self.assertFalse(any(outside.iterdir()), "nothing must be written through the link")
+
+    def test_extract_refuses_symlinked_file(self):
+        outside = Path(self.tmp.name) / "outside_file.bin"
+        outside.write_bytes(b"original")
+        dest = Path(self.tmp.name) / "out_file_link"
+        target = dest / "Assets/Example/Textures/Base.PNG"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(outside)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest)
+        self.assertEqual(outside.read_bytes(), b"original")
+        # 上書き指定でも同じ
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest, overwrite=True)
+        self.assertEqual(outside.read_bytes(), b"original")
+
+    def test_extract_allows_symlinked_dest_root(self):
+        real = Path(self.tmp.name) / "real_root"
+        real.mkdir()
+        dest = Path(self.tmp.name) / "root_link"
+        dest.symlink_to(real, target_is_directory=True)
+        paths = self.pkg.extract([GUID_TEX], dest)
+        self.assertEqual(paths[GUID_TEX].read_bytes(), b"\x89PNG-fake")
+
     def test_find_by_path(self):
         self.assertEqual(self.pkg.find_by_path("Assets/Example/Model.fbx").guid, GUID_FBX)
         self.assertIsNone(self.pkg.find_by_path("Assets/Nope"))
