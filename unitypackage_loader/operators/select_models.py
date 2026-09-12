@@ -13,6 +13,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
 from ..core.package import PackageError
+from ..core.report import sanitize_display
 
 
 @dataclass
@@ -94,7 +95,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         for m in prepared.models:
             item = self.items.add()
             item.guid = m.guid
-            item.pathname = m.entry.pathname
+            item.pathname = sanitize_display(m.entry.pathname)
             item.size_text = _human_size(m.entry.size)
             if m.supported:
                 item.materials_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
@@ -104,7 +105,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
                 item.materials_text = "unsupported"
             item.supported = m.supported
             item.selected = m.supported
-        self.package_name = prepared.path.name
+        self.package_name = sanitize_display(prepared.path.name)
         total = len(prepared.unity_mats)
         self.summary_materials = f"Materials: {total} found in package"
         if len(prepared.prefab_tables) > 1 and not _pending.opts.prefab:
@@ -154,11 +155,11 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
                 prepared=_pending.prepared,
             )
         except PackageError as exc:
-            self.report({"ERROR"}, str(exc))
+            self.report({"ERROR"}, sanitize_display(str(exc)))
             return {"CANCELLED"}
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
-            self.report({"ERROR"}, f"Import failed: {exc!r}")
+            self.report({"ERROR"}, sanitize_display(f"Import failed: {exc!r}"))
             return {"CANCELLED"}
         finally:
             wm.progress_end()
