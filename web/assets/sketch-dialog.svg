@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360" role="img" aria-label="Rough sketch: the import popup with Model, Materials and Textures options and an Import button">
+  <style>
+    .s { fill: none; stroke: #c9834f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .h { fill: rgba(240,127,42,.14); }
+    .t { font: 700 12px/1 "Nunito", system-ui, sans-serif; fill: #9a8a80; }
+    .tb { font: 800 12px/1 "Nunito", system-ui, sans-serif; fill: #9a8a80; }
+    .tt { font: 800 11px/1 "Nunito", system-ui, sans-serif; fill: #ad5410; letter-spacing: .06em; }
+    .d { stroke-dasharray: 5 6; }
+  </style>
+  <!-- viewport behind, dimmed -->
+  <rect x="20" y="20" width="600" height="320" rx="10" class="s" opacity=".4"/>
+  <text x="34" y="40" class="t" opacity=".5">3D Viewport</text>
+  <!-- popup -->
+  <rect x="150" y="44" width="340" height="286" rx="8" class="s"/>
+  <rect x="150" y="44" width="340" height="26" class="h"/>
+  <text x="162" y="62" class="tb">Import Unity Package</text>
+  <text x="162" y="92" class="tb">Model</text>
+  <g class="t">
+    <text x="176" y="112">Models</text><rect x="330" y="101" width="140" height="16" rx="3" class="s"/><text x="338" y="113">Ask ▾</text>
+    <text x="176" y="134">FBX Importer</text><rect x="330" y="123" width="140" height="16" rx="3" class="s"/><text x="338" y="135">Auto ▾</text>
+    <text x="176" y="156">☐ Import Bundled .blend Files</text>
+  </g>
+  <text x="162" y="184" class="tb">Materials</text>
+  <g class="t">
+    <text x="176" y="204">Material Mode</text><rect x="330" y="193" width="140" height="16" rx="3" class="s"/><text x="338" y="205">Auto ▾</text>
+    <text x="176" y="226">☑ Normal Maps   ☑ Emission   ☐ Outlines</text>
+    <text x="176" y="248">☑ Store Unity Properties</text>
+  </g>
+  <text x="162" y="276" class="tb">Textures</text>
+  <g class="t">
+    <text x="176" y="296">Extract To</text><rect x="330" y="285" width="140" height="16" rx="3" class="s"/><text x="338" y="297">Beside .blend ▾</text>
+  </g>
+  <rect x="380" y="308" width="96" height="16" rx="8" class="h"/>
+  <rect x="380" y="308" width="96" height="16" rx="8" class="s"/>
+  <text x="414" y="320" class="tb">Import</text>
+  <text x="34" y="336" class="tt">ROUGH · REPLACE WITH SCREENSHOT</text>
+</svg>

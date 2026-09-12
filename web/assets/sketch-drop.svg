@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360" role="img" aria-label="Rough sketch: a .unitypackage file dragged from a file manager onto the 3D Viewport">
+  <style>
+    .s { fill: none; stroke: #c9834f; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .h { fill: rgba(240,127,42,.14); }
+    .t { font: 700 12px/1 "Nunito", system-ui, sans-serif; fill: #9a8a80; }
+    .tb { font: 800 12px/1 "Nunito", system-ui, sans-serif; fill: #9a8a80; }
+    .tt { font: 800 11px/1 "Nunito", system-ui, sans-serif; fill: #ad5410; letter-spacing: .06em; }
+    .d { stroke-dasharray: 5 6; }
+  </style>
+  <!-- file manager -->
+  <rect x="20" y="40" width="200" height="280" rx="8" class="s"/>
+  <line x1="20" y1="64" x2="220" y2="64" class="s"/>
+  <text x="32" y="56" class="tb">Downloads</text>
+  <g class="t">
+    <text x="32" y="92">📄 readme.txt</text>
+    <text x="32" y="118">📄 license.pdf</text>
+    <rect x="26" y="130" width="188" height="24" rx="4" class="h"/>
+    <text x="32" y="146">📦 avatar_v1.unitypackage</text>
+    <text x="32" y="174">📄 notes.md</text>
+  </g>
+  <!-- dragged ghost -->
+  <g transform="translate(250 130) rotate(-6)">
+    <rect x="0" y="0" width="150" height="40" rx="8" class="s d"/>
+    <rect x="0" y="0" width="150" height="40" rx="8" class="h"/>
+    <text x="12" y="25" class="tb">📦 avatar_v1.unitypackage</text>
+  </g>
+  <!-- arrow -->
+  <path d="M232 142 C 300 120, 360 120, 420 160" class="s"/>
+  <path d="M410 150 l12 10 -15 4" class="s"/>
+  <!-- blender viewport -->
+  <rect x="330" y="40" width="290" height="280" rx="8" class="s"/>
+  <line x1="330" y1="64" x2="620" y2="64" class="s"/>
+  <text x="342" y="56" class="tb">Blender · 3D Viewport</text>
+  <rect x="346" y="80" width="258" height="224" rx="6" class="s d"/>
+  <path d="M370 280 L580 280 M390 250 L560 250 M410 220 L540 220" class="s" opacity=".35"/>
+  <text x="392" y="176" class="t">drop here → import popup opens</text>
+  <!-- cursor -->
+  <path d="M430 170 l0 26 7 -6 5 11 5 -2 -5 -11 9 -1z" class="s"/>
+  <text x="34" y="336" class="tt">ROUGH · REPLACE WITH SCREENSHOT</text>
+</svg>
