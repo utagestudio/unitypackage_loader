@@ -74,6 +74,45 @@ Material:
 """
 
 
+def toon_lit_mat_yaml(name: str, tex_guid: str) -> str:
+    """VRChat/Mobile/Toon Lit に切り替えた後の典型的な .mat。
+
+    Standard 時代の _Color（黒）と _EmissionColor（白）が残り、_EMISSION は m_InvalidKeywords に移っている。
+    Toon Lit は _MainTex しか参照しないので、テクスチャそのままの Unlit として読めなければならない。
+    """
+    return f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_Name: {name}
+  m_Shader: {{fileID: 4800000, guid: affc81f3d164d734d8f13053effb1c5c, type: 3}}
+  m_ValidKeywords: []
+  m_InvalidKeywords:
+  - _EMISSION
+  m_CustomRenderQueue: -1
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MainTex:
+        m_Texture: {{fileID: 2800000, guid: {tex_guid}, type: 3}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    - _EmissionMap:
+        m_Texture: {{fileID: 0}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    m_Floats:
+    - _Mode: 0
+    - _Cutoff: 0.5
+    - _Metallic: 0
+    - _Glossiness: 0.05
+    m_Colors:
+    - _Color: {{r: 0, g: 0, b: 0, a: 1}}
+    - _EmissionColor: {{r: 1, g: 1, b: 1, a: 1}}
+"""
+
+
 def model_meta(guid: str, materials: dict[str, str]) -> str:
     lines = [f"fileFormatVersion: 2", f"guid: {guid}", "ModelImporter:", "  serializedVersion: 22200", "  externalObjects:"]
     for name, mat_guid in materials.items():
@@ -130,6 +169,8 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
         bpy.ops.mesh.primitive_cone_add()
     elif kind == "torus":
         bpy.ops.mesh.primitive_torus_add()
+    elif kind == "icosphere":
+        bpy.ops.mesh.primitive_ico_sphere_add()
     else:
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
@@ -182,6 +223,15 @@ def main() -> None:
             mtl = path.with_suffix(".mtl")
             if mtl.is_file():
                 add(f"Assets/Synthetic/Models/{kind.capitalize()}.mtl", mtl.read_bytes(), None)
+
+    # VRChat Mobile Toon Lit（Standard の残骸プロパティ付き）を externalObjects で割り当てたモデル
+    path = tmp / "icosphere.fbx"
+    export_model("icosphere", "QuestToonMat", path)
+    ico_path = "Assets/Synthetic/Models/Icosphere.fbx"
+    quest_mat_path = "Assets/Synthetic/Materials/QuestToonMat.mat"
+    quest_mat = add(quest_mat_path, toon_lit_mat_yaml("QuestToonMat", tex_a).encode(),
+                    f"fileFormatVersion: 2\nguid: {guid_of(quest_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    add(ico_path, path.read_bytes(), model_meta(guid_of(ico_path), {"QuestToonMat": quest_mat}))
 
     # 同梱 .blend（マテリアルは既に設定済み。externalObjects は CubeMat を指す）
     path = tmp / "torus.blend"

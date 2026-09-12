@@ -29,12 +29,16 @@ class StandardProfile(ShaderProfile):
             n.normal_tex = mat.tex("_BumpMap", "_NormalMap")
             n.normal_strength = mat.f("_BumpScale", mat.f("_NormalScale", 1.0))
 
+        # _EMISSION が m_InvalidKeywords にある = 現在のシェーダーに emission が無い。
+        # 以前のシェーダーの _EmissionColor が残っていても光らせない
         emission_color = mat.color("_EmissionColor", default=BLACK)
         emission_tex = mat.tex("_EmissionMap")
-        if "_EMISSION" in mat.keywords or emission_tex is not None or not is_black(emission_color):
+        if "_EMISSION" in mat.invalid_keywords:
             if emission_tex is not None or not is_black(emission_color):
-                n.emission_tex = emission_tex
-                n.emission_color = emission_color
+                n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
+        elif emission_tex is not None or not is_black(emission_color):
+            n.emission_tex = emission_tex
+            n.emission_color = emission_color
 
         n.metallic = mat.f("_Metallic", 0.0)
         smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))

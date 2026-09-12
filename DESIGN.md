@@ -147,9 +147,9 @@ File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View に
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Material mode | Enum: `Auto` / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS）→ Toon、PBR 系（Standard, URP Lit, HDRP Lit）→ Principled |
+| Material mode | Enum: `Auto` / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS, VRChat Toon Standard）→ Toon、PBR 系（Standard, URP Lit, HDRP Lit, VRChat Standard Lite）→ Principled、Unlit 系（Unlit/*, VRChat Toon Lit）→ Unlit |
 | Transparency | Enum: `Auto` / `Force opaque` = `Auto` | Unity 側の Cutout/Fade/Transparent 判定を `surface_render_method` に反映 |
-| Backface culling | Bool = ON | `_Cull` に従う |
+| Backface culling | Bool = ON | `_Cull` / `_CullMode` / `_Culling` に従う |
 | Normal maps | Bool = ON | |
 | Emission | Bool = ON | |
 | Reuse existing materials by name | Bool = OFF | 同名マテリアルが .blend に既にある場合、置き換えず再利用 |
@@ -273,6 +273,7 @@ unitypackage_loader/
 │   │   ├─ standard.py           # Built-in Standard / URP Lit / HDRP Lit
 │   │   ├─ mtoon.py              # VRM MToon（Phase 2）
 │   │   ├─ poiyomi.py            # Phase 2
+│   │   ├─ vrchat_mobile.py      # VRChat SDK Mobile（Quest 向け）シェーダー
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
 ├─ blender/                      # bpy 依存
@@ -358,13 +359,14 @@ class UnityMaterial:            # .mat の生データ
     floats: dict[str, float]
     colors: dict[str, tuple4]
     render_queue: int
-    keywords: list[str]
+    keywords: list[str]           # m_ValidKeywords（+ 旧 m_ShaderKeywords）
+    invalid_keywords: list[str]   # m_InvalidKeywords。別シェーダーから切り替えた名残の判定に使う
 
 @dataclass
 class NormalizedMaterial:       # シェーダー非依存の中間表現
     name: str
-    family: str                          # "liltoon" | "standard" | "mtoon" | "unknown"
-    lighting: Literal["pbr", "toon"]     # Auto モードでの Principled / Unlit 選択に使う
+    family: str                          # "liltoon" | "standard" | "mtoon" | "poiyomi" | "vrchat_mobile" | "unknown"
+    lighting: Literal["pbr", "toon", "unlit"]  # Auto モードでの Principled / Toon / Unlit 選択に使う
     base_color_tex: TexRef | None
     base_color: tuple4                   # _Color / _BaseColor。既定 (1,1,1,1)
     alpha_mode: Literal["opaque","cutout","blend"]
@@ -385,6 +387,7 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    - Standard/URP: `_MainTex` or `_BaseMap` と `_Glossiness`/`_Smoothness` と `_Metallic`、かつ `_ShadowStrength` が無い
    - MToon: `_ShadeTexture` `_ShadeColor`
    - Poiyomi: `_MainTex` と `_Poi...` 系プロパティ
+   - VRChat Toon Standard: `_ShadowBoost` `_MinBrightness` `_MetallicStrength` と `_Ramp` スロット（Standard の残骸を持つので Standard より先に判定）
 3. どれにも該当しない → `generic`（`_MainTex`/`_BaseMap`/`_Color`/`_BumpMap`/`_EmissionMap`/`_Cutoff` の一般名だけで最善努力）
 
 **lilToon プロファイルの変換規則（サンプルで確認した値）**
@@ -403,6 +406,27 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 | `_ShadowColor` `_Shadow2ndColor` `_ShadowStrength` `_OutlineColor` `_OutlineWidth` `_MatCapTex` `_MatCap2ndTex` `_RimColor` `_AlphaMask` | extras（Phase 3 のトゥーンノードグループ用に温存） |
 
 サンプルでの観測: 顔用の Transparent マテリアルはシェーダー名が Transparent 系で `_DstBlend: 10`, queue 2450 → `blend` と判定。衣装マテリアルは `_AlphaToMask: 1` → cutout 相当。
+
+**Standard 系での emission の扱い**
+
+`_EmissionColor` が黒でなければ emission を有効にするが、`_EMISSION` が `m_InvalidKeywords` にある場合は
+現在のシェーダーに emission が無い（別シェーダーから切り替えた名残）とみなして無効にし、警告を出す。
+
+**VRChat Mobile プロファイル（`vrchat_mobile.py`）**
+
+VRChat SDK 同梱の Quest 向けシェーダー。機能が少なく、Standard から切り替えたマテリアルには `_Color` や
+`_EmissionColor` の残骸が残りやすいので、各シェーダーが実際に参照するプロパティだけを読む。
+`shader_guids.json` の `variant` でバリアントを選ぶ（GUID 無しで指紋判定できるのは Toon Standard だけ）。
+
+| variant | シェーダー | lighting | 読むもの |
+|---|---|---|---|
+| `toon_lit` | Toon Lit | unlit | `_MainTex` のみ |
+| `standard_lite` | Standard Lite | pbr | `_Color` `_BumpMap` `_Metallic` `_Glossiness` `_MetallicGlossMap` `_OcclusionMap`。emission は `_EMISSION` キーワードが有効なときだけ。不透明のみ |
+| `toon_standard` | Toon Standard / (Outline) | toon | `_Color` `_Culling`、`USE_NORMAL_MAPS` / `USE_SPECULAR`（`_MetallicStrength` `_GlossStrength`）/ `USE_OCCLUSION_MAP` / `USE_MATCAP` / `USE_DETAIL_MAPS` / `USE_HUE_SHIFT` / `USE_COLOR_MASK` の各キーワードで機能を ON。emission は常に有効で `_EmissionStrength` を乗数に。Ramp・リム・MatCap・アウトライン等は extras。不透明のみ |
+| `matcap_lit` | MatCap Lit | pbr | `_MainTex`、`_MatCap` は乗算として extras |
+| `diffuse` / `bumped_diffuse` / `bumped_specular` | Diffuse / Lightmapped / Bumped Diffuse / Bumped Mapped Specular | pbr | `_MainTex`（+ `_BumpMap`、`_Shininess` → roughness） |
+| `particle` | Particles/Additive, Alpha Blended, Multiply | unlit | `_MainTex`。半透明・両面。Additive / Multiply はアルファブレンドで近似し警告 |
+| `ui` | Worlds/Supersampled UI, Sprites/* | unlit / pbr | `_MainTex` `_Color`。半透明・両面 |
 
 ### 4.6 `core/mapping.py`
 
@@ -465,6 +489,7 @@ def run(ctx, filepath, opts) -> Report:
 | FBX マテリアルに対応する .mat が無い | 警告、Names only 相当で継続 |
 | .mat が参照するテクスチャ GUID がパッケージ内に無い（別パッケージ依存） | 警告、ノードは未接続で作る |
 | 未知シェーダー | 警告、generic プロファイル |
+| `_EMISSION` が無効キーワード（別シェーダーからの切り替え残骸） | emission を無効化し警告 |
 | 非対応画像形式（PSD 等） | 警告、展開のみ |
 | .mat の YAML 解析失敗 | 警告、そのマテリアルのみスキップ |
 

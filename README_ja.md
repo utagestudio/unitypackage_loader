@@ -6,7 +6,7 @@
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / Collada / 同梱 .blend、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP、その他は一般規則で最善努力）、参照テクスチャ
+- 読み込むもの: FBX / OBJ / glTF / Collada / 同梱 .blend、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
 - 読み込まないもの: シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等
 
 ## インストール
@@ -134,7 +134,8 @@ tests/                       単体テスト、統合テスト、合成パッケ
 GPL-3.0-or-later（[LICENSE](LICENSE)）。Blender の Extension として配布するための要件に合わせています。
 
 `unitypackage_loader/core/profiles/shader_guids.json` のシェーダー GUID は、公開リポジトリの
-[lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) と [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)（いずれも MIT License）の
+[lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) と [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)（いずれも MIT License）、
+および公開リポジトリにミラーされている VRChat SDK の Mobile シェーダー（`Sample Assets/Shaders/Mobile`）の
 `.shader.meta` から収集した識別子です。シェーダーのコードは含みません。
-lilToon、MToon、Poiyomi、Unity などの名称は各権利者の商標または製品名です。
-このアドオンは Unity Technologies および各シェーダー作者とは無関係です。
+lilToon、MToon、Poiyomi、VRChat、Unity などの名称は各権利者の商標または製品名です。
+このアドオンは Unity Technologies、VRChat Inc. および各シェーダー作者とは無関係です。

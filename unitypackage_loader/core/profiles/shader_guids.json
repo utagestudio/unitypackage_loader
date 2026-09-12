@@ -1,5 +1,5 @@
 {
-  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository.",
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py.",
   "builtin_guid": "0000000000000000f000000000000000",
   "builtin_file_ids": {
     "46": {
@@ -546,6 +546,116 @@
     "0781c64b7f2a1604ea6aa7e252080372": {
       "family": "mtoon",
       "name": "VRM10/Universal Render Pipeline/MToon10"
+    },
+    "affc81f3d164d734d8f13053effb1c5c": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Lit",
+      "lighting": "unlit",
+      "variant": "toon_lit"
+    },
+    "0b7113dea2069fc4e8943843eff19f70": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Standard Lite",
+      "lighting": "pbr",
+      "variant": "standard_lite"
+    },
+    "e765db0afa7ecfc44ade2e4e2491f65a": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Standard",
+      "lighting": "toon",
+      "outline": false,
+      "variant": "toon_standard"
+    },
+    "051a0ed2f2aedd741aa8186ae92f97e0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Standard (Outline)",
+      "lighting": "toon",
+      "outline": true,
+      "variant": "toon_standard"
+    },
+    "3ad043b7f9839cb48a75a9238d433dec": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/MatCap Lit",
+      "lighting": "pbr",
+      "variant": "matcap_lit"
+    },
+    "2dcd9e0568e0a6f45b92c60ba2eb16a0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Diffuse",
+      "lighting": "pbr",
+      "variant": "diffuse"
+    },
+    "b1f7ecc80417c414b9d62ce541d5bcbf": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Lightmapped",
+      "lighting": "pbr",
+      "variant": "diffuse"
+    },
+    "f8c1f8ac363df824899534a0b30eef00": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Diffuse",
+      "lighting": "pbr",
+      "variant": "bumped_diffuse"
+    },
+    "528d55c4e8adab14b974ca665ed1b996": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Mapped Specular",
+      "lighting": "pbr",
+      "variant": "bumped_specular"
+    },
+    "584dc70fbb9834e48beb29e3206e3ca0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Specular",
+      "lighting": "pbr",
+      "variant": "bumped_specular",
+      "verified": false
+    },
+    "9200bec112b65ec4fbbbd33fa89c20f4": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Additive",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "additive"
+    },
+    "8b39b95ac85682040beff730e0cfc77a": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Alpha Blended",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "alpha"
+    },
+    "d5b89f0c74ccf5049ba803c14a090378": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Particles/Multiply",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "particle",
+      "blend": "multiply"
+    },
+    "44c1b7c3827912f45b473dbe106c1ecf": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Worlds/Supersampled UI",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "ui"
+    },
+    "5f8fef09682fab74fb7a29d783391edb": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Sprites/Default",
+      "lighting": "unlit",
+      "alpha": "blend",
+      "variant": "ui",
+      "verified": false
+    },
+    "9ae8ad653e1d98940bbc79866b9170f3": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Sprites/Diffuse",
+      "lighting": "pbr",
+      "alpha": "blend",
+      "variant": "ui",
+      "verified": false
     }
   }
 }
