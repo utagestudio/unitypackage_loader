@@ -53,6 +53,7 @@ class ImportOptions:
     use_anim: bool = False
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
+    import_blend: bool = False  # 同梱 .blend を append するか（Python スクリプトを含み得るので既定 OFF）
     blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
     use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
@@ -67,12 +68,20 @@ class ImportOptions:
 # ---------------------------------------------------------------------------
 
 
+# 同梱 .blend を読まない理由（警告文とダイアログ表示に使う）
+BLEND_DISABLED_REASON = (
+    "bundled .blend files are not imported unless 'Import Bundled .blend Files' is enabled "
+    "(a .blend can contain Python scripts)"
+)
+
+
 @dataclass
 class ModelSummary:
     entry: AssetEntry
     material_count: int  # externalObjects に登録されたマテリアル数
     resolved_count: int  # そのうちパッケージ内の .mat に対応付けできた数
     supported: bool
+    skip_reason: str = ""  # supported が False の理由
 
     @property
     def guid(self) -> str:
@@ -119,7 +128,10 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     return table
 
 
-def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> PreparedPackage:
+def prepare_package(
+    filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False
+) -> PreparedPackage:
+    """パッケージを走査して解析する。``import_blend`` が False なら同梱 .blend は「読み込まない」扱いにする。"""
     path = Path(filepath)
     pkg = UnityPackage(path)
     pkg.scan()
@@ -143,7 +155,12 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
         names = list(info.external_materials)
         resolution = resolve_materials(names, info, unity_mats, entry.pathname)
         resolved = sum(1 for r in resolution.values() if r.guid)
-        models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
+        skip_reason = ""
+        if entry.ext not in SUPPORTED_MODEL_EXTS:
+            skip_reason = "model format not supported yet"
+        elif entry.ext == ".blend" and not import_blend:
+            skip_reason = BLEND_DISABLED_REASON
+        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
@@ -356,17 +373,20 @@ def run_import(
 
     step(0.0, "Scanning package")
     if prepared is None:
-        prepared = prepare_package(filepath, build_shader_table(opts.shader_table_path))
+        prepared = prepare_package(
+            filepath, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
+        )
     pkg = prepared.pkg
     for w in prepared.warnings:
         report.warn(w)
     for m in prepared.models:
         if not m.supported:
-            report.warn(f"model format not supported yet, skipped: {m.entry.pathname}")
+            report.warn(f"skipped {m.entry.pathname}: {m.skip_reason}")
 
     models = _select_models(prepared, opts)
     if not models:
-        raise PackageError("no importable models selected")
+        reasons = sorted({m.skip_reason for m in prepared.models if not m.supported})
+        raise PackageError("no importable models selected" + (f" ({'; '.join(reasons)})" if reasons else ""))
 
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 

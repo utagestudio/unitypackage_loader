@@ -94,7 +94,7 @@ Material:
 ## 1. スコープ
 
 ### 読み込む
-- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
+- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。Python スクリプトを含み得るので既定 OFF のオプトイン。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
 - `.vrm`: VRM add-on（extensions.blender.org の "VRM format"、`import_scene.vrm`）が登録されていればそちらに委譲し、マテリアルも add-on のもの（MToon ノードグループ）をそのまま使う。無ければ glTF バイナリとして標準 glTF インポーターで読み、`.mat`（UniVRM が展開した MToon マテリアル）から組み直す。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
@@ -143,6 +143,7 @@ File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View に
 |---|---|---|
 | Models to import | Enum: `All` / `Ask` / `First only` = `Ask` | `Ask` は複数ある時だけ §3.3 のダイアログを出す |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
+| Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | Use FBX file scale / axis | FBX インポーターのパススルー | 既定は Blender FBX インポーターと同じ |
 | Import armature / shape keys / animation | Bool = ON / ON / OFF | FBX インポーターへ渡す |
 
