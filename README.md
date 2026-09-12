@@ -1,6 +1,6 @@
 # Unity Package Importer for Blender
 
-English | [日本語](README_ja.md)
+English | [日本語](README_ja.md) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
 A Blender Extension that imports `.unitypackage` files directly from File > Import, placing meshes
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
@@ -27,7 +27,7 @@ click "+", choose "Add Remote Repository", and register the following URL. You c
 the extension from the list.
 
 ```
-https://<GitHub user name>.github.io/<repository name>/index.json
+https://utagestudio.github.io/unitypackage_loader/index.json
 ```
 
 The same page (the URL without `index.json`) shows the registration URL and a link to the zip.
