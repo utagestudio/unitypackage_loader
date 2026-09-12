@@ -5,6 +5,7 @@ from unitypackage_loader.core.material import TexRef, parse_material
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.meta import ModelImporterInfo
 from unitypackage_loader.core.profiles import ShaderTable, normalize_material, select_profile
+from unitypackage_loader.core.profiles.base import cull_backface
 from unitypackage_loader.core.profiles.liltoon import LilToonProfile
 from unitypackage_loader.core.profiles.standard import GenericProfile, StandardProfile
 from unitypackage_loader.core.unity_yaml import UnityRef
@@ -205,6 +206,16 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(n.emission_tex.guid, TEX_E)
         self.assertEqual(n.emission_color, (1.0, 0.5, 0.0, 1.0))
         self.assertTrue(n.has_emission)
+
+    def test_cull_backface_property_names(self):
+        base = parse_material(STANDARD_CUTOUT)
+        self.assertTrue(cull_backface(base))                 # プロパティ無しは既定値
+        self.assertFalse(cull_backface(base, default=False))
+        for name in ("_Cull", "_CullMode", "_Culling"):
+            for value, expected in ((0, False), (1, False), (2, True)):
+                mat = parse_material(STANDARD_CUTOUT)
+                mat.floats[name] = value
+                self.assertEqual(cull_backface(mat), expected, f"{name}={value}")
 
     def test_invalid_emission_keyword_disables_emission(self):
         n = normalize_material(parse_material(STALE_EMISSION))

@@ -105,12 +105,12 @@ def alpha_mode_from_blend_state(mat: UnityMaterial, default: AlphaMode = "opaque
 
 
 def cull_backface(mat: UnityMaterial, default: bool = True) -> bool:
-    cull = mat.f("_Cull", -1)
-    if cull < 0:
-        cull = mat.f("_CullMode", -1)
-    if cull < 0:
-        return default
-    return int(cull) == CULL_BACK
+    """_Cull / _CullMode / _Culling（VRChat Toon Standard）のいずれかから背面カリングを決める。"""
+    for name in ("_Cull", "_CullMode", "_Culling"):
+        cull = mat.f(name, -1)
+        if cull >= 0:
+            return int(cull) == CULL_BACK
+    return default
 
 
 def texture_transform(ref: TexRef | None) -> tuple[tuple[float, float], tuple[float, float]]:
