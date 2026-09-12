@@ -16,7 +16,7 @@ LTS_O = "efa77a80ca0344749b4f19fdd5891cbe"       # lilToon lts_o（公開 GUID�
 LTS_TRANS = "165365ab7100a044ca85fc8c33548a62"   # lilToon lts_trans（公開 GUID）
 
 
-def mat_yaml(name, shader, tex=(), floats=(), colors=(), queue=-1, keywords=()):
+def mat_yaml(name, shader, tex=(), floats=(), colors=(), queue=-1, keywords=(), invalid_keywords=()):
     lines = [
         "%YAML 1.1",
         "%TAG !u! tag:unity3d.com,2011:",
@@ -26,6 +26,8 @@ def mat_yaml(name, shader, tex=(), floats=(), colors=(), queue=-1, keywords=()):
         f"  m_Shader: {shader}",
         "  m_ValidKeywords:" + (" []" if not keywords else ""),
         *[f"  - {k}" for k in keywords],
+        "  m_InvalidKeywords:" + (" []" if not invalid_keywords else ""),
+        *[f"  - {k}" for k in invalid_keywords],
         f"  m_CustomRenderQueue: {queue}",
         "  m_SavedProperties:",
         "    serializedVersion: 3",
@@ -83,6 +85,15 @@ URP_TRANSPARENT = mat_yaml(
     colors=[("_BaseColor", (1, 1, 1, 0.5))],
 )
 
+# Standard から別シェーダーへ切り替えた後の残骸: _Color 黒 / _EmissionColor 白 が残り、_EMISSION は無効キーワードに移っている
+STALE_EMISSION = mat_yaml(
+    "Stale", "{fileID: 4800000, guid: 55555555555555555555555555555555, type: 3}",
+    tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_EmissionMap", None, (1, 1), (0, 0))],
+    floats=[("_Mode", 0), ("_Metallic", 0), ("_Glossiness", 0.1)],
+    colors=[("_Color", (0, 0, 0, 1)), ("_EmissionColor", (1, 1, 1, 1))],
+    invalid_keywords=["_EMISSION"],
+)
+
 UNKNOWN_TOON = mat_yaml(
     "Mystery", "{fileID: 4800000, guid: 99999999999999999999999999999999, type: 3}",
     tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_ShadeTexture", TEX_N, (1, 1), (0, 0))],
@@ -110,6 +121,12 @@ class ParseMaterialTests(unittest.TestCase):
         mat = parse_material(STANDARD_CUTOUT)
         self.assertEqual(mat.shader_builtin_id, 46)
         self.assertIn("_EMISSION", mat.keywords)
+        self.assertEqual(mat.invalid_keywords, [])
+
+    def test_invalid_keywords(self):
+        mat = parse_material(STALE_EMISSION)
+        self.assertEqual(mat.keywords, [])
+        self.assertEqual(mat.invalid_keywords, ["_EMISSION"])
 
     def test_texture_transform(self):
         mat = parse_material(LILTOON_TRANS)
@@ -188,6 +205,13 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(n.emission_tex.guid, TEX_E)
         self.assertEqual(n.emission_color, (1.0, 0.5, 0.0, 1.0))
         self.assertTrue(n.has_emission)
+
+    def test_invalid_emission_keyword_disables_emission(self):
+        n = normalize_material(parse_material(STALE_EMISSION))
+        self.assertEqual(n.family, "standard")
+        self.assertFalse(n.has_emission)
+        self.assertIsNone(n.emission_tex)
+        self.assertTrue(any("_EMISSION" in w for w in n.warnings))
 
     def test_urp_transparent(self):
         n = normalize_material(parse_material(URP_TRANSPARENT))

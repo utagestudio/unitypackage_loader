@@ -47,6 +47,9 @@ class UnityMaterial:
     colors: dict[str, Color] = field(default_factory=dict)
     render_queue: int = -1
     keywords: list[str] = field(default_factory=list)
+    # 現在のシェーダーには存在しないが .mat に残っているキーワード（m_InvalidKeywords）。
+    # 別シェーダーから切り替えた名残なので、プロパティの残骸を無視する手掛かりになる
+    invalid_keywords: list[str] = field(default_factory=list)
     # テクスチャ参照が null（fileID 0）でも Scale/Offset を持つプロパティの一覧
     texture_slots: set[str] = field(default_factory=set)
 
@@ -140,6 +143,9 @@ def parse_material(text: str, guid: str = "", pathname: str = "") -> UnityMateri
     legacy = body.get("m_ShaderKeywords")
     if isinstance(legacy, str) and legacy.strip():
         mat.keywords.extend(legacy.split())
+    invalid = body.get("m_InvalidKeywords")
+    if isinstance(invalid, list):
+        mat.invalid_keywords = [str(k) for k in invalid]
 
     saved = body.get("m_SavedProperties") or {}
     if not isinstance(saved, dict):
