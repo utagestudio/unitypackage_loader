@@ -136,14 +136,14 @@ def prepare_package(
     pkg = UnityPackage(path)
     pkg.scan()
     table = shader_table or default_table()
-    warnings: list[str] = []
+    warnings: list[str] = list(pkg.warnings)
 
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_text(entry.guid), entry.guid, entry.pathname)
-        except (MaterialParseError, ValueError) as exc:
+        except (MaterialParseError, ValueError, PackageError) as exc:
             warnings.append(f"could not parse {entry.pathname}: {exc}")
             continue
         unity_mats[entry.guid] = umat
