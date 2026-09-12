@@ -95,6 +95,7 @@ Material:
 
 ### 読み込む
 - モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
+- `.vrm`: VRM add-on（extensions.blender.org の "VRM format"、`import_scene.vrm`）が登録されていればそちらに委譲し、マテリアルも add-on のもの（MToon ノードグループ）をそのまま使う。無ければ glTF バイナリとして標準 glTF インポーターで読み、`.mat`（UniVRM が展開した MToon マテリアル）から組み直す。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
@@ -141,6 +142,7 @@ File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View に
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
 | Models to import | Enum: `All` / `Ask` / `First only` = `Ask` | `Ask` は複数ある時だけ §3.3 のダイアログを出す |
+| VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Use FBX file scale / axis | FBX インポーターのパススルー | 既定は Blender FBX インポーターと同じ |
 | Import armature / shape keys / animation | Bool = ON / ON / OFF | FBX インポーターへ渡す |
 
@@ -468,6 +470,10 @@ def run(ctx, filepath, opts) -> Report:
 ```
 
 - 1 パッケージ = 1 Collection（名前はパッケージ名）、その下にモデルごとの Collection。
+- インポーターがシーンのルートコレクションに直接入れたオブジェクト・コレクション（VRM add-on のコライダー用コレクション等）はパッケージ用コレクションに移す。
+- `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。全モデルが委譲対象なら `.mat` 用テクスチャの展開も省く。
+- `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
+- VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外は各マテリアル単位で捕捉して警告にする。FBX インポート自体の失敗だけがエラー。
 - `bpy.ops.import_scene.fbx` は `wm.fbx_import` の旧名。4.2 以降では両方存在するが、5.x 系では新 C++ インポーター（`bpy.ops.wm.fbx_import`）を優先し、無ければ旧名にフォールバック。
 
@@ -516,6 +522,7 @@ def run(ctx, filepath, opts) -> Report:
 
 - **検証用データはリポジトリに含めない。** unitypackage・展開物・参考 .blend・期待値 JSON は全て `_local/` 配下に置き、コミットするファイル（ドキュメント、テスト、コメント）にアセット固有の名称や数値を書かない。
 
+- **VRM は再実装しない**。VRM add-on が MToon・Humanoid・スプリングボーンを再現するので、入っていればそちらに委譲する。add-on 無しの環境向けの glTF フォールバックは、既存の glTF 経路と `.mat` 再構築の組み合わせに留める。
 - **Unity のライティング再現はしない**。lilToon の影色・MatCap・リムは Phase 3 まではカスタムプロパティに保存するだけ。
 - FBX の座標系・スケールは Blender 標準インポーターに委ねる。Unity の `globalScale` / `useFileScale` は参考値としてレポートに出すのみ。
 - テクスチャの `maxTextureSize`（Unity 側の縮小設定）は無視し、元解像度で読み込む。

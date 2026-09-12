@@ -6,8 +6,9 @@
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / Collada / 同梱 .blend、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
+- 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
 - 読み込まないもの: シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等
+- VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
 ## インストール
 
@@ -51,6 +52,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 |---|---|---|
 | Model | Models | `Ask`（複数モデルがあれば選択ダイアログ）/ `All` / `First Only` |
 | | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
+| | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | Materials | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
 | | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
