@@ -240,8 +240,8 @@ def setup_modes_shot() -> None:
     bpy.context.view_layer.objects.active = copies[0]
     bpy.ops.unitypkg.rebuild_material(mode="PRINCIPLED", scope="SELECTED")
 
-    for obj in originals:
-        obj.location.x -= width * 0.15
+    # 元のメッシュは動かさない。アーマチュアを置いたままメッシュだけずらすと、
+    # モディファイアが変形を引き戻して肩などが歪む。
     frame_front(originals + copies)
 
 
