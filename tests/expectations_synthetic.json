@@ -1,15 +1,16 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL" },
-  "objects": { "count": 6, "mesh_count": 6, "armature_count": 0 },
-  "materials": { "count": 6, "mapped": 6, "families": ["standard", "vrchat_mobile"], "methods": ["external", "kept", "prefab"] },
+  "objects": { "count": 7, "mesh_count": 7, "armature_count": 0 },
+  "materials": { "count": 7, "mapped": 7, "families": ["standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab"] },
   "images": { "count": 2 },
-  "warnings_max": 0,
+  "warnings_max": 1,
   "material_checks": [
     { "name": "CubeMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png", "base_colorspace": "sRGB", "normal_image": "Normal.png", "normal_colorspace": "Non-Color", "node_types": ["ShaderNodeBsdfPrincipled", "ShaderNodeNormalMap"] },
     { "name": "SphereMat", "alpha_mode": "cutout", "render_method": "DITHERED", "mode": "PRINCIPLED", "base_image": "ColorA.png", "node_types": ["ShaderNodeMath", "ShaderNodeMix"] },
     { "name": "CylinderMat", "alpha_mode": "blend", "render_method": "BLENDED", "mode": "PRINCIPLED" },
     { "name": "ConeFbxMat", "alpha_mode": "blend", "render_method": "BLENDED", "mode": "PRINCIPLED", "shader_name": "Standard" },
     { "name": "TorusBlendMat", "shader_name": "Standard" },
+    { "name": "SphereMat.001", "alpha_mode": "cutout", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png" },
     { "name": "QuestToonMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "UNLIT", "shader_name": "VRChat/Mobile/Toon Lit", "base_image": "ColorA.png", "base_colorspace": "sRGB", "node_types": ["ShaderNodeEmission"] }
   ]
 }
