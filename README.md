@@ -6,7 +6,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
 - Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
-- What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files, `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
+- What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
 - What is not imported: shader source code, C# scripts, animations, prefab hierarchies, Expression menus, etc.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
@@ -54,12 +54,13 @@ Load the generated zip via Preferences > Get Extensions > "Install from Disk".
 | Model | Models | `Ask` (shows a selection dialog when there are multiple models) / `All` / `First Only` |
 | | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
+| | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Force Opaque | Ignore Unity's Cutout / Transparent settings |
 | | Backface Culling / Normal Maps / Emission | Whether to apply each element |
 | | Outlines (Solidify) | Add a Solidify outline from Unity's outline color and width (converted with Width Scale) |
 | | Reuse Existing Materials | Reuse a material with the same name if one already exists instead of rebuilding it |
-| | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files |
+| | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files (only when the option above is on) |
 | | Store Unity Properties | Store GUIDs, shadow colors, etc. as custom properties |
 | Textures | Extract To | `Beside .blend` (`//textures/<package name>/`) / `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | Pack images into the .blend file |
@@ -71,6 +72,28 @@ material, textures used, and warnings). A Collection named after the package is 
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unity Package Importer).
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
+"Max Extract Size" (default 8 GiB, 0 = no limit) refuses an import before writing anything when the files to extract
+from one package would exceed it or the free space of the destination.
+
+### Security notes
+
+- **Bundled .blend files are not imported by default.** A `.blend` can carry Python code (driver expressions,
+  registered text blocks) that Blender runs when "Auto Run Python Scripts" is enabled, so appending a `.blend` from
+  an untrusted package is equivalent to running its scripts. Turn on "Import Bundled .blend Files" only for packages
+  you trust, and keep "Auto Run Python Scripts" off unless you need it.
+- **The add-on itself never executes code from the package.** C# scripts, shaders, Python and other assets are ignored.
+  Only the following are extracted to disk or read: model files (`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`, and `.blend`
+  only with the option above), the textures referenced by materials (every image with "Import Unreferenced Images"),
+  the `.mtl` next to an `.obj` and the `.bin` next to a `.gltf`. `.mat`, `.meta` and `.prefab` files are parsed in memory
+  as text with the add-on's own YAML reader and never written out.
+- **Parsing the model and image files is done by Blender itself**, not by this add-on: FBX / OBJ / glTF / Collada by
+  Blender's importers, and PNG / TIFF / TGA / EXR / PSD etc. by its image libraries (OpenImageIO and friends).
+  A crafted file that targets a bug in those components cannot be blocked here. Keep Blender on the latest LTS release,
+  and open packages from unknown sources in an isolated environment (a virtual machine, a sandbox, or a separate Blender
+  installation without other add-ons).
+- Archive handling is hardened against common tricks: paths are validated (no `..`, absolute paths, drive letters,
+  reserved device names or control characters), symbolic links are never followed while extracting, oversized metadata
+  is ignored, and the total size to extract is checked against "Max Extract Size" and the free disk space before writing.
 
 ### Matching meshes to materials
 

@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+
+__all__ = ["MaterialReport", "ImportReport", "sanitize_display"]
+
+# C0 制御文字（改行・タブ含む）、DEL、C1 制御文字（8 ビットの ESC / CSI など）。
+# 名前やパスはパッケージ由来の文字列なので、ANSI エスケープで端末や UI の表示を乱せないようにする
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def sanitize_display(text: str) -> str:
+    """表示・ログ用に制御文字を ``\\x1b`` のような可視表現へ置き換える。"""
+    return _CONTROL_RE.sub(lambda m: f"\\x{ord(m.group(0)):02x}", text)
 
 
 @dataclass
@@ -82,4 +94,5 @@ class ImportReport:
         if self.errors:
             lines.append(f"  errors ({len(self.errors)}):")
             lines += [f"    X {e}" for e in self.errors]
-        return "\n".join(lines)
+        # 各行はこちらで組み立てているので、行ごとに無害化すれば名前に含まれる改行も可視化される
+        return "\n".join(sanitize_display(line) for line in lines)

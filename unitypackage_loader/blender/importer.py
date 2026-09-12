@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,10 +50,12 @@ class ImportOptions:
     pack_images: bool = False
     import_unreferenced: bool = False
     overwrite_extracted: bool = False
+    max_extract_size: int = 0  # 1 回のインポートで展開する合計バイト数の上限（0 は無制限。Preferences から）
     fbx_importer: str = "AUTO"  # AUTO / NEW / LEGACY
     use_anim: bool = False
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
+    import_blend: bool = False  # 同梱 .blend を append するか（Python スクリプトを含み得るので既定 OFF）
     blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
     use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
@@ -67,12 +70,20 @@ class ImportOptions:
 # ---------------------------------------------------------------------------
 
 
+# 同梱 .blend を読まない理由（警告文とダイアログ表示に使う）
+BLEND_DISABLED_REASON = (
+    "bundled .blend files are not imported unless 'Import Bundled .blend Files' is enabled "
+    "(a .blend can contain Python scripts)"
+)
+
+
 @dataclass
 class ModelSummary:
     entry: AssetEntry
     material_count: int  # externalObjects に登録されたマテリアル数
     resolved_count: int  # そのうちパッケージ内の .mat に対応付けできた数
     supported: bool
+    skip_reason: str = ""  # supported が False の理由
 
     @property
     def guid(self) -> str:
@@ -119,19 +130,43 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     return table
 
 
-def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> PreparedPackage:
+def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
+    """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
+    if not entry.meta_text:
+        return ModelImporterInfo()
+    try:
+        return ModelImporterInfo.from_meta(entry.meta_text)
+    except ValueError as exc:
+        warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        return ModelImporterInfo()
+
+
+def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImporterInfo:
+    if not entry.meta_text:
+        return TextureImporterInfo()
+    try:
+        return TextureImporterInfo.from_meta(entry.meta_text)
+    except ValueError as exc:
+        warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        return TextureImporterInfo()
+
+
+def prepare_package(
+    filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False
+) -> PreparedPackage:
+    """パッケージを走査して解析する。``import_blend`` が False なら同梱 .blend は「読み込まない」扱いにする。"""
     path = Path(filepath)
     pkg = UnityPackage(path)
     pkg.scan()
     table = shader_table or default_table()
-    warnings: list[str] = []
+    warnings: list[str] = list(pkg.warnings)
 
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_text(entry.guid), entry.guid, entry.pathname)
-        except (MaterialParseError, ValueError) as exc:
+        except (MaterialParseError, ValueError, PackageError) as exc:
             warnings.append(f"could not parse {entry.pathname}: {exc}")
             continue
         unity_mats[entry.guid] = umat
@@ -139,11 +174,16 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
 
     models: list[ModelSummary] = []
     for entry in pkg.models():
-        info = ModelImporterInfo.from_meta(entry.meta_text) if entry.meta_text else ModelImporterInfo()
+        info = _model_info(entry, warnings.append)
         names = list(info.external_materials)
         resolution = resolve_materials(names, info, unity_mats, entry.pathname)
         resolved = sum(1 for r in resolution.values() if r.guid)
-        models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
+        skip_reason = ""
+        if entry.ext not in SUPPORTED_MODEL_EXTS:
+            skip_reason = "model format not supported yet"
+        elif entry.ext == ".blend" and not import_blend:
+            skip_reason = BLEND_DISABLED_REASON
+        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
@@ -356,17 +396,20 @@ def run_import(
 
     step(0.0, "Scanning package")
     if prepared is None:
-        prepared = prepare_package(filepath, build_shader_table(opts.shader_table_path))
+        prepared = prepare_package(
+            filepath, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
+        )
     pkg = prepared.pkg
     for w in prepared.warnings:
         report.warn(w)
     for m in prepared.models:
         if not m.supported:
-            report.warn(f"model format not supported yet, skipped: {m.entry.pathname}")
+            report.warn(f"skipped {m.entry.pathname}: {m.skip_reason}")
 
     models = _select_models(prepared, opts)
     if not models:
-        raise PackageError("no importable models selected")
+        reasons = sorted({m.skip_reason for m in prepared.models if not m.supported})
+        raise PackageError("no importable models selected" + (f" ({'; '.join(reasons)})" if reasons else ""))
 
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
@@ -389,6 +432,7 @@ def run_import(
         extract_root,
         overwrite=opts.overwrite_extracted,
         progress=lambda f, n: step(0.2 + 0.3 * f, f"Extracting {n}"),
+        max_total_size=opts.max_extract_size,
     )
 
     # --- 画像の読み込み ---
@@ -397,7 +441,7 @@ def run_import(
     tex_infos: dict[str, TextureImporterInfo] = {}
     for guid in sorted(needed_tex):
         entry = pkg.get(guid)
-        info = TextureImporterInfo.from_meta(entry.meta_text) if entry.meta_text else TextureImporterInfo()
+        info = _texture_info(entry, report.warn)
         tex_infos[guid] = info
         path = paths.get(guid)
         image = load_image(path, info, pack=opts.pack_images) if path else None
@@ -435,7 +479,7 @@ def run_import(
         for index, summary in enumerate(models):
             model = summary.entry
             step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
-            model_info = ModelImporterInfo.from_meta(model.meta_text) if model.meta_text else ModelImporterInfo()
+            model_info = _model_info(model, report.warn)
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}
             delegated = _import_model(context, paths[model.guid], model, opts, collection, report)

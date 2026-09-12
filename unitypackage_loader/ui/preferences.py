@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
 _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]
 
@@ -40,6 +40,16 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
         default="",
         description="JSON file with the same layout as shader_guids.json; entries are added to the built-in table",
     )
+    max_extract_mb: IntProperty(
+        name="Max Extract Size (MB)",
+        default=8192,
+        min=0,
+        soft_max=65536,
+        description=(
+            "Refuse to import when the files to extract from one package would exceed this total size "
+            "(protects against packages that hide huge files behind gzip). 0 = no limit"
+        ),
+    )
     verbose_log: BoolProperty(
         name="Verbose Console Log",
         default=True,
@@ -61,6 +71,9 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
 
         col = layout.column(heading="Shaders")
         col.prop(self, "shader_table_path")
+
+        col = layout.column(heading="Safety")
+        col.prop(self, "max_extract_mb")
 
         col = layout.column(heading="Logging")
         col.prop(self, "verbose_log")

@@ -6,7 +6,7 @@
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
+- 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
 - 読み込まないもの: シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
@@ -53,12 +53,13 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 | Model | Models | `Ask`（複数モデルがあれば選択ダイアログ）/ `All` / `First Only` |
 | | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
+| | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
 | Materials | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
 | | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
 | | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
-| | Bundled .blend Materials | 同梱 .blend のマテリアルを `Keep`（既定）/ `Rebuild` |
+| | Bundled .blend Materials | 同梱 .blend のマテリアルを `Keep`（既定）/ `Rebuild`（上のオプションが ON のときのみ） |
 | | Store Unity Properties | GUID や影色などをカスタムプロパティに保存 |
 | Textures | Extract To | `Beside .blend`（`//textures/<パッケージ名>/`）/ `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | 画像を .blend に同梱 |
@@ -70,6 +71,26 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 既定値は Preferences（Edit > Preferences > Add-ons > Unity Package Importer）で変更できます。
 独自シェーダーの GUID 表（`shader_guids.json` と同じ書式の JSON）を追加登録することもできます。
+"Max Extract Size"（既定 8 GiB、0 で無制限）を超える量を 1 つのパッケージから展開しようとした場合や、展開先の空き容量に
+収まらない場合は、何も書かずにインポートを中止します。
+
+### セキュリティ上の注意
+
+- **同梱 .blend は既定では読み込みません。** `.blend` には Python コード（ドライバー式、登録済みテキストブロック）を
+  仕込むことができ、Blender の「Auto Run Python Scripts」が有効だと読み込み時に実行されます。出所の確かなパッケージでだけ
+  "Import Bundled .blend Files" を ON にし、必要がなければ「Auto Run Python Scripts」は OFF のままにしてください。
+- **アドオン自身はパッケージ内のコードを一切実行しません。** C#、シェーダー、Python などのアセットは無視します。
+  ディスクに展開・読み込みするのは次のものだけです: モデル（`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`。`.blend` は上のオプションが
+  ON のときのみ）、マテリアルが参照するテクスチャ（"Import Unreferenced Images" なら全画像）、`.obj` と同じフォルダの `.mtl`、
+  `.gltf` と同じフォルダの `.bin`。`.mat` `.meta` `.prefab` はアドオン専用の YAML リーダーでメモリ上でテキストとして解析するだけで、
+  書き出しません。
+- **モデルと画像の解析は Blender 本体が行います。** FBX / OBJ / glTF / Collada は Blender のインポーター、PNG / TIFF / TGA / EXR /
+  PSD などは Blender の画像ライブラリ（OpenImageIO 等）が処理するため、それらの脆弱性を突く細工ファイルはこのアドオンでは防げません。
+  Blender は最新の LTS を使い、出所不明のパッケージは隔離した環境（仮想マシン、サンドボックス、他のアドオンを入れていない
+  別の Blender）で開いてください。
+- アーカイブの扱いは一般的な細工に備えています: パスの検証（`..`、絶対パス、ドライブ文字、予約デバイス名、制御文字を拒否）、
+  展開時にシンボリックリンクを追従しない、巨大なメタデータは無視、展開する合計サイズを "Max Extract Size" と空き容量と
+  照合してから書き出す。
 
 ### メッシュとマテリアルの対応付け
 

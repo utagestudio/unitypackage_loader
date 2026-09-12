@@ -94,7 +94,7 @@ Material:
 ## 1. スコープ
 
 ### 読み込む
-- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
+- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。Python スクリプトを含み得るので既定 OFF のオプトイン。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
 - `.vrm`: VRM add-on（extensions.blender.org の "VRM format"、`import_scene.vrm`）が登録されていればそちらに委譲し、マテリアルも add-on のもの（MToon ノードグループ）をそのまま使う。無ければ glTF バイナリとして標準 glTF インポーターで読み、`.mat`（UniVRM が展開した MToon マテリアル）から組み直す。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
@@ -143,6 +143,7 @@ File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View に
 |---|---|---|
 | Models to import | Enum: `All` / `Ask` / `First only` = `Ask` | `Ask` は複数ある時だけ §3.3 のダイアログを出す |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
+| Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | Use FBX file scale / axis | FBX インポーターのパススルー | 既定は Blender FBX インポーターと同じ |
 | Import armature / shape keys / animation | Bool = ON / ON / OFF | FBX インポーターへ渡す |
 
@@ -225,6 +226,9 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 - **Info バー**: `Imported 20 objects, 7 materials (7 mapped), 12 textures. 2 warnings — see Unity Package panel.`
 - **3D View > N パネル > "Unity Package" タブ**: 直近のインポートのレポート（読み取り専用）
+- オブジェクト名・マテリアル名・パス・例外文はパッケージ由来の文字列なので、コンソール（`as_text`）・N パネル・
+  モデル選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
+  `\x1b` のような可視表現に置き換える（ANSI エスケープで表示を乱せないようにする）。
   - Objects / Materials / Textures の一覧
   - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、PSD などの非対応画像形式
   - 「Open extract folder」「Copy log」ボタン
@@ -333,7 +337,14 @@ class UnityPackage:
 - `tarfile.open(path, "r:gz")` をストリームで 1 回走査。`pathname` と `asset.meta` は即読み。`asset` はサイズだけ記録。
 - 2 パス目は必要 GUID 集合に絞って `extractfile`。数 GB のパッケージでも展開量は必要分だけ。
 - `pathname` の 1 行目のみ使用（2 行目に `00` が入る形式がある）。
-- パス正規化: `Assets/` 始まりでないもの、`..` を含むものは拒否（安全性）。
+- パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる
+  コロン（ドライブ文字・NTFS 代替データストリーム）、制御文字、`<>"|?*`、予約デバイス名（`CON` `NUL` `COM1` 等。拡張子付きも）、
+  末尾のドット / 空白を拒否する。規則は展開する OS に依らず同じ（Linux で展開した結果を Windows で開くケースがあるため）。
+- メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB。tar ヘッダーのサイズで判定）。
+  超えた `pathname` / `asset.meta` は警告して無視し、`read_asset` は `PackageError`（呼び出し側はそのアセットだけスキップ）。
+- 展開前に書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せても実際に書く量）を求め、
+  Preferences の上限（`Max Extract Size`、既定 8 GiB、0 で無制限）と展開先の空き容量（`shutil.disk_usage`）を超えるなら何も書かずに `PackageError`。
+- 書き出し時は展開先から対象までの各要素がシンボリックリンクでないことを確認し、リンクなら `PackageError`（既存のリンク経由で外側へ書くのを防ぐ）。展開先自体はユーザーが選んだ場所なのでリンクでもよい。
 - 進捗: `wm.progress_begin/update/end`。
 
 ### 4.4 `core/unity_yaml.py` — Unity YAML サブセットパーサー
@@ -348,6 +359,8 @@ class UnityPackage:
   - スカラー: int / float / 文字列（クォート有無）。`-` 始まりの数値。`m_Name: ` の空値
   - 複数行に折り返された `{...}`（サンプルの prefab にあり）
 - 出力: `dict / list / str / int / float`。`{fileID, guid, type}` は `UnityRef` にする。
+- 安全性: ブロック・フローともネスト深さに上限（`MAX_DEPTH` = 256）を置き、超えたら `UnityYamlError`（`ValueError` 派生）。
+  万一の `RecursionError` も `UnityYamlError` に揃える。呼び出し側（`.mat` / `.meta` / prefab）は `ValueError` を捕捉してそのアセットだけスキップする。
 - 検証: サンプルパッケージ内の全 `.mat` と全 `.meta` をパースして例外ゼロ。
 - 将来 PyYAML を wheel 同梱する余地は残す（`blender_manifest.toml` の `wheels`）が、初期は専用パーサーで十分。
 

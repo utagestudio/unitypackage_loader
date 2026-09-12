@@ -11,6 +11,8 @@ tar.gz はランダムアクセスできないため、
 
 from __future__ import annotations
 
+import os
+import shutil
 import tarfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -36,6 +38,10 @@ PREFAB_EXTS = frozenset({".prefab"})
 # scan 時に実体をメモリへ載せておく拡張子と上限サイズ
 _CACHE_EXTS = frozenset({".mat", ".prefab"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
+# メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
+# 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
+_METADATA_MAX_SIZE = 16 << 20  # pathname / asset.meta（通常は数 KB）
+_READ_ASSET_MAX_SIZE = 64 << 20  # read_asset（.mat / .prefab のテキスト解析用）
 
 ProgressFn = Callable[[float, str], None]
 
@@ -89,20 +95,91 @@ def _split_member(name: str) -> tuple[str, str] | None:
     return guid.lower(), part
 
 
+# Windows で特別な意味を持つ文字・名前。展開先の OS に関係なく拒否する
+# （Linux で展開したファイルを含む .blend を Windows で開く、といったケースがあるため）。
+_INVALID_PATH_CHARS = frozenset('<>:"|?*') | frozenset(chr(c) for c in range(0x20)) | {"\x7f"}
+_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _check_path_component(part: str, pathname: str) -> None:
+    """パスの 1 要素が展開先のファイル名として安全か確認する。"""
+    if part in ("..", ""):
+        raise PackageError(f"unsafe pathname in package: {pathname!r}")
+    # コロンはドライブ文字（C:）と NTFS 代替データストリーム（name:stream）の両方を塞ぐ
+    if any(c in _INVALID_PATH_CHARS for c in part):
+        raise PackageError(f"pathname contains characters not allowed in file names: {pathname!r}")
+    if part[-1] in (".", " "):
+        raise PackageError(f"pathname component ends with a dot or space: {pathname!r}")
+    # 予約デバイス名は拡張子が付いていても（CON.txt）デバイスとして解釈される
+    if part.split(".", 1)[0].upper() in _RESERVED_DEVICE_NAMES:
+        raise PackageError(f"pathname uses a reserved device name: {pathname!r}")
+
+
 def safe_relative_path(pathname: str) -> PurePosixPath:
-    """展開先に使える相対パスへ正規化する。``..`` や絶対パスは拒否。"""
+    """展開先に使える相対パスへ正規化する。
+
+    ``..``、絶対パス、空要素に加え、Windows で展開先の外に出るか異常なファイルになる
+    ドライブ文字・代替データストリーム（コロン）、制御文字、予約デバイス名、末尾のドット / 空白も拒否する。
+    規則は OS に依らず同じ。
+    """
     p = PurePosixPath(pathname.replace("\\", "/"))
-    if p.is_absolute() or any(part in ("..", "") for part in p.parts):
+    if p.is_absolute():
         raise PackageError(f"unsafe pathname in package: {pathname!r}")
     if not p.parts:
         raise PackageError("empty pathname in package")
+    for part in p.parts:
+        _check_path_component(part, pathname)
     return p
+
+
+def _reject_symlinks(dest_root: Path, target: Path) -> None:
+    """``dest_root`` から ``target`` までの各要素がシンボリックリンクでないことを確認する。
+
+    展開先配下に既にリンクがあると（別パッケージの展開物や手作業で置かれたもの）、
+    そこを経由して展開先の外へ書けてしまうため、リンクを見つけたら書かずに失敗させる。
+    ``dest_root`` 自体はユーザーが選んだ場所なのでリンクでもよい。
+    """
+    current = dest_root
+    for part in target.relative_to(dest_root).parts:
+        current = current / part
+        if current.is_symlink():
+            raise PackageError(f"refusing to write through a symbolic link: {current}")
+
+
+def _free_disk_space(dest_root: Path) -> int | None:
+    """``dest_root``（未作成なら最も近い既存の親）のあるボリュームの空き容量。取れなければ None。"""
+    probe = dest_root
+    while not probe.exists():
+        if probe.parent == probe:
+            return None
+        probe = probe.parent
+    try:
+        return shutil.disk_usage(probe).free
+    except OSError:
+        return None
+
+
+def _open_for_write(target: Path):
+    # 最終要素がリンクなら追従しない（対応 OS のみ）。Windows では O_BINARY が必要
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    return os.fdopen(os.open(target, flags, 0o644), "wb")
+
+
+def _human_size(size: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GiB"
 
 
 class UnityPackage:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.entries: dict[str, AssetEntry] = {}
+        self.warnings: list[str] = []  # scan 中に無視したものの説明
         self._scanned = False
 
     # ------------------------------------------------------------------ scan
@@ -120,7 +197,11 @@ class UnityPackage:
                     entry = entries.get(guid)
                     if entry is None:
                         entry = entries[guid] = AssetEntry(guid)
-                    if part == "pathname":
+                    if part in ("pathname", "asset.meta") and member.size > _METADATA_MAX_SIZE:
+                        self.warnings.append(
+                            f"ignored {member.name}: {member.size} bytes exceeds the {_METADATA_MAX_SIZE} byte limit"
+                        )
+                    elif part == "pathname":
                         text = tar.extractfile(member).read().decode("utf-8", "replace")
                         entry.pathname = text.splitlines()[0].strip() if text.strip() else ""
                     elif part == "asset.meta":
@@ -181,17 +262,28 @@ class UnityPackage:
 
     # ------------------------------------------------------------- read/extract
     def read_asset(self, guid: str) -> bytes:
-        """小さなアセット（.mat など）の実体を返す。キャッシュに無ければ再走査する。"""
+        """小さなアセット（.mat など）の実体を返す。キャッシュに無ければ再走査する。
+
+        メモリへ丸ごと載せるので ``_READ_ASSET_MAX_SIZE`` を超えるものは ``PackageError``。
+        大きなファイル（モデル・テクスチャ）は ``extract`` でディスクに書き出す。
+        """
         entry = self.get(guid)
         if entry is None or not entry.has_asset:
             raise KeyError(guid)
         if entry._cache is not None:
             return entry._cache
+        if entry.size > _READ_ASSET_MAX_SIZE:
+            raise PackageError(
+                f"{entry.pathname or guid} is too large to read into memory "
+                f"({entry.size} bytes > {_READ_ASSET_MAX_SIZE} byte limit)"
+            )
         target = f"{entry.guid}/asset"
         with tarfile.open(self.path, "r:*") as tar:
             for member in tar:
                 split = _split_member(member.name)
                 if split and split[0] == entry.guid and split[1] == "asset":
+                    if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
+                        raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
                     return tar.extractfile(member).read()
         raise KeyError(f"{target} not found in {self.path.name}")
 
@@ -205,10 +297,13 @@ class UnityPackage:
         *,
         overwrite: bool = False,
         progress: ProgressFn | None = None,
+        max_total_size: int = 0,
     ) -> dict[str, Path]:
         """指定 GUID の ``asset`` を ``dest_root/<pathname>`` に書き出し、GUID → パスを返す。
 
         既に同じサイズのファイルがあれば ``overwrite=False`` のとき書き出しをスキップする。
+        書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せていても実際に書く量）が
+        ``max_total_size``（0 は無制限）を超えるか、展開先の空き容量に収まらなければ何も書かずに ``PackageError``。
         """
         self._require_scan()
         dest_root = Path(dest_root)
@@ -222,6 +317,7 @@ class UnityPackage:
         pending: dict[str, Path] = {}
         for guid, entry in wanted.items():
             target = dest_root / safe_relative_path(entry.pathname)
+            _reject_symlinks(dest_root, target)
             result[guid] = target
             if not overwrite and target.is_file() and target.stat().st_size == entry.size:
                 continue
@@ -229,6 +325,18 @@ class UnityPackage:
 
         if not pending:
             return result
+
+        total = sum(wanted[g].size for g in pending)
+        if max_total_size and total > max_total_size:
+            raise PackageError(
+                f"extracting {len(pending)} files needs {_human_size(total)}, "
+                f"more than the {_human_size(max_total_size)} limit set in the add-on preferences"
+            )
+        free = _free_disk_space(dest_root)
+        if free is not None and total > free:
+            raise PackageError(
+                f"not enough free disk space in {dest_root}: need {_human_size(total)}, {_human_size(free)} available"
+            )
 
         done = 0
         with tarfile.open(self.path, "r:*") as tar:
@@ -238,8 +346,9 @@ class UnityPackage:
                     continue
                 target = pending.pop(split[0])
                 target.parent.mkdir(parents=True, exist_ok=True)
+                _reject_symlinks(dest_root, target)  # mkdir 後にもう一度（途中の要素が作られた直後の状態で確認）
                 src = tar.extractfile(member)
-                with open(target, "wb") as dst:
+                with _open_for_write(target) as dst:
                     while chunk := src.read(1 << 20):
                         dst.write(chunk)
                 done += 1

@@ -4,6 +4,7 @@ import unittest
 
 from tests import _paths  # noqa: F401  (sys.path 設定)
 from unitypackage_loader.core.unity_yaml import (
+    MAX_DEPTH,
     UnityRef,
     UnityYamlError,
     parse_documents,
@@ -179,6 +180,53 @@ class ParseTextTests(unittest.TestCase):
         self.assertEqual(importer["meshes"]["useFileScale"], 1)
         self.assertEqual(importer["userData"], "")
         self.assertEqual(importer["internalIDToNameTable"], [])
+
+
+class DepthLimitTests(unittest.TestCase):
+    """ネストが深すぎる入力は RecursionError ではなく UnityYamlError（ValueError）で止まる。"""
+
+    DEEP = 3000
+
+    def assert_too_deep(self, text: str) -> None:
+        with self.assertRaises(UnityYamlError) as cm:
+            parse_text(text)
+        self.assertIsInstance(cm.exception, ValueError)
+        self.assertIn("nested", str(cm.exception))
+
+    def test_deep_flow_mapping(self):
+        self.assert_too_deep("a: " + "{a: " * self.DEEP + "1" + "}" * self.DEEP)
+
+    def test_deep_flow_sequence(self):
+        self.assert_too_deep("a: " + "[" * self.DEEP + "1" + "]" * self.DEEP)
+
+    def test_deep_block_mapping(self):
+        lines = [" " * i + f"k{i}:" for i in range(self.DEEP)] + [" " * self.DEEP + "leaf: 1"]
+        self.assert_too_deep("\n".join(lines))
+
+    def test_deep_block_sequence(self):
+        lines = [" " * i + "-" for i in range(self.DEEP)] + [" " * self.DEEP + "- 1"]
+        self.assert_too_deep("\n".join(lines))
+
+    def test_deep_inline_dashes(self):
+        # ``- - - - x`` はダッシュごとにブロックを読み直すので、1 行でも深くなる
+        self.assert_too_deep("- " * self.DEEP + "x")
+
+    def test_deep_documents_raise_yaml_error(self):
+        text = "%YAML 1.1\n--- !u!21 &1\nMaterial:\n  m_X: " + "[" * self.DEEP + "]" * self.DEEP
+        with self.assertRaises(UnityYamlError):
+            parse_documents(text)
+
+    def test_within_limit_parses(self):
+        depth = MAX_DEPTH // 2
+        value = parse_text("a: " + "[" * depth + "1" + "]" * depth)["a"]
+        for _ in range(depth):
+            value = value[0]
+        self.assertEqual(value, 1)
+        lines = [" " * i + f"k{i}:" for i in range(depth)] + [" " * depth + "leaf: 1"]
+        value = parse_text("\n".join(lines))
+        for i in range(depth):
+            value = value[f"k{i}"]
+        self.assertEqual(value, {"leaf": 1})
 
 
 class LocalSampleTests(unittest.TestCase):

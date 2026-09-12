@@ -1,10 +1,13 @@
 import io
+import shutil
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests import _paths
+from unitypackage_loader.core import package as package_module
 from unitypackage_loader.core.package import PackageError, UnityPackage, safe_relative_path
 
 GUID_FOLDER = "0" * 32
@@ -96,6 +99,40 @@ class SyntheticPackageTests(unittest.TestCase):
         self.pkg.extract([GUID_TEX], dest)
         self.assertEqual(paths[GUID_TEX].stat().st_mtime_ns, before)
 
+    def test_extract_refuses_symlinked_directory(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        dest = Path(self.tmp.name) / "out_dir_link"
+        (dest / "Assets").mkdir(parents=True)
+        # 展開先配下の中間ディレクトリが外側へのリンク
+        (dest / "Assets" / "Example").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest)
+        self.assertFalse(any(outside.iterdir()), "nothing must be written through the link")
+
+    def test_extract_refuses_symlinked_file(self):
+        outside = Path(self.tmp.name) / "outside_file.bin"
+        outside.write_bytes(b"original")
+        dest = Path(self.tmp.name) / "out_file_link"
+        target = dest / "Assets/Example/Textures/Base.PNG"
+        target.parent.mkdir(parents=True)
+        target.symlink_to(outside)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest)
+        self.assertEqual(outside.read_bytes(), b"original")
+        # 上書き指定でも同じ
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest, overwrite=True)
+        self.assertEqual(outside.read_bytes(), b"original")
+
+    def test_extract_allows_symlinked_dest_root(self):
+        real = Path(self.tmp.name) / "real_root"
+        real.mkdir()
+        dest = Path(self.tmp.name) / "root_link"
+        dest.symlink_to(real, target_is_directory=True)
+        paths = self.pkg.extract([GUID_TEX], dest)
+        self.assertEqual(paths[GUID_TEX].read_bytes(), b"\x89PNG-fake")
+
     def test_find_by_path(self):
         self.assertEqual(self.pkg.find_by_path("Assets/Example/Model.fbx").guid, GUID_FBX)
         self.assertIsNone(self.pkg.find_by_path("Assets/Nope"))
@@ -121,6 +158,120 @@ class SafePathTests(unittest.TestCase):
         for bad in ("../x", "Assets/../../x", "/etc/passwd", ""):
             with self.assertRaises(PackageError):
                 safe_relative_path(bad)
+
+    def test_rejects_windows_drive_and_streams(self):
+        # PureWindowsPath("D:/dest") / "C:/evil.txt" は C:\evil.txt になるため、コロンは全て拒否する
+        for bad in ("C:/evil.txt", "C:\\evil.txt", "Assets/C:/x.png", "Assets/name.png:stream", "Assets/a:b/c.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_rejects_reserved_device_names(self):
+        for bad in ("CON", "Assets/nul", "Assets/COM1.png", "Assets/lpt9.tar.gz", "Assets/Aux/x.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+        # 予約名を含むだけの名前は許可する
+        for ok in ("Assets/CONSOLE.png", "Assets/COM10.png", "Assets/nul_mask.png", "Assets/Auxiliary/x.png"):
+            with self.subTest(ok=ok):
+                safe_relative_path(ok)
+
+    def test_rejects_control_and_special_chars(self):
+        for bad in ("Assets/a\x00b.png", "Assets/a\x1bb.png", "Assets/a\x7f.png", "Assets/a\nb.png",
+                    "Assets/a?.png", "Assets/a*.png", "Assets/<a>.png", "Assets/a|b.png", 'Assets/a"b.png'):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_rejects_trailing_dot_or_space(self):
+        for bad in ("Assets/a. /b.png", "Assets/a./b.png", "Assets/b.png.", "Assets/b.png ", "Assets /b.png"):
+            with self.subTest(bad=bad), self.assertRaises(PackageError):
+                safe_relative_path(bad)
+
+    def test_accepts_unicode_and_dots(self):
+        for ok in ("Assets/日本語/テクスチャ.png", "Assets/.hidden/x.png", "Assets/a.b.c.png", "Assets/a b/c d.png", "Assets/./x.png"):
+            with self.subTest(ok=ok):
+                safe_relative_path(ok)
+
+
+class SizeLimitTests(unittest.TestCase):
+    """メモリへ丸ごと読むメンバーの上限。実際に巨大なファイルは作らず、上限側を小さくして検証する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "big.unitypackage"
+        big_meta = b"fileFormatVersion: 2\nguid: " + GUID_TEX.encode() + b"\n" + b"#" * 600
+        with tarfile.open(self.path, "w:gz") as tar:
+            _add(tar, f"{GUID_MAT}/pathname", b"Assets/Big/Big.mat")
+            _add(tar, f"{GUID_MAT}/asset", MAT_TEXT + b"# " + b"x" * 600)
+            _add(tar, f"{GUID_MAT}/asset.meta", b"fileFormatVersion: 2\nguid: " + GUID_MAT.encode() + b"\n")
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Big/" + b"a" * 600 + b".png")
+            _add(tar, f"{GUID_TEX}/asset", b"\x89PNG-fake")
+            _add(tar, f"{GUID_TEX}/asset.meta", big_meta)
+            _add(tar, f"{GUID_FBX}/pathname", b"Assets/Big/Model.fbx")
+            _add(tar, f"{GUID_FBX}/asset", b"Kaydara-fake" * 100)
+            _add(tar, f"{GUID_FBX}/asset.meta", b"fileFormatVersion: 2\nguid: " + GUID_FBX.encode() + b"\n")
+
+    def test_oversized_metadata_is_ignored_with_warning(self):
+        with mock.patch.object(package_module, "_METADATA_MAX_SIZE", 512):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+        self.assertEqual(pkg.entries[GUID_TEX].pathname, "", "oversized pathname must not be read")
+        self.assertIsNone(pkg.entries[GUID_TEX].meta_text, "oversized asset.meta must not be read")
+        self.assertEqual(pkg.entries[GUID_FBX].pathname, "Assets/Big/Model.fbx")
+        self.assertEqual(len(pkg.warnings), 2)
+        self.assertTrue(all("exceeds" in w for w in pkg.warnings))
+
+    def test_oversized_asset_is_refused_by_read_asset(self):
+        with mock.patch.object(package_module, "_CACHE_MAX_SIZE", 0), \
+             mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 512):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+            self.assertIsNone(pkg.entries[GUID_MAT]._cache)
+            with self.assertRaises(PackageError):
+                pkg.read_asset(GUID_MAT)
+            with self.assertRaises(PackageError):
+                pkg.read_asset(GUID_FBX)
+            # 上限内なら再走査して読める
+            self.assertEqual(pkg.read_asset(GUID_TEX), b"\x89PNG-fake")
+        # extract は上限の対象外（ディスクへ流すだけ）
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 512):
+            paths = pkg.extract([GUID_FBX], Path(self.tmp.name) / "out")
+        self.assertEqual(paths[GUID_FBX].stat().st_size, len(b"Kaydara-fake" * 100))
+
+
+class ExtractBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "example.unitypackage"
+        build_package(self.path)
+        self.pkg = UnityPackage(self.path)
+        self.dest = Path(self.tmp.name) / "out"
+
+    def test_total_size_limit(self):
+        fbx_size = len(b"Kaydara-fake" * 10)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, max_total_size=fbx_size)
+        self.assertFalse(self.dest.exists(), "nothing must be written when over the limit")
+        # 上限ちょうどは許可。既に展開済みのものは合計に含めない
+        paths = self.pkg.extract([GUID_FBX], self.dest, max_total_size=fbx_size)
+        self.assertTrue(paths[GUID_FBX].is_file())
+        self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, max_total_size=len(b"\x89PNG-fake"))
+        # 0 は無制限
+        self.pkg.extract([GUID_TEX, GUID_FBX], self.dest, overwrite=True, max_total_size=0)
+
+    def test_free_disk_space_is_checked_before_writing(self):
+        usage = shutil.disk_usage(self.tmp.name)._replace(free=4)
+        with mock.patch.object(package_module.shutil, "disk_usage", return_value=usage) as du:
+            with self.assertRaises(PackageError):
+                self.pkg.extract([GUID_TEX], self.dest)
+            # 展開先が未作成でも、既存の親で空きを調べる
+            du.assert_called_once_with(Path(self.tmp.name))
+        self.assertFalse(self.dest.exists())
+
+    def test_disk_usage_failure_does_not_block(self):
+        with mock.patch.object(package_module.shutil, "disk_usage", side_effect=OSError("no statvfs")):
+            paths = self.pkg.extract([GUID_TEX], self.dest)
+        self.assertTrue(paths[GUID_TEX].is_file())
 
 
 class LocalSampleTests(unittest.TestCase):
