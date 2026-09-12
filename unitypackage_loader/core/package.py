@@ -26,7 +26,7 @@ __all__ = [
     "PREFAB_EXTS",
 ]
 
-MODEL_EXTS = frozenset({".fbx", ".obj", ".dae", ".blend", ".gltf", ".glb"})
+MODEL_EXTS = frozenset({".fbx", ".obj", ".dae", ".blend", ".gltf", ".glb", ".vrm"})  # .vrm は glTF バイナリ
 TEXTURE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".tga", ".tif", ".tiff", ".bmp", ".exr", ".hdr", ".psd", ".webp"}
 )

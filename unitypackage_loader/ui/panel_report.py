@@ -88,7 +88,7 @@ class UNITYPKG_PT_report_materials(bpy.types.Panel):
         col = layout.column(align=True)
         for m in report.active_materials:
             row = col.row(align=True)
-            if m.guid is None and m.method not in ("reused", "kept"):
+            if m.guid is None and m.method not in ("reused", "kept", "delegated"):
                 row.label(text=m.blender_name, icon="ERROR")
                 row.label(text="unresolved")
             else:

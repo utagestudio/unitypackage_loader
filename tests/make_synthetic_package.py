@@ -171,6 +171,8 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
         bpy.ops.mesh.primitive_torus_add()
     elif kind == "icosphere":
         bpy.ops.mesh.primitive_ico_sphere_add()
+    elif kind == "monkey":
+        bpy.ops.mesh.primitive_monkey_add()
     else:
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
@@ -179,6 +181,10 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
     obj.data.materials.append(mat)
     if path.suffix == ".fbx":
         bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False)
+    elif path.suffix == ".vrm":
+        # .vrm は glTF バイナリ。VRM 拡張の無い .glb を .vrm 名で置き、glTF インポーターへのフォールバック経路を確認する
+        bpy.ops.export_scene.gltf(filepath=str(path.with_suffix(".glb")), export_format="GLB", use_selection=False)
+        path.with_suffix(".glb").rename(path)
     elif path.suffix == ".blend":
         # 既にノードが組まれたマテリアルを持つ .blend（KEEP の確認用）
         mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.2, 0.9, 0.3, 1.0)
@@ -232,6 +238,13 @@ def main() -> None:
     quest_mat = add(quest_mat_path, toon_lit_mat_yaml("QuestToonMat", tex_a).encode(),
                     f"fileFormatVersion: 2\nguid: {guid_of(quest_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
     add(ico_path, path.read_bytes(), model_meta(guid_of(ico_path), {"QuestToonMat": quest_mat}))
+
+    # .vrm（VRM 拡張の無い glb）。UniVRM と同じく ScriptedImporter の .meta で、マテリアルは名前一致で解決する
+    path = tmp / "monkey.vrm"
+    export_model("monkey", "SphereMat", path)
+    vrm_path = "Assets/Synthetic/Models/Monkey.vrm"
+    add(vrm_path, path.read_bytes(),
+        f"fileFormatVersion: 2\nguid: {guid_of(vrm_path)}\nScriptedImporter:\n  internalIDToNameTable: []\n  externalObjects: {{}}\n")
 
     # 同梱 .blend（マテリアルは既に設定済み。externalObjects は CubeMat を指す）
     path = tmp / "torus.blend"

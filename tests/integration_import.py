@@ -84,6 +84,14 @@ def main() -> int:
     exp = json.loads(expectations_path.read_text("utf-8"))
     _register_from_repo()
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    # 期待値の "enable_addons" に挙げた add-on（例: VRM add-on の "bl_ext.blender_org.vrm"）を有効にする。
+    # factory 設定で始めるため、使う add-on は明示的に有効化する。無ければテストをスキップする
+    for module_name in exp.get("enable_addons", []):
+        import addon_utils
+
+        if addon_utils.enable(module_name, default_set=True) is None:
+            print(f"\n=== integration_import: skipped (add-on {module_name} is not installed) ===")
+            return 0
 
     from unitypackage_loader.blender import importer
 

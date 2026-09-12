@@ -29,7 +29,7 @@ _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_load
 LAST_REPORT: ImportReport | None = None
 
 # 読み込めるモデル形式と、同じフォルダから一緒に展開する付随ファイル
-SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".dae", ".blend"})
+SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".vrm", ".dae", ".blend"})
 _SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 
 
@@ -54,6 +54,7 @@ class ImportOptions:
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
     blend_materials: str = "KEEP"  # .blend 同梱モデル: KEEP（既存マテリアルを残す）/ REBUILD
+    use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
     outline_width_scale: float = 0.01
     prefab: str = ""  # マテリアル割り当てに使う prefab の pathname（空なら全 prefab を先勝ちで統合）
@@ -144,7 +145,7 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
         resolved = sum(1 for r in resolution.values() if r.guid)
         models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
     if not models:
-        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.dae/.blend)")
+        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
     referenced: set[str] = set()
     for norm in normalized.values():
@@ -186,7 +187,7 @@ def resolve_extract_root(opts: ImportOptions, package_path: Path) -> Path:
 # bpy.data の差分取得
 # ---------------------------------------------------------------------------
 
-_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions")
+_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions", "collections")
 
 
 def _snapshot() -> dict[str, set[str]]:
@@ -199,6 +200,30 @@ def _new_since(before: dict[str, set[str]]) -> dict[str, list]:
         coll = getattr(bpy.data, name)
         result[name] = [d for d in coll if d.name not in before[name]]
     return result
+
+
+def _adopt_into_collection(new: dict[str, list], scene, collection) -> None:
+    """インポーターがシーンのルートコレクションに直接入れたオブジェクト・コレクションをパッケージ用コレクションに移す。
+
+    VRM add-on はアクティブコレクションを無視してルートに入れ、コライダー用のコレクションも作る。
+    """
+    root = scene.collection
+    for coll in new["collections"]:
+        if coll is collection or coll.name not in root.children:
+            continue
+        root.children.unlink(coll)
+        if coll.name not in collection.children:
+            collection.children.link(coll)
+    for obj in new["objects"]:
+        if obj.name in root.objects:
+            root.objects.unlink(obj)
+            if obj.name not in collection.objects:
+                collection.objects.link(obj)
+
+
+def vrm_addon_available() -> bool:
+    """VRM add-on（import_scene.vrm）が登録されているか。bpy.ops の属性は常に存在するので bpy.types で見る。"""
+    return hasattr(bpy.types, "IMPORT_SCENE_OT_vrm")
 
 
 def _find_layer_collection(layer_coll, target):
@@ -260,24 +285,43 @@ def _import_blend(context, path: Path, collection: bpy.types.Collection) -> None
             collection.objects.link(obj)
 
 
-def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, collection) -> None:
+def _delegate_to_vrm_addon(model: AssetEntry, opts: ImportOptions) -> bool:
+    return model.ext == ".vrm" and opts.use_vrm_addon and vrm_addon_available()
+
+
+def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, collection, report: ImportReport) -> bool:
+    """モデルを読み込む。マテリアルを外部インポーターに任せた（こちらで組み直さない）場合は True。"""
     ext = model.ext
     if ext == ".fbx":
         _import_fbx(context, path, opts)
-        return
+        return False
     if ext == ".obj":
         result = bpy.ops.wm.obj_import(filepath=str(path), global_scale=opts.global_scale)
-    elif ext in (".gltf", ".glb"):
+    elif ext == ".vrm" and _delegate_to_vrm_addon(model, opts):
+        # VRM add-on が MToon・Humanoid・スプリングボーンまで再現するので、マテリアルも add-on のものを使う。
+        # use_addon_preferences=True で利用者の add-on 設定（テクスチャ展開先など）に従う
+        result = bpy.ops.import_scene.vrm(filepath=str(path), use_addon_preferences=True)
+        if "FINISHED" not in result:
+            raise RuntimeError(f"VRM add-on import failed for {path.name}: {result}")
+        return True
+    elif ext in (".gltf", ".glb", ".vrm"):
+        if ext == ".vrm" and opts.use_vrm_addon:
+            report.warn(
+                f"VRM add-on is not installed; {model.name} was imported with the glTF importer "
+                "and MToon materials were rebuilt from .mat files (install the 'VRM format' add-on for full fidelity)"
+            )
+        # .vrm は glTF バイナリなので標準の glTF インポーターで読める（VRM 拡張は無視される）
         result = bpy.ops.import_scene.gltf(filepath=str(path))
     elif ext == ".dae":
         result = bpy.ops.wm.collada_import(filepath=str(path))
     elif ext == ".blend":
         _import_blend(context, path, collection)
-        return
+        return False
     else:
         raise RuntimeError(f"unsupported model format: {model.pathname}")
     if "FINISHED" not in result:
         raise RuntimeError(f"import failed for {path.name}: {result}")
+    return False
 
 
 def _select_models(prepared: PreparedPackage, opts: ImportOptions) -> list[ModelSummary]:
@@ -327,7 +371,9 @@ def run_import(
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
     # --- 必要なテクスチャを決めて展開 ---
-    needed_tex = set(prepared.referenced_textures)
+    # 全モデルを VRM add-on に任せる場合、.mat 由来のマテリアルは組まないのでテクスチャも読まない
+    delegate_all = all(_delegate_to_vrm_addon(m.entry, opts) for m in models)
+    needed_tex = set() if delegate_all else set(prepared.referenced_textures)
     if opts.import_unreferenced:
         needed_tex.update(e.guid for e in pkg.textures())
     for g in sorted(prepared.missing_textures):
@@ -392,8 +438,19 @@ def run_import(
             model_info = ModelImporterInfo.from_meta(model.meta_text) if model.meta_text else ModelImporterInfo()
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}
-            _import_model(context, paths[model.guid], model, opts, collection)
+            delegated = _import_model(context, paths[model.guid], model, opts, collection, report)
             new = _new_since(before)
+            _adopt_into_collection(new, scene, collection)
+            if delegated:
+                # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
+                report.images.extend(i.name for i in new["images"])
+            if delegated and not new["objects"]:
+                # VRM 0.x の制限付きライセンスでは add-on が確認ダイアログを出し、その場では読み込まない
+                report.warn(
+                    f"VRM add-on did not create any objects for {model.name} "
+                    "(a license confirmation dialog may be waiting; the model is imported after confirming, "
+                    "outside of this importer)"
+                )
             report.models.append(model.pathname)
             report.objects.extend(o.name for o in new["objects"])
 
@@ -409,13 +466,14 @@ def run_import(
             )
             assignments = slot_assignments(object_slots, prefab_table, unity_mats)
 
-            keep_blend_materials = model.ext == ".blend" and opts.blend_materials == "KEEP"
+            # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
+            keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
             for bmat in new_materials:
                 res = resolution[bmat.name]
                 mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
                 report.materials.append(mrep)
-                if keep_blend_materials:
-                    mrep.method = "kept"
+                if keep_materials:
+                    mrep.method = "delegated" if delegated else "kept"
                     if res.guid:
                         norm = normalized[res.guid]
                         mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
@@ -444,8 +502,14 @@ def run_import(
                 _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
                 built_by_guid.setdefault(res.guid, bmat)
 
+            if not keep_materials:
+                # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
+                for image in new["images"]:
+                    if image.users == 0:
+                        bpy.data.images.remove(image)
+
             # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
-            if assignments and not (model.ext == ".blend" and opts.blend_materials == "KEEP"):
+            if assignments and not keep_materials:
                 split = _split_slots_by_prefab(
                     new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
                     images, tex_infos, build_opts, pkg, report,
