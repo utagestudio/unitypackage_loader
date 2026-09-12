@@ -12,6 +12,7 @@ GUID_MAT = "1" * 32
 GUID_TEX = "2" * 32
 GUID_FBX = "3" * 32
 GUID_OTHER = "4" * 32
+GUID_VRM = "5" * 32
 
 MAT_TEXT = b"%YAML 1.1\n--- !u!21 &2100000\nMaterial:\n  m_Name: ExampleMat\n"
 
@@ -42,6 +43,8 @@ def build_package(path: Path) -> None:
         # 対象外
         _add(tar, f"{GUID_OTHER}/pathname", b"Assets/Example/Script.cs")
         _add(tar, f"{GUID_OTHER}/asset", b"class X {}")
+        _add(tar, f"{GUID_VRM}/pathname", b"Assets/Example/Avatar.vrm")
+        _add(tar, f"{GUID_VRM}/asset", b"glTF" + b"\0" * 16)
         # 想定外のメンバーは無視される
         _add(tar, "README.txt", b"hello")
 
@@ -58,16 +61,17 @@ class SyntheticPackageTests(unittest.TestCase):
 
     def test_scan_and_classify(self):
         entries = self.pkg.scan()
-        self.assertEqual(set(entries), {GUID_FOLDER, GUID_MAT, GUID_TEX, GUID_FBX, GUID_OTHER})
+        self.assertEqual(set(entries), {GUID_FOLDER, GUID_MAT, GUID_TEX, GUID_FBX, GUID_OTHER, GUID_VRM})
         self.assertEqual(entries[GUID_FOLDER].kind, "folder")
         self.assertEqual(entries[GUID_MAT].kind, "material")
         self.assertEqual(entries[GUID_TEX].kind, "texture")  # 拡張子は大文字でも可
         self.assertEqual(entries[GUID_FBX].kind, "model")
         self.assertEqual(entries[GUID_OTHER].kind, "other")
+        self.assertEqual(entries[GUID_VRM].kind, "model")  # .vrm は glTF バイナリ
         self.assertEqual(entries[GUID_MAT].pathname, "Assets/Example/Materials/ExampleMat.mat")
         self.assertEqual(entries[GUID_MAT].name, "ExampleMat.mat")
         self.assertIn("TextureImporter", entries[GUID_TEX].meta_text)
-        self.assertEqual([e.guid for e in self.pkg.models()], [GUID_FBX])
+        self.assertEqual({e.guid for e in self.pkg.models()}, {GUID_FBX, GUID_VRM})
         self.assertEqual([e.guid for e in self.pkg.materials()], [GUID_MAT])
         self.assertEqual([e.guid for e in self.pkg.textures()], [GUID_TEX])
 

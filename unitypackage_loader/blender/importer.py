@@ -29,7 +29,7 @@ _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_load
 LAST_REPORT: ImportReport | None = None
 
 # 読み込めるモデル形式と、同じフォルダから一緒に展開する付随ファイル
-SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".dae", ".blend"})
+SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".vrm", ".dae", ".blend"})
 _SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 
 
@@ -144,7 +144,7 @@ def prepare_package(filepath: str, shader_table: ShaderTable | None = None) -> P
         resolved = sum(1 for r in resolution.values() if r.guid)
         models.append(ModelSummary(entry, len(names), resolved, entry.ext in SUPPORTED_MODEL_EXTS))
     if not models:
-        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.dae/.blend)")
+        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
     referenced: set[str] = set()
     for norm in normalized.values():
@@ -267,7 +267,8 @@ def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, c
         return
     if ext == ".obj":
         result = bpy.ops.wm.obj_import(filepath=str(path), global_scale=opts.global_scale)
-    elif ext in (".gltf", ".glb"):
+    elif ext in (".gltf", ".glb", ".vrm"):
+        # .vrm は glTF バイナリなので標準の glTF インポーターで読める（VRM 拡張は無視される）
         result = bpy.ops.import_scene.gltf(filepath=str(path))
     elif ext == ".dae":
         result = bpy.ops.wm.collada_import(filepath=str(path))

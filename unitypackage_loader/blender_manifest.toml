@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "unitypackage_loader"
-version = "1.1.0"
+version = "1.2.0-dev.1"
 name = "Unity Package Importer"
 tagline = "Import meshes, materials and textures from .unitypackage files"
 maintainer = "utagestudio"
