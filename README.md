@@ -81,7 +81,19 @@ from one package would exceed it or the free space of the destination.
   registered text blocks) that Blender runs when "Auto Run Python Scripts" is enabled, so appending a `.blend` from
   an untrusted package is equivalent to running its scripts. Turn on "Import Bundled .blend Files" only for packages
   you trust, and keep "Auto Run Python Scripts" off unless you need it.
-- The add-on itself never executes code from the package (C# scripts, shaders and Python are ignored).
+- **The add-on itself never executes code from the package.** C# scripts, shaders, Python and other assets are ignored.
+  Only the following are extracted to disk or read: model files (`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`, and `.blend`
+  only with the option above), the textures referenced by materials (every image with "Import Unreferenced Images"),
+  the `.mtl` next to an `.obj` and the `.bin` next to a `.gltf`. `.mat`, `.meta` and `.prefab` files are parsed in memory
+  as text with the add-on's own YAML reader and never written out.
+- **Parsing the model and image files is done by Blender itself**, not by this add-on: FBX / OBJ / glTF / Collada by
+  Blender's importers, and PNG / TIFF / TGA / EXR / PSD etc. by its image libraries (OpenImageIO and friends).
+  A crafted file that targets a bug in those components cannot be blocked here. Keep Blender on the latest LTS release,
+  and open packages from unknown sources in an isolated environment (a virtual machine, a sandbox, or a separate Blender
+  installation without other add-ons).
+- Archive handling is hardened against common tricks: paths are validated (no `..`, absolute paths, drive letters,
+  reserved device names or control characters), symbolic links are never followed while extracting, oversized metadata
+  is ignored, and the total size to extract is checked against "Max Extract Size" and the free disk space before writing.
 
 ### Matching meshes to materials
 

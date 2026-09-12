@@ -79,7 +79,18 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 - **同梱 .blend は既定では読み込みません。** `.blend` には Python コード（ドライバー式、登録済みテキストブロック）を
   仕込むことができ、Blender の「Auto Run Python Scripts」が有効だと読み込み時に実行されます。出所の確かなパッケージでだけ
   "Import Bundled .blend Files" を ON にし、必要がなければ「Auto Run Python Scripts」は OFF のままにしてください。
-- アドオン自身はパッケージ内のコード（C#、シェーダー、Python）を一切実行しません。
+- **アドオン自身はパッケージ内のコードを一切実行しません。** C#、シェーダー、Python などのアセットは無視します。
+  ディスクに展開・読み込みするのは次のものだけです: モデル（`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`。`.blend` は上のオプションが
+  ON のときのみ）、マテリアルが参照するテクスチャ（"Import Unreferenced Images" なら全画像）、`.obj` と同じフォルダの `.mtl`、
+  `.gltf` と同じフォルダの `.bin`。`.mat` `.meta` `.prefab` はアドオン専用の YAML リーダーでメモリ上でテキストとして解析するだけで、
+  書き出しません。
+- **モデルと画像の解析は Blender 本体が行います。** FBX / OBJ / glTF / Collada は Blender のインポーター、PNG / TIFF / TGA / EXR /
+  PSD などは Blender の画像ライブラリ（OpenImageIO 等）が処理するため、それらの脆弱性を突く細工ファイルはこのアドオンでは防げません。
+  Blender は最新の LTS を使い、出所不明のパッケージは隔離した環境（仮想マシン、サンドボックス、他のアドオンを入れていない
+  別の Blender）で開いてください。
+- アーカイブの扱いは一般的な細工に備えています: パスの検証（`..`、絶対パス、ドライブ文字、予約デバイス名、制御文字を拒否）、
+  展開時にシンボリックリンクを追従しない、巨大なメタデータは無視、展開する合計サイズを "Max Extract Size" と空き容量と
+  照合してから書き出す。
 
 ### メッシュとマテリアルの対応付け
 
