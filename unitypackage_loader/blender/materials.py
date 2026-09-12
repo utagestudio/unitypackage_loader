@@ -8,7 +8,7 @@ from typing import Any
 
 import bpy
 
-from ..core.material import NormalizedMaterial, TexRef
+from ..core.material import NormalizedMaterial, TexRef, matcap_blend_mode
 from ..core.meta import TextureImporterInfo
 
 MODE_PRINCIPLED = "PRINCIPLED"
@@ -362,8 +362,7 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         b.link(mc_out, group.inputs["MatCap"])
         strength = float(matcap.get("blend", 1.0)) * mc_color[3]
         group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, strength))
-        mode = int(matcap.get("blend_mode", 0))
-        group.inputs["MatCap Mode"].default_value = float(mode if 0 <= mode <= 3 else (1 if matcap.get("additive") else 0))
+        group.inputs["MatCap Mode"].default_value = float(matcap_blend_mode(matcap))
     elif matcap.get("tex"):
         warnings.append("matcap texture could not be loaded")
 

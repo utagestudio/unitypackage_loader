@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _paths
-from unitypackage_loader.core.material import TexRef, parse_material
+from unitypackage_loader.core.material import TexRef, matcap_blend_mode, parse_material
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.meta import ModelImporterInfo
 from unitypackage_loader.core.profiles import ShaderTable, normalize_material, select_profile
@@ -336,3 +336,28 @@ class RoundTripTests(unittest.TestCase):
         n = NormalizedMaterial.from_dict({"name": "X", "future_field": 1, "base_color_tex": None})
         self.assertEqual(n.name, "X")
         self.assertIsNone(n.base_color_tex)
+
+
+class MatCapBlendModeTests(unittest.TestCase):
+    """MatCap のブレンドモード決定（Toon ノードグループの MatCap Mode 入力）。"""
+
+    def test_liltoon_blend_mode_is_used_as_is(self) -> None:
+        for value in (0, 1, 2, 3):
+            self.assertEqual(matcap_blend_mode({"blend_mode": value}), value)
+
+    def test_additive_flag_selects_add_when_blend_mode_is_absent(self) -> None:
+        # MToon と VRChat Mobile の MatCap は blend_mode を持たず additive で来る。
+        # ここで Normal を選ぶと MatCap がマテリアル色を置き換えてしまう。
+        self.assertEqual(matcap_blend_mode({"additive": True}), 1)
+        self.assertEqual(matcap_blend_mode({"additive": False}), 0)
+
+    def test_out_of_range_blend_mode_falls_back_to_additive_flag(self) -> None:
+        self.assertEqual(matcap_blend_mode({"blend_mode": 9, "additive": True}), 1)
+        self.assertEqual(matcap_blend_mode({"blend_mode": -1, "additive": False}), 0)
+
+    def test_unusable_blend_mode_falls_back(self) -> None:
+        self.assertEqual(matcap_blend_mode({"blend_mode": None, "additive": True}), 1)
+        self.assertEqual(matcap_blend_mode({"blend_mode": "x", "additive": True}), 1)
+
+    def test_empty_matcap_is_normal(self) -> None:
+        self.assertEqual(matcap_blend_mode({}), 0)
