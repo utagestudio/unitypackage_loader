@@ -37,6 +37,10 @@ PREFAB_EXTS = frozenset({".prefab"})
 # scan 時に実体をメモリへ載せておく拡張子と上限サイズ
 _CACHE_EXTS = frozenset({".mat", ".prefab"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
+# メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
+# 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
+_METADATA_MAX_SIZE = 16 << 20  # pathname / asset.meta（通常は数 KB）
+_READ_ASSET_MAX_SIZE = 64 << 20  # read_asset（.mat / .prefab のテキスト解析用）
 
 ProgressFn = Callable[[float, str], None]
 
@@ -153,6 +157,7 @@ class UnityPackage:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.entries: dict[str, AssetEntry] = {}
+        self.warnings: list[str] = []  # scan 中に無視したものの説明
         self._scanned = False
 
     # ------------------------------------------------------------------ scan
@@ -170,7 +175,11 @@ class UnityPackage:
                     entry = entries.get(guid)
                     if entry is None:
                         entry = entries[guid] = AssetEntry(guid)
-                    if part == "pathname":
+                    if part in ("pathname", "asset.meta") and member.size > _METADATA_MAX_SIZE:
+                        self.warnings.append(
+                            f"ignored {member.name}: {member.size} bytes exceeds the {_METADATA_MAX_SIZE} byte limit"
+                        )
+                    elif part == "pathname":
                         text = tar.extractfile(member).read().decode("utf-8", "replace")
                         entry.pathname = text.splitlines()[0].strip() if text.strip() else ""
                     elif part == "asset.meta":
@@ -231,17 +240,28 @@ class UnityPackage:
 
     # ------------------------------------------------------------- read/extract
     def read_asset(self, guid: str) -> bytes:
-        """小さなアセット（.mat など）の実体を返す。キャッシュに無ければ再走査する。"""
+        """小さなアセット（.mat など）の実体を返す。キャッシュに無ければ再走査する。
+
+        メモリへ丸ごと載せるので ``_READ_ASSET_MAX_SIZE`` を超えるものは ``PackageError``。
+        大きなファイル（モデル・テクスチャ）は ``extract`` でディスクに書き出す。
+        """
         entry = self.get(guid)
         if entry is None or not entry.has_asset:
             raise KeyError(guid)
         if entry._cache is not None:
             return entry._cache
+        if entry.size > _READ_ASSET_MAX_SIZE:
+            raise PackageError(
+                f"{entry.pathname or guid} is too large to read into memory "
+                f"({entry.size} bytes > {_READ_ASSET_MAX_SIZE} byte limit)"
+            )
         target = f"{entry.guid}/asset"
         with tarfile.open(self.path, "r:*") as tar:
             for member in tar:
                 split = _split_member(member.name)
                 if split and split[0] == entry.guid and split[1] == "asset":
+                    if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
+                        raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
                     return tar.extractfile(member).read()
         raise KeyError(f"{target} not found in {self.path.name}")
 

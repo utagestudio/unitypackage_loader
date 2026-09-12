@@ -3,8 +3,10 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests import _paths
+from unitypackage_loader.core import package as package_module
 from unitypackage_loader.core.package import PackageError, UnityPackage, safe_relative_path
 
 GUID_FOLDER = "0" * 32
@@ -186,6 +188,53 @@ class SafePathTests(unittest.TestCase):
         for ok in ("Assets/日本語/テクスチャ.png", "Assets/.hidden/x.png", "Assets/a.b.c.png", "Assets/a b/c d.png", "Assets/./x.png"):
             with self.subTest(ok=ok):
                 safe_relative_path(ok)
+
+
+class SizeLimitTests(unittest.TestCase):
+    """メモリへ丸ごと読むメンバーの上限。実際に巨大なファイルは作らず、上限側を小さくして検証する。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "big.unitypackage"
+        big_meta = b"fileFormatVersion: 2\nguid: " + GUID_TEX.encode() + b"\n" + b"#" * 600
+        with tarfile.open(self.path, "w:gz") as tar:
+            _add(tar, f"{GUID_MAT}/pathname", b"Assets/Big/Big.mat")
+            _add(tar, f"{GUID_MAT}/asset", MAT_TEXT + b"# " + b"x" * 600)
+            _add(tar, f"{GUID_MAT}/asset.meta", b"fileFormatVersion: 2\nguid: " + GUID_MAT.encode() + b"\n")
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Big/" + b"a" * 600 + b".png")
+            _add(tar, f"{GUID_TEX}/asset", b"\x89PNG-fake")
+            _add(tar, f"{GUID_TEX}/asset.meta", big_meta)
+            _add(tar, f"{GUID_FBX}/pathname", b"Assets/Big/Model.fbx")
+            _add(tar, f"{GUID_FBX}/asset", b"Kaydara-fake" * 100)
+            _add(tar, f"{GUID_FBX}/asset.meta", b"fileFormatVersion: 2\nguid: " + GUID_FBX.encode() + b"\n")
+
+    def test_oversized_metadata_is_ignored_with_warning(self):
+        with mock.patch.object(package_module, "_METADATA_MAX_SIZE", 512):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+        self.assertEqual(pkg.entries[GUID_TEX].pathname, "", "oversized pathname must not be read")
+        self.assertIsNone(pkg.entries[GUID_TEX].meta_text, "oversized asset.meta must not be read")
+        self.assertEqual(pkg.entries[GUID_FBX].pathname, "Assets/Big/Model.fbx")
+        self.assertEqual(len(pkg.warnings), 2)
+        self.assertTrue(all("exceeds" in w for w in pkg.warnings))
+
+    def test_oversized_asset_is_refused_by_read_asset(self):
+        with mock.patch.object(package_module, "_CACHE_MAX_SIZE", 0), \
+             mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 512):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+            self.assertIsNone(pkg.entries[GUID_MAT]._cache)
+            with self.assertRaises(PackageError):
+                pkg.read_asset(GUID_MAT)
+            with self.assertRaises(PackageError):
+                pkg.read_asset(GUID_FBX)
+            # 上限内なら再走査して読める
+            self.assertEqual(pkg.read_asset(GUID_TEX), b"\x89PNG-fake")
+        # extract は上限の対象外（ディスクへ流すだけ）
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 512):
+            paths = pkg.extract([GUID_FBX], Path(self.tmp.name) / "out")
+        self.assertEqual(paths[GUID_FBX].stat().st_size, len(b"Kaydara-fake" * 100))
 
 
 class LocalSampleTests(unittest.TestCase):
