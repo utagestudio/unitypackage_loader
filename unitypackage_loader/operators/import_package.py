@@ -49,6 +49,15 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     )
     use_anim: BoolProperty(name="Import Animation", default=False)
     ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
+    import_blend: BoolProperty(
+        name="Import Bundled .blend Files",
+        default=False,
+        description=(
+            "Append objects from .blend files inside the package. A .blend can contain Python scripts "
+            "(drivers, registered text blocks) that run when 'Auto Run Python Scripts' is enabled; "
+            "turn this on only for packages you trust"
+        ),
+    )
 
     # --- Materials ---
     material_mode: EnumProperty(name="Material Mode", items=MATERIAL_MODE_ITEMS, default="AUTO")
@@ -126,6 +135,11 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         box.prop(self, "use_anim")
         box.prop(self, "ignore_leaf_bones")
         box.prop(self, "use_vrm_addon")
+        box.prop(self, "import_blend")
+        if self.import_blend:
+            col = box.column(align=True)
+            col.label(text="Bundled .blend files may contain Python scripts.", icon="ERROR")
+            col.label(text="Enable only for packages you trust.")
 
         box = layout.box()
         box.label(text="Materials", icon="MATERIAL")
@@ -140,7 +154,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         if self.outlines:
             sub.prop(self, "outline_width_scale")
         box.prop(self, "reuse_existing")
-        box.prop(self, "blend_materials")
+        sub = box.column()
+        sub.active = self.import_blend
+        sub.prop(self, "blend_materials")
         box.prop(self, "store_props")
 
         box = layout.box()
@@ -190,6 +206,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 use_anim=self.use_anim,
                 ignore_leaf_bones=self.ignore_leaf_bones,
                 global_scale=self.global_scale,
+                import_blend=self.import_blend,
                 blend_materials=self.blend_materials,
                 use_vrm_addon=self.use_vrm_addon,
                 outlines=self.outlines,
@@ -207,7 +224,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 base = index / len(paths)
                 span = 1.0 / len(paths)
                 try:
-                    prepared = prepare_package(path, build_shader_table(opts.shader_table_path))
+                    prepared = prepare_package(
+                        path, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
+                    )
                     ask = opts.models == "ASK" and not bpy.app.background
                     if ask and (len(prepared.models) > 1 or len(prepared.prefab_tables) > 1):
                         select_models.set_pending(path, opts, prepared)

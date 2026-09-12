@@ -96,9 +96,12 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             item.guid = m.guid
             item.pathname = m.entry.pathname
             item.size_text = _human_size(m.entry.size)
-            item.materials_text = (
-                f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
-            ) if m.supported else "unsupported"
+            if m.supported:
+                item.materials_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
+            elif m.entry.ext == ".blend":
+                item.materials_text = ".blend import disabled"
+            else:
+                item.materials_text = "unsupported"
             item.supported = m.supported
             item.selected = m.supported
         self.package_name = prepared.path.name

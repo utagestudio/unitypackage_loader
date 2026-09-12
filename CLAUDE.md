@@ -79,6 +79,7 @@ python3 -m unittest discover -s tests -t .
 # 合成パッケージの生成と統合テスト（実在アセット不要）
 blender -b --factory-startup --python tests/make_synthetic_package.py
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic.json
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py

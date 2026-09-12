@@ -1,5 +1,5 @@
 {
-  "options": { "material_mode": "AUTO", "models": "ALL" },
+  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
   "objects": { "count": 7, "mesh_count": 7, "armature_count": 0 },
   "materials": { "count": 7, "mapped": 7, "families": ["standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab"] },
   "images": { "count": 2 },

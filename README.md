@@ -6,7 +6,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
 - Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
-- What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files, `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
+- What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
 - What is not imported: shader source code, C# scripts, animations, prefab hierarchies, Expression menus, etc.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
@@ -54,12 +54,13 @@ Load the generated zip via Preferences > Get Extensions > "Install from Disk".
 | Model | Models | `Ask` (shows a selection dialog when there are multiple models) / `All` / `First Only` |
 | | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
+| | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Force Opaque | Ignore Unity's Cutout / Transparent settings |
 | | Backface Culling / Normal Maps / Emission | Whether to apply each element |
 | | Outlines (Solidify) | Add a Solidify outline from Unity's outline color and width (converted with Width Scale) |
 | | Reuse Existing Materials | Reuse a material with the same name if one already exists instead of rebuilding it |
-| | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files |
+| | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files (only when the option above is on) |
 | | Store Unity Properties | Store GUIDs, shadow colors, etc. as custom properties |
 | Textures | Extract To | `Beside .blend` (`//textures/<package name>/`) / `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | Pack images into the .blend file |
@@ -71,6 +72,14 @@ material, textures used, and warnings). A Collection named after the package is 
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unity Package Importer).
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
+
+### Security notes
+
+- **Bundled .blend files are not imported by default.** A `.blend` can carry Python code (driver expressions,
+  registered text blocks) that Blender runs when "Auto Run Python Scripts" is enabled, so appending a `.blend` from
+  an untrusted package is equivalent to running its scripts. Turn on "Import Bundled .blend Files" only for packages
+  you trust, and keep "Auto Run Python Scripts" off unless you need it.
+- The add-on itself never executes code from the package (C# scripts, shaders and Python are ignored).
 
 ### Matching meshes to materials
 
