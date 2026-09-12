@@ -10,6 +10,8 @@ from unitypackage_loader.core.profiles.vrchat_mobile import VRChatMobileProfile
 
 TOON_LIT = "affc81f3d164d734d8f13053effb1c5c"
 STANDARD_LITE = "0b7113dea2069fc4e8943843eff19f70"
+TOON_STANDARD = "e765db0afa7ecfc44ade2e4e2491f65a"
+TOON_STANDARD_OUTLINE = "051a0ed2f2aedd741aa8186ae92f97e0"
 
 
 def shader(guid: str) -> str:
@@ -39,6 +41,30 @@ STANDARD_LITE_EMISSION_ON = mat_yaml(
     colors=[("_Color", (1, 1, 1, 1)), ("_EmissionColor", (1, 0.5, 0, 1))],
     keywords=["_EMISSION"],
 )
+
+TOON_STANDARD_FULL = mat_yaml(
+    "Skin", shader(TOON_STANDARD_OUTLINE),
+    tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_BumpMap", TEX_N, (1, 1), (0, 0)), ("_EmissionMap", TEX_E, (1, 1), (0, 0)),
+         ("_Ramp", TEX_E, (1, 1), (0, 0)), ("_Matcap", TEX_N, (1, 1), (0, 0)), ("_OcclusionMap", TEX_A, (1, 1), (0, 0))],
+    floats=[("_Culling", 0), ("_BumpScale", 0.8), ("_EmissionStrength", 1.5), ("_MetallicStrength", 0.3), ("_GlossStrength", 0.9),
+            ("_Metallic", 1), ("_Glossiness", 1), ("_ShadowBoost", 0.2), ("_ShadowAlbedo", 0.4), ("_MinBrightness", 0.05),
+            ("_RimIntensity", 0.5), ("_MatcapType", 1), ("_MatcapStrength", 0.7), ("_OutlineThickness", 0.1), ("_Mode", 3)],
+    colors=[("_Color", (1, 0.9, 0.9, 1)), ("_EmissionColor", (0.2, 0.2, 1, 1)), ("_RimColor", (1, 1, 1, 1)), ("_OutlineColor", (0.1, 0, 0, 1))],
+    keywords=["USE_NORMAL_MAPS", "USE_SPECULAR", "USE_MATCAP", "USE_OCCLUSION_MAP"],
+)
+
+# キーワードが無ければ、テクスチャが割り当てられていても機能は OFF
+TOON_STANDARD_FEATURES_OFF = mat_yaml(
+    "Plain", shader(TOON_STANDARD),
+    tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_BumpMap", TEX_N, (1, 1), (0, 0)), ("_Matcap", TEX_N, (1, 1), (0, 0))],
+    floats=[("_Culling", 2), ("_MetallicStrength", 1), ("_GlossStrength", 1), ("_RimIntensity", 0), ("_EmissionStrength", 1)],
+    colors=[("_Color", (1, 1, 1, 1)), ("_EmissionColor", (0, 0, 0, 0))],
+)
+
+# GUID 表に無くても固有プロパティで Toon Standard と判定できる
+TOON_STANDARD_UNKNOWN_GUID = TOON_STANDARD_FEATURES_OFF.replace(TOON_STANDARD, "66666666666666666666666666666666").replace(
+    "    m_Floats:\n", "    m_Floats:\n    - _ShadowBoost: 0\n    - _MinBrightness: 0\n").replace(
+    "    m_TexEnvs:\n", "    m_TexEnvs:\n    - _Ramp:\n        m_Texture: {fileID: 0}\n        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n")
 
 
 class ToonLitTests(unittest.TestCase):
@@ -82,3 +108,48 @@ class StandardLiteTests(unittest.TestCase):
         self.assertEqual(n.emission_tex.guid, TEX_E)
         self.assertEqual(n.emission_color, (1.0, 0.5, 0.0, 1.0))
         self.assertEqual(n.emission_strength, 1.0)
+
+
+class ToonStandardTests(unittest.TestCase):
+    def test_full_features(self):
+        mat = parse_material(TOON_STANDARD_FULL)
+        profile, info = select_profile(mat)
+        self.assertIsInstance(profile, VRChatMobileProfile)
+        self.assertTrue(info.outline)
+        n = normalize_material(mat)
+        self.assertEqual((n.family, n.lighting, n.alpha_mode), ("vrchat_mobile", "toon", "opaque"))  # _Mode 3 の残骸は無視
+        self.assertEqual(n.base_color, (1.0, 0.9, 0.9, 1.0))
+        self.assertFalse(n.cull_backface)  # _Culling 0
+        self.assertEqual(n.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(n.normal_strength, 0.8)
+        self.assertEqual(n.emission_tex.guid, TEX_E)
+        self.assertEqual(n.emission_color, (0.2, 0.2, 1.0, 1.0))
+        self.assertAlmostEqual(n.emission_strength, 1.5)
+        self.assertAlmostEqual(n.metallic, 0.3)   # _Metallic 1 ではなく _MetallicStrength
+        self.assertAlmostEqual(n.roughness, 0.1)  # 1 - _GlossStrength
+        self.assertEqual(n.occlusion_tex.guid, TEX_A)
+        self.assertEqual(n.extras["shadow"]["ramp"], TEX_E)
+        self.assertAlmostEqual(n.extras["shadow"]["boost"], 0.2)
+        self.assertEqual(n.extras["rim"]["color"], (1.0, 1.0, 1.0, 1.0))
+        self.assertEqual(n.extras["matcap"], {"tex": TEX_N, "mask": None, "additive": False, "strength": 0.7})
+        self.assertEqual(n.extras["outline"]["color"], (0.1, 0.0, 0.0, 1.0))
+        self.assertAlmostEqual(n.extras["outline"]["width"], 0.1)
+        self.assertEqual(n.warnings, [])
+
+    def test_features_off_without_keywords(self):
+        n = normalize_material(parse_material(TOON_STANDARD_FEATURES_OFF))
+        self.assertIsNone(n.normal_tex)
+        self.assertFalse(n.has_emission)
+        self.assertEqual((n.metallic, n.roughness), (0.0, 1.0))
+        self.assertTrue(n.cull_backface)
+        self.assertNotIn("matcap", n.extras)
+        self.assertNotIn("rim", n.extras)
+        self.assertNotIn("outline", n.extras)
+
+    def test_fingerprint_without_guid(self):
+        mat = parse_material(TOON_STANDARD_UNKNOWN_GUID)
+        profile, info = select_profile(mat)
+        self.assertIsInstance(profile, VRChatMobileProfile)
+        self.assertIsNone(info)
+        n = normalize_material(mat)
+        self.assertEqual((n.family, n.lighting, n.extras["variant"]), ("vrchat_mobile", "toon", "toon_standard"))

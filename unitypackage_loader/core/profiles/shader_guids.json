@@ -558,6 +558,20 @@
       "name": "VRChat/Mobile/Standard Lite",
       "lighting": "pbr",
       "variant": "standard_lite"
+    },
+    "e765db0afa7ecfc44ade2e4e2491f65a": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Standard",
+      "lighting": "toon",
+      "outline": false,
+      "variant": "toon_standard"
+    },
+    "051a0ed2f2aedd741aa8186ae92f97e0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Toon Standard (Outline)",
+      "lighting": "toon",
+      "outline": true,
+      "variant": "toon_standard"
     }
   }
 }
