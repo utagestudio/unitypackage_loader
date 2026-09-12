@@ -212,6 +212,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 outlines=self.outlines,
                 outline_width_scale=self.outline_width_scale,
                 shader_table_path=prefs.shader_table_path if prefs else "",
+                max_extract_size=(prefs.max_extract_mb << 20) if prefs else 0,
             )
 
         wm = context.window_manager

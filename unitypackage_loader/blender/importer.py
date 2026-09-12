@@ -49,6 +49,7 @@ class ImportOptions:
     pack_images: bool = False
     import_unreferenced: bool = False
     overwrite_extracted: bool = False
+    max_extract_size: int = 0  # 1 回のインポートで展開する合計バイト数の上限（0 は無制限。Preferences から）
     fbx_importer: str = "AUTO"  # AUTO / NEW / LEGACY
     use_anim: bool = False
     ignore_leaf_bones: bool = True
@@ -409,6 +410,7 @@ def run_import(
         extract_root,
         overwrite=opts.overwrite_extracted,
         progress=lambda f, n: step(0.2 + 0.3 * f, f"Extracting {n}"),
+        max_total_size=opts.max_extract_size,
     )
 
     # --- 画像の読み込み ---

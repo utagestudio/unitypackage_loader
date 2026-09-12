@@ -339,6 +339,8 @@ class UnityPackage:
   末尾のドット / 空白を拒否する。規則は展開する OS に依らず同じ（Linux で展開した結果を Windows で開くケースがあるため）。
 - メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB。tar ヘッダーのサイズで判定）。
   超えた `pathname` / `asset.meta` は警告して無視し、`read_asset` は `PackageError`（呼び出し側はそのアセットだけスキップ）。
+- 展開前に書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せても実際に書く量）を求め、
+  Preferences の上限（`Max Extract Size`、既定 8 GiB、0 で無制限）と展開先の空き容量（`shutil.disk_usage`）を超えるなら何も書かずに `PackageError`。
 - 書き出し時は展開先から対象までの各要素がシンボリックリンクでないことを確認し、リンクなら `PackageError`（既存のリンク経由で外側へ書くのを防ぐ）。展開先自体はユーザーが選んだ場所なのでリンクでもよい。
 - 進捗: `wm.progress_begin/update/end`。
 

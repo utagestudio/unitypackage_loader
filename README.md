@@ -72,6 +72,8 @@ material, textures used, and warnings). A Collection named after the package is 
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unity Package Importer).
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
+"Max Extract Size" (default 8 GiB, 0 = no limit) refuses an import before writing anything when the files to extract
+from one package would exceed it or the free space of the destination.
 
 ### Security notes
 
