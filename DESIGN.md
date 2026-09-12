@@ -356,6 +356,8 @@ class UnityPackage:
   - スカラー: int / float / 文字列（クォート有無）。`-` 始まりの数値。`m_Name: ` の空値
   - 複数行に折り返された `{...}`（サンプルの prefab にあり）
 - 出力: `dict / list / str / int / float`。`{fileID, guid, type}` は `UnityRef` にする。
+- 安全性: ブロック・フローともネスト深さに上限（`MAX_DEPTH` = 256）を置き、超えたら `UnityYamlError`（`ValueError` 派生）。
+  万一の `RecursionError` も `UnityYamlError` に揃える。呼び出し側（`.mat` / `.meta` / prefab）は `ValueError` を捕捉してそのアセットだけスキップする。
 - 検証: サンプルパッケージ内の全 `.mat` と全 `.meta` をパースして例外ゼロ。
 - 将来 PyYAML を wheel 同梱する余地は残す（`blender_manifest.toml` の `wheels`）が、初期は専用パーサーで十分。
 

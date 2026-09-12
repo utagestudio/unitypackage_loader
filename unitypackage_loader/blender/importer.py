@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -129,6 +130,27 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     return table
 
 
+def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
+    """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
+    if not entry.meta_text:
+        return ModelImporterInfo()
+    try:
+        return ModelImporterInfo.from_meta(entry.meta_text)
+    except ValueError as exc:
+        warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        return ModelImporterInfo()
+
+
+def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImporterInfo:
+    if not entry.meta_text:
+        return TextureImporterInfo()
+    try:
+        return TextureImporterInfo.from_meta(entry.meta_text)
+    except ValueError as exc:
+        warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        return TextureImporterInfo()
+
+
 def prepare_package(
     filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False
 ) -> PreparedPackage:
@@ -152,7 +174,7 @@ def prepare_package(
 
     models: list[ModelSummary] = []
     for entry in pkg.models():
-        info = ModelImporterInfo.from_meta(entry.meta_text) if entry.meta_text else ModelImporterInfo()
+        info = _model_info(entry, warnings.append)
         names = list(info.external_materials)
         resolution = resolve_materials(names, info, unity_mats, entry.pathname)
         resolved = sum(1 for r in resolution.values() if r.guid)
@@ -419,7 +441,7 @@ def run_import(
     tex_infos: dict[str, TextureImporterInfo] = {}
     for guid in sorted(needed_tex):
         entry = pkg.get(guid)
-        info = TextureImporterInfo.from_meta(entry.meta_text) if entry.meta_text else TextureImporterInfo()
+        info = _texture_info(entry, report.warn)
         tex_infos[guid] = info
         path = paths.get(guid)
         image = load_image(path, info, pack=opts.pack_images) if path else None
@@ -457,7 +479,7 @@ def run_import(
         for index, summary in enumerate(models):
             model = summary.entry
             step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
-            model_info = ModelImporterInfo.from_meta(model.meta_text) if model.meta_text else ModelImporterInfo()
+            model_info = _model_info(model, report.warn)
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}
             delegated = _import_model(context, paths[model.guid], model, opts, collection, report)

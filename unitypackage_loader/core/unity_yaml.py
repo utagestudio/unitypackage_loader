@@ -23,13 +23,27 @@ __all__ = [
     "UnityRef",
     "UnityDocument",
     "UnityYamlError",
+    "MAX_DEPTH",
     "parse_documents",
     "parse_text",
 ]
 
 
 class UnityYamlError(ValueError):
-    """パースできない行があったときに送出される。"""
+    """パースできない行があったとき、またはネストが深すぎるときに送出される。
+
+    ``ValueError`` の派生なので、呼び出し側は ``ValueError`` でまとめて捕捉できる。
+    """
+
+
+# ブロック / フローのネスト深さの上限。Unity の出力は高々 10 段程度なので十分大きく、
+# かつ Python の再帰上限（既定 1000 フレーム）より手前で止まる値にする
+MAX_DEPTH = 256
+
+
+def _check_depth(depth: int, what: str) -> None:
+    if depth > MAX_DEPTH:
+        raise UnityYamlError(f"{what} nested deeper than {MAX_DEPTH} levels")
 
 
 @dataclass(frozen=True)
@@ -137,6 +151,7 @@ class _FlowParser:
     def __init__(self, text: str):
         self.text = text
         self.pos = 0
+        self.depth = 0
 
     def parse(self) -> Any:
         value = self._value()
@@ -190,6 +205,8 @@ class _FlowParser:
 
     def _mapping(self) -> Any:
         self.pos += 1  # {
+        self.depth += 1
+        _check_depth(self.depth, "flow value")
         result: dict[str, Any] = {}
         while True:
             self._skip_ws()
@@ -207,10 +224,13 @@ class _FlowParser:
             self._skip_ws()
             if self._peek() == ",":
                 self.pos += 1
+        self.depth -= 1
         return _maybe_ref(result)
 
     def _sequence(self) -> list[Any]:
         self.pos += 1  # [
+        self.depth += 1
+        _check_depth(self.depth, "flow value")
         items: list[Any] = []
         while True:
             self._skip_ws()
@@ -223,6 +243,7 @@ class _FlowParser:
             self._skip_ws()
             if self._peek() == ",":
                 self.pos += 1
+        self.depth -= 1
         return items
 
 
@@ -296,18 +317,19 @@ class _BlockParser:
     def parse(self) -> Any:
         if not self.lines:
             return {}
-        value, i = self._block(0, self.lines[0].indent)
+        value, i = self._block(0, self.lines[0].indent, 1)
         if i != len(self.lines):
             line = self.lines[i]
             raise UnityYamlError(f"line {line.number}: unexpected indentation: {line.content!r}")
         return value
 
-    def _block(self, i: int, indent: int) -> tuple[Any, int]:
+    def _block(self, i: int, indent: int, depth: int) -> tuple[Any, int]:
+        _check_depth(depth, "block")
         if _is_seq_item(self.lines[i].content):
-            return self._sequence(i, indent)
-        return self._mapping(i, indent)
+            return self._sequence(i, indent, depth)
+        return self._mapping(i, indent, depth)
 
-    def _mapping(self, i: int, indent: int) -> tuple[dict[str, Any], int]:
+    def _mapping(self, i: int, indent: int, depth: int) -> tuple[dict[str, Any], int]:
         result: dict[str, Any] = {}
         n = len(self.lines)
         while i < n:
@@ -318,9 +340,9 @@ class _BlockParser:
             if rest == "":
                 nxt = self.lines[i + 1] if i + 1 < n else None
                 if nxt is not None and nxt.indent > indent:
-                    value, i = self._block(i + 1, nxt.indent)
+                    value, i = self._block(i + 1, nxt.indent, depth + 1)
                 elif nxt is not None and nxt.indent == indent and _is_seq_item(nxt.content):
-                    value, i = self._sequence(i + 1, indent)
+                    value, i = self._sequence(i + 1, indent, depth + 1)
                 else:
                     # ``key: `` （値が空）は Unity では空文字列
                     value, i = "", i + 1
@@ -329,7 +351,8 @@ class _BlockParser:
             result[key] = value
         return result, i
 
-    def _sequence(self, i: int, indent: int) -> tuple[list[Any], int]:
+    def _sequence(self, i: int, indent: int, depth: int) -> tuple[list[Any], int]:
+        _check_depth(depth, "block")
         items: list[Any] = []
         n = len(self.lines)
         while i < n:
@@ -340,7 +363,7 @@ class _BlockParser:
             if content == "":
                 nxt = self.lines[i + 1] if i + 1 < n else None
                 if nxt is not None and nxt.indent > indent:
-                    value, i = self._block(i + 1, nxt.indent)
+                    value, i = self._block(i + 1, nxt.indent, depth + 1)
                 else:
                     value, i = None, i + 1
             elif content[0] in "{[" or content[0] in "'\"":
@@ -350,7 +373,7 @@ class _BlockParser:
                 # ブロックとして読み直す
                 virtual_indent = indent + (len(line.content) - len(content))
                 self.lines[i] = _Line(virtual_indent, content, line.number)
-                value, i = self._block(i, virtual_indent)
+                value, i = self._block(i, virtual_indent, depth + 1)
             else:
                 value, i = self._inline(i, content, None)
             items.append(value)
@@ -373,12 +396,23 @@ class _BlockParser:
 # ---------------------------------------------------------------------------
 
 
+def _parse_block(lines: list[_Line]) -> Any:
+    """ブロックを解析する。深さ上限で止まるはずだが、万一の RecursionError も UnityYamlError に揃える。"""
+    try:
+        return _BlockParser(lines).parse()
+    except RecursionError as exc:
+        raise UnityYamlError("YAML nested too deeply") from exc
+
+
 def parse_text(text: str) -> Any:
-    """ヘッダー無しの YAML（.meta など）を dict / list に変換する。"""
+    """ヘッダー無しの YAML（.meta など）を dict / list に変換する。
+
+    構文エラーとネスト過多はいずれも ``UnityYamlError``（``ValueError`` の派生）。
+    """
     if text.startswith("\ufeff"):
         text = text[1:]
     body = [ln for ln in _split_lines(text) if not ln.content.startswith("%")]
-    return _BlockParser(body).parse()
+    return _parse_block(body)
 
 
 def parse_documents(text: str) -> list[UnityDocument]:
@@ -392,7 +426,7 @@ def parse_documents(text: str) -> list[UnityDocument]:
     def flush() -> None:
         nonlocal buffer
         if current is not None:
-            current.data = _BlockParser(buffer).parse() or {}
+            current.data = _parse_block(buffer) or {}
             docs.append(current)
         buffer = []
 
