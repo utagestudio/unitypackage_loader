@@ -12,6 +12,10 @@ TOON_LIT = "affc81f3d164d734d8f13053effb1c5c"
 STANDARD_LITE = "0b7113dea2069fc4e8943843eff19f70"
 TOON_STANDARD = "e765db0afa7ecfc44ade2e4e2491f65a"
 TOON_STANDARD_OUTLINE = "051a0ed2f2aedd741aa8186ae92f97e0"
+MATCAP_LIT = "3ad043b7f9839cb48a75a9238d433dec"
+DIFFUSE = "2dcd9e0568e0a6f45b92c60ba2eb16a0"
+BUMPED_DIFFUSE = "f8c1f8ac363df824899534a0b30eef00"
+BUMPED_SPECULAR = "528d55c4e8adab14b974ca665ed1b996"
 
 
 def shader(guid: str) -> str:
@@ -153,3 +157,49 @@ class ToonStandardTests(unittest.TestCase):
         self.assertIsNone(info)
         n = normalize_material(mat)
         self.assertEqual((n.family, n.lighting, n.extras["variant"]), ("vrchat_mobile", "toon", "toon_standard"))
+
+
+class SimpleLitTests(unittest.TestCase):
+    """MatCap Lit / Diffuse 系: _MainTex（と _BumpMap）だけを使い、残骸の _Color / _EmissionColor は無視する。"""
+
+    STALE = dict(
+        tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_BumpMap", TEX_N, (1, 1), (0, 0)), ("_MatCap", TEX_E, (1, 1), (0, 0))],
+        floats=[("_Metallic", 1), ("_Glossiness", 1), ("_Shininess", 0.25), ("_Mode", 1)],
+        colors=[("_Color", (0, 0, 0, 1)), ("_EmissionColor", (1, 1, 1, 1)), ("_SpecColor", (0.5, 0.5, 1, 1))],
+        invalid_keywords=["_EMISSION"],
+    )
+
+    def _normalize(self, guid):
+        n = normalize_material(parse_material(mat_yaml("M", shader(guid), **self.STALE)))
+        self.assertEqual((n.family, n.lighting, n.alpha_mode), ("vrchat_mobile", "pbr", "opaque"))
+        self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 1.0))
+        self.assertFalse(n.has_emission)
+        self.assertEqual(n.metallic, 0.0)
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        return n
+
+    def test_matcap_lit(self):
+        n = self._normalize(MATCAP_LIT)
+        self.assertEqual(n.extras["variant"], "matcap_lit")
+        self.assertIsNone(n.normal_tex)
+        self.assertEqual(n.extras["matcap"]["tex"], TEX_E)
+        self.assertFalse(n.extras["matcap"]["additive"])
+        self.assertEqual(n.roughness, 1.0)
+
+    def test_diffuse(self):
+        n = self._normalize(DIFFUSE)
+        self.assertIsNone(n.normal_tex)
+        self.assertNotIn("matcap", n.extras)
+        self.assertEqual(n.roughness, 1.0)
+
+    def test_bumped_diffuse(self):
+        n = self._normalize(BUMPED_DIFFUSE)
+        self.assertEqual(n.normal_tex.guid, TEX_N)
+        self.assertEqual(n.normal_strength, 1.0)
+        self.assertEqual(n.roughness, 1.0)
+
+    def test_bumped_specular(self):
+        n = self._normalize(BUMPED_SPECULAR)
+        self.assertEqual(n.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(n.roughness, 0.75)  # 1 - _Shininess
+        self.assertEqual(n.extras["specular"]["color"], (0.5, 0.5, 1.0, 1.0))

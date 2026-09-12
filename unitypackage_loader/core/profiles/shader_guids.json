@@ -572,6 +572,43 @@
       "lighting": "toon",
       "outline": true,
       "variant": "toon_standard"
+    },
+    "3ad043b7f9839cb48a75a9238d433dec": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/MatCap Lit",
+      "lighting": "pbr",
+      "variant": "matcap_lit"
+    },
+    "2dcd9e0568e0a6f45b92c60ba2eb16a0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Diffuse",
+      "lighting": "pbr",
+      "variant": "diffuse"
+    },
+    "b1f7ecc80417c414b9d62ce541d5bcbf": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Lightmapped",
+      "lighting": "pbr",
+      "variant": "diffuse"
+    },
+    "f8c1f8ac363df824899534a0b30eef00": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Diffuse",
+      "lighting": "pbr",
+      "variant": "bumped_diffuse"
+    },
+    "528d55c4e8adab14b974ca665ed1b996": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Mapped Specular",
+      "lighting": "pbr",
+      "variant": "bumped_specular"
+    },
+    "584dc70fbb9834e48beb29e3206e3ca0": {
+      "family": "vrchat_mobile",
+      "name": "VRChat/Mobile/Bumped Specular",
+      "lighting": "pbr",
+      "variant": "bumped_specular",
+      "verified": false
     }
   }
 }

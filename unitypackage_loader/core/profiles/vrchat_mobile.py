@@ -157,6 +157,30 @@ class VRChatMobileProfile(ShaderProfile):
                 "from_albedo": mat.f("_OutlineFromAlbedo", 0.0),
             }
 
+    def _diffuse(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/Diffuse, Lightmapped: _MainTex だけのライティング付きシェーダー。"""
+        n.lighting = "pbr"
+
+    def _bumped_diffuse(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/Bumped Diffuse: Diffuse + _BumpMap（強度指定無し）。"""
+        self._diffuse(mat, info, n)
+        if mat.tex("_BumpMap"):
+            n.normal_tex = mat.tex("_BumpMap")
+            n.normal_strength = 1.0
+
+    def _bumped_specular(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/Bumped Mapped Specular: Bumped Diffuse + _Shininess / _SpecColor（グロスは _MainTex の A）。"""
+        self._bumped_diffuse(mat, info, n)
+        shininess = max(0.0, min(1.0, mat.f("_Shininess", 0.078125)))
+        n.roughness = 1.0 - shininess
+        n.extras["specular"] = {"color": mat.color("_SpecColor"), "shininess": shininess, "gloss_from_main_alpha": True}
+
+    def _matcap_lit(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
+        """VRChat/Mobile/MatCap Lit: _MainTex × _MatCap × ライティング。MatCap は乗算で extras に保存。"""
+        n.lighting = "pbr"
+        if mat.tex("_MatCap"):
+            n.extras["matcap"] = {"tex": _guid(mat, "_MatCap"), "additive": False, "strength": 1.0}
+
 
 def _guid(mat: UnityMaterial, name: str) -> str | None:
     ref = mat.tex(name)
