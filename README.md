@@ -1,4 +1,4 @@
-# Unity Package Importer for Blender
+# Unitypackage Importer for Blender
 
 English | [日本語](README_ja.md) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
@@ -19,7 +19,7 @@ ln -s "$PWD/unitypackage_loader" ~/.config/blender/5.2/extensions/user_default/u
 ```
 
 In Blender, open Preferences > Get Extensions, run "Refresh Local" from the menu in the upper right,
-and enable "Unity Package Importer".
+and enable "Unitypackage Importer".
 
 **Register as an Extension Repository (recommended)**
 
@@ -47,7 +47,7 @@ Load the generated zip via Preferences > Get Extensions > "Install from Disk".
 ## Usage
 
 - **Drag and drop**: drop a `.unitypackage` onto the 3D Viewport to open a popup with import options. Multiple files can be dropped at once.
-- **Menu**: choose File > Import > Unity Package (.unitypackage), pick the file in the file browser, adjust the options on the right as needed, and click Import.
+- **Menu**: choose File > Import > Unitypackage (.unitypackage), pick the file in the file browser, adjust the options on the right as needed, and click Import.
 
 | Section | Option | Description |
 |---|---|---|
@@ -66,11 +66,11 @@ Load the generated zip via Preferences > Get Extensions > "Install from Disk".
 | | Pack Into .blend | Pack images into the .blend file |
 | | Import Unreferenced Images | Also load images not referenced by any material (masks, icons, etc.) as image data |
 
-A summary appears in the Info bar. The "Unity Package" tab in the 3D View sidebar (N key) shows counts,
+A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) shows counts,
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
 material, textures used, and warnings). A Collection named after the package is created and the objects are placed in it.
 
-Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unity Package Importer).
+Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer).
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
 "Max Extract Size" (default 8 GiB, 0 = no limit) refuses an import before writing anything when the files to extract
 from one package would exceed it or the free space of the destination.

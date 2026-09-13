@@ -1,4 +1,4 @@
-"""Unity Package Importer — .unitypackage を Blender へ直接読み込む Extension。
+"""Unitypackage Importer — .unitypackage を Blender へ直接読み込む Extension。
 
 bpy が無い環境（単体テスト）でも ``core`` パッケージを import できるように、
 bpy 依存部分は遅延 import にしている。

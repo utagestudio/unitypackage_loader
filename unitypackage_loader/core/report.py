@@ -72,7 +72,7 @@ class ImportReport:
         return text
 
     def as_text(self) -> str:
-        lines = [f"[Unity Package Importer] {self.package}", f"  extract root: {self.extract_root}"]
+        lines = [f"[Unitypackage Importer] {self.package}", f"  extract root: {self.extract_root}"]
         lines.append(f"  models ({len(self.models)}):")
         lines += [f"    - {m}" for m in self.models]
         lines.append(f"  objects ({len(self.objects)}):")

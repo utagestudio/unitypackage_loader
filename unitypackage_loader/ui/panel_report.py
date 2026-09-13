@@ -1,4 +1,4 @@
-"""3D View > Sidebar > Unity Package タブ。直近のインポート結果を表示する。"""
+"""3D View > Sidebar > UPI タブ。直近のインポート結果を表示する。"""
 
 from __future__ import annotations
 
@@ -42,12 +42,12 @@ class UNITYPKG_OT_open_extract_folder(bpy.types.Operator):
 class UNITYPKG_PT_report(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Unity Package"
-    bl_label = "Unity Package Importer"
+    bl_category = "UPI"
+    bl_label = "Unitypackage Importer"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator("import_scene.unitypackage", text="Import Unity Package", icon="IMPORT")
+        layout.operator("import_scene.unitypackage", text="Import Unitypackage", icon="IMPORT")
 
         report = importer.LAST_REPORT
         if report is None:
@@ -71,7 +71,7 @@ class UNITYPKG_PT_report(bpy.types.Panel):
 class UNITYPKG_PT_report_materials(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Unity Package"
+    bl_category = "UPI"
     bl_label = "Materials"
     bl_parent_id = "UNITYPKG_PT_report"
     bl_options = {"DEFAULT_CLOSED"}
@@ -103,7 +103,7 @@ class UNITYPKG_PT_report_materials(bpy.types.Panel):
 class UNITYPKG_PT_report_warnings(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Unity Package"
+    bl_category = "UPI"
     bl_label = "Warnings"
     bl_parent_id = "UNITYPKG_PT_report"
 
@@ -131,7 +131,7 @@ class UNITYPKG_PT_report_warnings(bpy.types.Panel):
 class UNITYPKG_PT_tools(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Unity Package"
+    bl_category = "UPI"
     bl_label = "Tools"
 
     def draw(self, context):

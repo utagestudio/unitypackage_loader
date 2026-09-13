@@ -1,4 +1,4 @@
-# Unity Package Importer for Blender
+# Unitypackage Importer for Blender
 
 日本語 | [English](README.md) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
@@ -19,7 +19,7 @@ ln -s "$PWD/unitypackage_loader" ~/.config/blender/5.2/extensions/user_default/u
 ```
 
 Blender の Preferences > Get Extensions で右上メニューから "Refresh Local" を実行し、
-"Unity Package Importer" を有効にします。
+"Unitypackage Importer" を有効にします。
 
 **Extension Repository として登録（推奨）**
 
@@ -46,7 +46,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 ## 使い方
 
 - **ドラッグ＆ドロップ**: `.unitypackage` を 3D ビューポートにドラッグ＆ドロップすると、インポートオプションのポップアップが開きます。複数ファイルをまとめてドロップすることもできます。
-- **メニュー**: File > Import > Unity Package (.unitypackage) からファイルブラウザで選び、右側のオプションを必要に応じて変更して Import
+- **メニュー**: File > Import > Unitypackage (.unitypackage) からファイルブラウザで選び、右側のオプションを必要に応じて変更して Import
 
 | セクション | 項目 | 説明 |
 |---|---|---|
@@ -65,11 +65,11 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 | | Pack Into .blend | 画像を .blend に同梱 |
 | | Import Unreferenced Images | マテリアル未参照の画像（マスク・アイコン等）も画像データとして読み込む |
 
-結果は Info バーに要約が、3D View のサイドバー（N キー）の "Unity Package" タブに件数・マテリアルごとの解決状況・警告が、
+結果は Info バーに要約が、3D View のサイドバー（N キー）の "UPI" タブに件数・マテリアルごとの解決状況・警告が、
 システムコンソールに詳細（各マテリアルの対応先 .mat、使用テクスチャ、警告）が出ます。
 パッケージ名の Collection が作られ、その中にオブジェクトが入ります。
 
-既定値は Preferences（Edit > Preferences > Add-ons > Unity Package Importer）で変更できます。
+既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。
 独自シェーダーの GUID 表（`shader_guids.json` と同じ書式の JSON）を追加登録することもできます。
 "Max Extract Size"（既定 8 GiB、0 で無制限）を超える量を 1 つのパッケージから展開しようとした場合や、展開先の空き容量に
 収まらない場合は、何も書かずにインポートを中止します。

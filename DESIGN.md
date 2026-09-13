@@ -114,7 +114,7 @@ Unity と 1:1 は不可能なので、**「Unity マテリアル → シェー�
 ## 2. ユーザーフロー
 
 ```
-File > Import > Unity Package (.unitypackage)      .unitypackage を 3D View にドラッグ＆ドロップ
+File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View にドラッグ＆ドロップ
         │                                              │（FileHandler → 同じオペレーターを filepath 付きで invoke）
         ▼                                              ▼
  ファイルブラウザ（右側にオプション）      ← §3.1   オプションのポップアップ（invoke_props_dialog）
@@ -226,8 +226,8 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 ### 3.4 完了レポート
 
-- **Info バー**: `Imported 20 objects, 7 materials (7 mapped), 12 textures. 2 warnings — see Unity Package panel.`
-- **3D View > N パネル > "Unity Package" タブ**: 直近のインポートのレポート（読み取り専用）
+- **Info バー**: `Imported 20 objects, 7 materials (7 mapped), 12 textures. 2 warning(s) — see the system console`
+- **3D View > N パネル > "UPI" タブ**: 直近のインポートのレポート（読み取り専用）
 - オブジェクト名・マテリアル名・パス・例外文はパッケージ由来の文字列なので、コンソール（`as_text`）・N パネル・
   モデル選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
   `\x1b` のような可視表現に置き換える（ANSI エスケープで表示を乱せないようにする）。
