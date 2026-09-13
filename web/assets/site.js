@@ -3,6 +3,15 @@
 (function () {
   var root = document.documentElement;
 
+  // Respect "reduce motion": keep the demo on its poster and let the viewer start it.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    Array.prototype.forEach.call(document.querySelectorAll("video.demo-video"), function (v) {
+      v.removeAttribute("autoplay");
+      v.pause();
+      v.controls = true;
+    });
+  }
+
   var sliders = document.querySelectorAll(".ba");
   Array.prototype.forEach.call(sliders, function (box) {
     var range = box.querySelector(".ba-range");

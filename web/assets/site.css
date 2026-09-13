@@ -118,7 +118,8 @@ li + li { margin-top: .35em; }
 /* ---------- figures / placeholders ---------- */
 .shot { margin: 0; display: grid; gap: 10px; }
 .shot .frame { border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); border: 1px solid var(--line); }
-.shot .frame img { display: block; width: 100%; height: auto; }
+.shot .frame img, .shot .frame video { display: block; width: 100%; height: auto; }
+.shot .frame video { aspect-ratio: 16 / 9; background: #393939; }
 .shot figcaption { font-size: .88rem; color: var(--muted); }
 .shot figcaption b { color: var(--ink); font-weight: 800; }
 
