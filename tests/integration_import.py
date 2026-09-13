@@ -131,6 +131,23 @@ def main() -> int:
         c.eq("image count", len(report.images), exp["images"]["count"])
     if "warnings_max" in exp:
         c.le("warning count", len(report.warnings), exp["warnings_max"])
+    if "split_slots" in exp:
+        c.eq("split slots", report.split_slots, exp["split_slots"])
+
+    # ポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、
+    # どのポリゴン群にどのマテリアルが付いたかを確かめる
+    for obj_name, names in exp.get("submesh_materials", {}).items():
+        obj = bpy.data.objects.get(obj_name)
+        c.true(f"object {obj_name} exists", obj is not None)
+        if obj is None:
+            continue
+        seen: list[int] = []
+        for polygon in obj.data.polygons:
+            if polygon.material_index not in seen:
+                seen.append(polygon.material_index)
+        slots = obj.material_slots
+        actual = [slots[i].material.name if i < len(slots) and slots[i].material else "" for i in seen]
+        c.eq(f"{obj_name}.submesh_materials", actual, names)
 
     for spec in exp.get("material_checks", []):
         name = spec["name"]

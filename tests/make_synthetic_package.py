@@ -5,7 +5,8 @@
     blender -b --factory-startup --python tests/make_synthetic_package.py -- <出力パス.unitypackage>
 
 内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
-ノーマルマップ設定）、externalObjects 付きの .meta、Cone に .mat を割り当てる prefab。
+ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
+.mat を割り当てる prefab。
 """
 
 from __future__ import annotations
@@ -127,20 +128,24 @@ def model_meta(guid: str, materials: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def prefab_yaml(game_object: str, mat_guid: str) -> str:
-    return f"""%YAML 1.1
-%TAG !u! tag:unity3d.com,2011:
---- !u!1 &100
-GameObject:
-  m_Name: {game_object}
-  m_Component:
-  - component: {{fileID: 101}}
---- !u!23 &101
-MeshRenderer:
-  m_GameObject: {{fileID: 100}}
-  m_Materials:
-  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}
-"""
+def prefab_yaml(renderers: list[tuple[str, list[str]]]) -> str:
+    """(GameObject 名, m_Materials に並べる .mat GUID) の組から prefab を作る。m_Materials は Unity のサブメッシュ順。"""
+    lines = ["%YAML 1.1", "%TAG !u! tag:unity3d.com,2011:"]
+    for i, (game_object, mat_guids) in enumerate(renderers):
+        go_id, renderer_id = 100 * (i + 1), 100 * (i + 1) + 1
+        lines += [
+            f"--- !u!1 &{go_id}",
+            "GameObject:",
+            f"  m_Name: {game_object}",
+            "  m_Component:",
+            f"  - component: {{fileID: {renderer_id}}}",
+            f"--- !u!23 &{renderer_id}",
+            "MeshRenderer:",
+            f"  m_GameObject: {{fileID: {go_id}}}",
+            "  m_Materials:",
+        ]
+        lines += [f"  - {{fileID: 2100000, guid: {guid}, type: 2}}" for guid in mat_guids]
+    return "\n".join(lines) + "\n"
 
 
 def texture_meta(guid: str, normal: bool) -> str:
@@ -159,7 +164,11 @@ TextureImporter:
 """
 
 
-def export_model(kind: str, mat_name: str, path: Path) -> None:
+def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = None, first_used_mat: str | None = None) -> None:
+    """``first_used_mat`` を渡すと 2 番目のスロットに追加し、先頭側の半分のポリゴンに割り当てる。
+
+    ポリゴンで最初に使われるのが 2 番目のスロットになり、Unity のサブメッシュ順がスロット順と逆になる。
+    """
     bpy.ops.wm.read_factory_settings(use_empty=True)
     if kind == "cube":
         bpy.ops.mesh.primitive_cube_add()
@@ -176,9 +185,14 @@ def export_model(kind: str, mat_name: str, path: Path) -> None:
     else:
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
-    obj.name = f"Synthetic{kind.capitalize()}"
+    obj.name = name or f"Synthetic{kind.capitalize()}"
     mat = bpy.data.materials.new(mat_name)
     obj.data.materials.append(mat)
+    if first_used_mat:
+        obj.data.materials.append(bpy.data.materials.new(first_used_mat))
+        polygons = obj.data.polygons
+        for polygon in polygons[: len(polygons) // 2]:
+            polygon.material_index = 1
     if path.suffix == ".fbx":
         bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False)
     elif path.suffix == ".vrm":
@@ -257,8 +271,25 @@ def main() -> None:
     export_model("cone", "ConeFbxMat", path)
     cone_path = "Assets/Synthetic/Models/Cone.fbx"
     add(cone_path, path.read_bytes(), model_meta(guid_of(cone_path), {}))
+
+    # 2 マテリアルのモデル。ポリゴンは 2 番目のスロット（PairB）から使われるので、Unity のサブメッシュ順と
+    # prefab の m_Materials は PairB, PairA になる。スロット番号で突き合わせると入れ替わってしまう（Issue #22）
+    for pair_name in ("PairA", "PairB"):
+        pathname = f"Assets/Synthetic/Materials/{pair_name}.mat"
+        mat_guids[pair_name] = add(pathname, mat_yaml(pair_name, tex_a, None, (1, 1, 1), 0).encode(),
+                                   f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "pair.fbx"
+    export_model("cube", "PairA", path, name="SyntheticPair", first_used_mat="PairB")
+    pair_path = "Assets/Synthetic/Models/Pair.fbx"
+    add(pair_path, path.read_bytes(),
+        model_meta(guid_of(pair_path), {"PairA": mat_guids["PairA"], "PairB": mat_guids["PairB"]}))
+
     prefab_path = "Assets/Synthetic/Prefabs/Cone.prefab"
-    add(prefab_path, prefab_yaml("SyntheticCone", mat_guids["CylinderMat"]).encode(),
+    prefab = prefab_yaml([
+        ("SyntheticCone", [mat_guids["CylinderMat"]]),
+        ("SyntheticPair", [mat_guids["PairB"], mat_guids["PairA"]]),
+    ])
+    add(prefab_path, prefab.encode(),
         f"fileFormatVersion: 2\nguid: {guid_of(prefab_path)}\nPrefabImporter:\n  externalObjects: {{}}\n")
 
     with tarfile.open(out, "w:gz") as tar:
