@@ -141,6 +141,7 @@ li + li { margin-top: .35em; }
 
 /* ---------- worries → this add-on ---------- */
 .flow { max-width: 760px; margin-inline: auto; margin-bottom: clamp(32px, 5vw, 56px); }
+.flow .section-head { max-width: none; }
 .worry-title { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; align-items: center; }
 .worry-title .face { width: 64px; height: 64px; }
 @media (max-width: 480px) { .worry-title { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; } .worry-title .face { width: 48px; height: 48px; } }
