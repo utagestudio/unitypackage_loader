@@ -371,7 +371,7 @@
         <details>
           <summary>Is it safe to open packages made by someone else?</summary>
           <div class="answer">
-            <p>No code from the package ever runs. Only model files and the textures their materials use are written to disk. Bundled .blend files can carry Python, so they stay closed unless you opt in for that import. File paths and extracted sizes are checked before anything is written.</p>
+            <p>No code from the package ever runs. What gets written to disk is mainly model files and the textures their materials use. Bundled .blend files can carry Python, so they stay closed unless you opt in for that import. File paths and extracted sizes are checked before anything is written.</p>
             <p>FBX and image decoding are done by Blender itself, so keep Blender on the latest LTS. The full notes are in the <a href="https://github.com/utagestudio/unitypackage_loader#security-notes">README</a>.</p>
           </div>
         </details>
