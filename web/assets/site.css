@@ -163,6 +163,7 @@ html[lang="ja"] .vs-after li span { word-break: keep-all; overflow-wrap: anywher
 .use .body { padding: 18px 22px 24px; display: grid; gap: 8px; align-content: start; }
 .use p { color: var(--muted); font-size: .98rem; }
 @media (max-width: 860px) { .uses { grid-template-columns: 1fr; } }
+.uses-note { margin-top: 16px; }
 
 /* ---------- what comes through ---------- */
 .included { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; margin-bottom: clamp(32px, 5vw, 48px); }
