@@ -1,7 +1,7 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
-  "objects": { "count": 11, "mesh_count": 11, "armature_count": 0 },
-  "materials": { "count": 12, "mapped": 12, "families": ["standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab"] },
+  "objects": { "count": 12, "mesh_count": 12, "armature_count": 0 },
+  "materials": { "count": 13, "mapped": 13, "families": ["standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab"] },
   "images": { "count": 2 },
   "warnings_max": 1,
   "split_slots": 0,
@@ -16,6 +16,7 @@
     { "name": "VariantFbxMat", "alpha_mode": "cutout", "shader_name": "Standard" },
     { "name": "TorusBlendMat", "shader_name": "Standard" },
     { "name": "SphereMat.001", "alpha_mode": "cutout", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png" },
-    { "name": "QuestToonMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "UNLIT", "shader_name": "VRChat/Mobile/Toon Lit", "base_image": "ColorA.png", "base_colorspace": "sRGB", "node_types": ["ShaderNodeEmission"] }
+    { "name": "QuestToonMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "UNLIT", "shader_name": "VRChat/Mobile/Toon Lit", "base_image": "ColorA.png", "base_colorspace": "sRGB", "node_types": ["ShaderNodeEmission"] },
+    { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" }
   ]
 }

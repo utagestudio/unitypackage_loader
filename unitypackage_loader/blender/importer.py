@@ -181,7 +181,7 @@ def prepare_package(
     normalized: dict[str, NormalizedMaterial] = {}
     for entry in pkg.materials():
         try:
-            umat = parse_material(pkg.read_text(entry.guid), entry.guid, entry.pathname)
+            umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
         except (MaterialParseError, ValueError, PackageError) as exc:
             warnings.append(f"could not parse {entry.pathname}: {exc}")
             continue
@@ -213,7 +213,7 @@ def prepare_package(
     documents: dict[str, PrefabDocument] = {}
     for entry in pkg.prefabs():
         try:
-            documents[entry.guid.lower()] = parse_prefab(pkg.read_text(entry.guid))
+            documents[entry.guid.lower()] = parse_prefab(pkg.read_asset(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
     model_guids = [m.guid for m in models]
