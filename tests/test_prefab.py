@@ -96,6 +96,15 @@ class PrefabMappingTests(unittest.TestCase):
         res = resolve_materials(["FbxMat0"], info, self.mats, "", self.table, {"Body": ["FbxMat0"]})
         self.assertEqual((res["FbxMat0"].guid, res["FbxMat0"].method), (MAT_B, "external"))
 
+    def test_prefab_fallback_follows_submesh_order(self):
+        # ポリゴンがスロット 1 から使われていれば、m_Materials[0] はスロット 1 のマテリアル
+        object_slots = {"Body": ["FbxMat0", "FbxMat1"]}
+        res = resolve_materials(
+            ["FbxMat0", "FbxMat1"], None, self.mats, "", self.table, object_slots, {"Body": [1, 0]}
+        )
+        self.assertEqual(res["FbxMat0"].guid, MAT_B)
+        self.assertEqual(res["FbxMat1"].guid, MAT_A)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -114,3 +123,23 @@ class SlotAssignmentTests(unittest.TestCase):
         result = slot_assignments(object_slots, table, mats)
         self.assertEqual(result, {("Body.001", 0): MAT_A, ("Body.001", 1): MAT_B, ("Prop", 0): MAT_B})
         self.assertEqual(slot_assignments(object_slots, None, mats), {})
+
+    def test_submesh_slot_order(self):
+        from unitypackage_loader.core.mapping import submesh_slot_order
+
+        # 最初に使われた順。使われないスロット（1）と範囲外の番号は含めない
+        self.assertEqual(submesh_slot_order([0, 0, 3, 2, 3, 0, 9, -1], 4), [0, 3, 2])
+        self.assertEqual(submesh_slot_order([], 2), [])
+
+    def test_slot_assignments_follow_submesh_order(self):
+        from unitypackage_loader.core.mapping import slot_assignments
+
+        mats = {
+            MAT_A: parse_material(LILTOON_OPAQUE, guid=MAT_A),
+            MAT_B: parse_material(LILTOON_TRANS, guid=MAT_B),
+        }
+        table = parse_prefab_materials(PREFAB)
+        # Body のポリゴンはスロット 2 から使われ、スロット 1 はポリゴンが無い（Unity ではサブメッシュにならない）
+        object_slots = {"Body": ["Skin", "Unused", "Hair"]}
+        result = slot_assignments(object_slots, table, mats, {"Body": [2, 0]})
+        self.assertEqual(result, {("Body", 2): MAT_A, ("Body", 0): MAT_B})

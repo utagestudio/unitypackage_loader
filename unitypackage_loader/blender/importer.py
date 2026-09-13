@@ -12,7 +12,7 @@ from pathlib import Path
 
 import bpy
 
-from ..core.mapping import resolve_materials, slot_assignments
+from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
@@ -500,15 +500,17 @@ def run_import(
 
             new_materials: list[bpy.types.Material] = new["materials"]
             fbx_names = [m.name for m in new_materials]
+            mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
             object_slots = {
                 o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
-                for o in new["objects"]
-                if o.type == "MESH"
+                for o in mesh_objects
             }
+            # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
+            submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
             resolution = resolve_materials(
-                fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots
+                fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
             )
-            assignments = slot_assignments(object_slots, prefab_table, unity_mats)
+            assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
 
             # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
             keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
@@ -639,6 +641,14 @@ def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normali
         slot.material = mat
         count += 1
     return count
+
+
+def _submesh_order(obj) -> list[int]:
+    """Unity のサブメッシュ順（ポリゴンで最初に使われた順）に並べたスロット番号。"""
+    polygons = obj.data.polygons
+    indices = [0] * len(polygons)
+    polygons.foreach_get("material_index", indices)
+    return submesh_slot_order(indices, len(obj.material_slots))
 
 
 def _replace_material(objects, old: bpy.types.Material, new: bpy.types.Material) -> None:

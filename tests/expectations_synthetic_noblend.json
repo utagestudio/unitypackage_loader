@@ -1,9 +1,11 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL" },
-  "objects": { "count": 6, "mesh_count": 6, "armature_count": 0 },
-  "materials": { "count": 6, "mapped": 6, "families": ["standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
+  "objects": { "count": 7, "mesh_count": 7, "armature_count": 0 },
+  "materials": { "count": 8, "mapped": 8, "families": ["standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
   "images": { "count": 2 },
   "warnings_max": 2,
+  "split_slots": 0,
+  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"] },
   "material_checks": [
     { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard" }
   ]

@@ -33,7 +33,9 @@
       "node_types": ["ShaderNodeMixShader"]
     }
   ],
-  "shape_keys": { "<オブジェクト名>": 0 }
+  "shape_keys": { "<オブジェクト名>": 0 },
+  "split_slots": 0,
+  "submesh_materials": { "<オブジェクト名>": ["<マテリアル名>"] }
 }
 ```
 
@@ -48,6 +50,8 @@
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
+| `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
+| `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 
 実行:
 

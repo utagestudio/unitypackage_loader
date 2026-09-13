@@ -96,13 +96,15 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 1. モデルの `.meta`（ModelImporter の externalObjects）に書かれた「マテリアル名 → .mat」
 2. `.mat` の名前との一致（同名が複数あればモデルと同じフォルダに近いもの）
-3. prefab 内の同名 GameObject の Renderer が同じスロットに持つ .mat
+3. prefab 内の同名 GameObject の Renderer が同じサブメッシュに持つ .mat
 
 の順で解決します。どれにも当たらないマテリアルはインポーターが作ったまま残し、警告に出します。
 
 FBX 内では少数のマテリアルを共有し、Unity 側で prefab がパーツごとに別の .mat を割り当てているパッケージでは、
 prefab の割り当てに従ってスロット単位で Blender マテリアルを分割します。prefab が複数ある場合（車体色違いなど）は
 選択ダイアログでどの prefab を使うか選べます。
+prefab のマテリアルの並びは Unity のサブメッシュ順（メッシュのポリゴンで最初に使われた順）で、Blender のスロット順と
+異なることがあるため、その順でスロットに対応付けます。
 
 ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます）。
 
