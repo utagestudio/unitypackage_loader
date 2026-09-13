@@ -1,7 +1,25 @@
-// Theme toggle and copy-to-clipboard. The initial theme is applied by the inline script in <head>
-// (so the page does not flash); this file only handles interaction.
+// Theme toggle, copy-to-clipboard and the before/after slider. The initial theme is applied by the inline
+// script in <head> (so the page does not flash); this file only handles interaction.
 (function () {
   var root = document.documentElement;
+
+  // Respect "reduce motion": keep the demo on its poster and let the viewer start it.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    Array.prototype.forEach.call(document.querySelectorAll("video.demo-video"), function (v) {
+      v.removeAttribute("autoplay");
+      v.pause();
+      v.controls = true;
+    });
+  }
+
+  var sliders = document.querySelectorAll(".ba");
+  Array.prototype.forEach.call(sliders, function (box) {
+    var range = box.querySelector(".ba-range");
+    if (!range) return;
+    function update() { box.style.setProperty("--pos", range.value + "%"); }
+    range.addEventListener("input", update);
+    update();
+  });
 
   function currentTheme() {
     var stamped = root.getAttribute("data-theme");
