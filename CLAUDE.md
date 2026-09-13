@@ -101,6 +101,7 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
   Google Tag Manager は、環境変数 `GTM_ID`（無ければリポジトリ直下の `.env`。gitignore 対象）に `GTM-XXXX` 形式の ID があるときだけ埋め込む。
   公開時はリポジトリの Settings > Secrets and variables > Actions > Variables の `GTM_ID` を `pages.yml` が渡す（未設定なら埋め込まない）。
+  フッターの「アクセス解析と Cookie について」は `<!-- gtm-only -->` 〜 `<!-- /gtm-only -->` で囲んであり、GTM ID があるときだけ残る。GTM で入れるタグを増やしたら文面も見直す。
   OGP 画像は `tools/og_card.html` を Chrome でレンダリングして、英語は `web/assets/og.png`、日本語は `?lang=ja` を付けて `og-ja.png` に置く
   （コマンドは同ファイル冒頭。右側の前後比較は `hero-before.webp` / `hero-after.webp` を読むので、ヒーロー画像を差し替えたら作り直す）。
   使い道の画像は全画面のスクリーンショットから 3:2 で切り出し、1200×800 の WebP にする（1 枚目は `use-edit.webp`、2・3 枚目は F12 でレンダリングした画像から作った `use-render.webp` / `use-props.webp`）。
