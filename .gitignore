@@ -31,6 +31,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# --- ローカルの環境変数（GTM_ID など） ---
+.env
+
 # --- セッション用の非公開メモ ---
 CLAUDE.local.md
 
