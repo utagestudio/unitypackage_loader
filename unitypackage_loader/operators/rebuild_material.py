@@ -83,7 +83,7 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
             except Exception as exc:  # noqa: BLE001
                 failed.append(f"{mat.name}: {exc!r}")
         for f in failed:
-            print("[Unity Package Importer] rebuild failed:", f)
+            print("[Unitypackage Importer] rebuild failed:", f)
         msg = f"Rebuilt {done} material(s)"
         if skipped:
             msg += f", skipped {skipped} without Unity data"

@@ -1,4 +1,4 @@
-"""File > Import > Unity Package オペレーター。"""
+"""File > Import > Unitypackage オペレーター。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from . import select_models
 
 class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.unitypackage"
-    bl_label = "Import Unity Package"
+    bl_label = "Import Unitypackage"
     bl_description = "Import meshes, materials and textures from a .unitypackage"
     bl_options = {"REGISTER", "UNDO", "PRESET"}
 
@@ -260,7 +260,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             for report in reports:
                 print(report.as_text())
             for f in failures:
-                print("[Unity Package Importer] failed:", f)
+                print("[Unitypackage Importer] failed:", f)
 
         if not reports:
             self.report({"ERROR"}, "; ".join(failures) or "Nothing imported")
@@ -286,7 +286,7 @@ class IO_FH_unitypackage(bpy.types.FileHandler):
     """3D ビューポートなどへの .unitypackage のドラッグ＆ドロップを受け付ける。"""
 
     bl_idname = "IO_FH_unitypackage"
-    bl_label = "Unity Package"
+    bl_label = "Unitypackage"
     bl_import_operator = IMPORT_SCENE_OT_unitypackage.bl_idname
     bl_file_extensions = ".unitypackage"
 
@@ -298,7 +298,7 @@ class IO_FH_unitypackage(bpy.types.FileHandler):
 
 
 def menu_func_import(self, context):
-    self.layout.operator(IMPORT_SCENE_OT_unitypackage.bl_idname, text="Unity Package (.unitypackage)")
+    self.layout.operator(IMPORT_SCENE_OT_unitypackage.bl_idname, text="Unitypackage (.unitypackage)")
 
 
 _classes = (IMPORT_SCENE_OT_unitypackage, IO_FH_unitypackage)
