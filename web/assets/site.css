@@ -139,24 +139,29 @@ li + li { margin-top: .35em; }
 .ba-label-after { right: 12px; background: #f07f2a; color: #3a322c; }
 @media (max-width: 480px) { .ba-label { top: 8px; font-size: .74rem; padding: 4px 9px; } .ba-label-before { left: 8px; } .ba-label-after { right: 8px; } }
 
-/* ---------- the usual way vs. this add-on ---------- */
-.versus { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: clamp(24px, 4vw, 40px); }
-.vs-col { border-radius: var(--radius); padding: clamp(20px, 3vw, 28px); display: grid; gap: 16px; align-content: start; }
-.vs-before { background: var(--surface-2); border: 1px solid var(--line); }
-.vs-before h3 { color: var(--muted); }
-.vs-after { background: var(--peach); }
+/* ---------- worries → this add-on ---------- */
+.flow { max-width: 760px; margin-inline: auto; margin-bottom: clamp(32px, 5vw, 56px); }
+.worry-title { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; align-items: center; }
+.worry-title .face { width: 64px; height: 64px; }
+@media (max-width: 480px) { .worry-title { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; } .worry-title .face { width: 48px; height: 48px; } }
+.worries { list-style: none; margin: 0; padding: clamp(18px, 3vw, 28px); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 12px; }
+.worries li { margin: 0; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px; align-items: start; font-size: 1.05rem; font-weight: 700; line-height: 1.6; }
+.worries .box { width: 26px; height: 26px; border-radius: 7px; border: 2px solid var(--muted); display: grid; place-items: center; color: var(--ink); background: var(--bg); margin-top: 1px; }
+.worries .box svg { width: 18px; height: 18px; }
+.turn { display: grid; justify-items: center; gap: 6px; margin-block: 20px; text-align: center; }
+.turn .arrow { width: 0; height: 0; border-style: solid; border-width: 18px 34px 0; border-color: var(--accent) transparent transparent; }
+.turn p { font-weight: 800; font-size: clamp(1.15rem, 1rem + .6vw, 1.45rem); line-height: 1.5; }
+.turn em { font-style: normal; color: var(--ink); }
+.vs-after { background: var(--peach); border-radius: var(--radius); padding: clamp(20px, 3vw, 28px); display: grid; gap: 16px; }
 .vs-after h3 { color: var(--ink-strong); }
 .vs-after p { color: var(--text); }
 .vs-steps { list-style: none; padding: 0; display: grid; gap: 10px; counter-reset: vs; }
 .vs-steps li { counter-increment: vs; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start; margin: 0; }
-.vs-steps li::before { content: counter(vs); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: .85rem; background: var(--bg); color: var(--muted); border: 1px solid var(--line); margin-top: 1px; }
-.vs-before li { color: var(--muted); }
+.vs-steps li::before { content: counter(vs); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: .85rem; background: var(--accent); color: var(--on-accent); margin-top: 4px; }
 .vs-after li { font-size: clamp(1.15rem, 1rem + .6vw, 1.4rem); font-weight: 800; line-height: 1.45; }
-.vs-after li::before { background: var(--accent); color: var(--on-accent); border: 0; margin-top: 4px; }
 html[lang="ja"] .vs-after li span { word-break: keep-all; overflow-wrap: anywhere; }
 .shot.demo { max-width: 880px; margin-inline: auto; }
 .shot.demo figcaption { text-align: center; }
-@media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
 
 /* ---------- use cases ---------- */
 .uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }

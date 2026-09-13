@@ -124,23 +124,32 @@
 
   <section class="section" id="compare">
     <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">こんな手間、ありませんか</span>
-        <h2>Blender で見たいだけなのに、<wbr>まず Unity の準備から</h2>
-        <p>買ったアバターを Blender で確認したり改変したりするには、これまで Unity を経由するのが一般的でした。</p>
-      </div>
-      <div class="versus">
-        <div class="vs-col vs-before">
-          <h3>これまでの手順</h3>
-          <ol class="vs-steps">
-            <li>Unity Hub と、対応するバージョンの Unity をインストール</li>
-            <li>プロジェクトを作って、パッケージをインポート</li>
-            <li>Assets フォルダーから FBX を探して、Blender に読み込む</li>
-            <li>真っ白なモデルに、マテリアルとテクスチャを 1 枚ずつ繋ぎ直す</li>
-            <li>影色やリムライトは、Unity の画面と見比べながら手で調整</li>
-          </ol>
+      <div class="flow">
+        <div class="section-head">
+          <span class="eyebrow">こんなお悩み、ありませんか？</span>
+          <div class="worry-title">
+          <svg class="face" viewBox="0 0 64 64" aria-hidden="true">
+            <circle cx="32" cy="34" r="26" style="fill:var(--peach)"/>
+            <path d="M19 30l9-4M45 30l-9-4" style="fill:none;stroke:var(--text);stroke-width:3;stroke-linecap:round"/>
+            <circle cx="24" cy="36" r="3" style="fill:var(--text)"/>
+            <circle cx="40" cy="36" r="3" style="fill:var(--text)"/>
+            <path d="M24 48c3-3 5-3 8 0s5 3 8 0" style="fill:none;stroke:var(--text);stroke-width:3;stroke-linecap:round"/>
+            <path d="M52 10c-4 6-6 9-6 12a6 6 0 0 0 12 0c0-3-2-6-6-12z" style="fill:var(--mint)"/>
+          </svg>
+            <h2>Blender で見たいだけなのに……</h2>
+          </div>
         </div>
-        <div class="vs-col vs-after">
+        <ul class="worries">
+          <li><span class="box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>まず Unity のインストールとプロジェクト作りから始まる</span></li>
+          <li><span class="box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>FBX を読み込んだら、真っ白なモデルが出てきた</span></li>
+          <li><span class="box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>マテリアルとテクスチャを 1 枚ずつ繋ぎ直すのが面倒</span></li>
+          <li><span class="box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><span>影色やリムライトを、Unity の画面と見比べながら手で直している</span></li>
+        </ul>
+        <div class="turn">
+          <span class="arrow" aria-hidden="true"></span>
+          <p>その手間、<em>ドロップ 1 回</em>で終わります</p>
+        </div>
+        <div class="vs-after">
           <h3>このアドオンなら</h3>
           <ol class="vs-steps">
             <li><span><code>.unitypackage</code> を Blender に<wbr>ドラッグ＆ドロップ</span></li>
