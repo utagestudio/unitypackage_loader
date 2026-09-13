@@ -49,6 +49,9 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build extension zip and repository index
+        env:
+          # リポジトリの Settings > Secrets and variables > Actions > Variables に GTM_ID があれば紹介ページに GTM を埋め込む（無ければ空）
+          GTM_ID: ${{ vars.GTM_ID }}
         run: |
           mkdir -p site
           ~/blender/blender -b --factory-startup --command extension build \
