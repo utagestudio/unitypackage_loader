@@ -99,7 +99,8 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 - バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
-  OGP 画像は `tools/og_card.html` を Chrome でレンダリングして `web/assets/og.png` に置く（コマンドは同ファイル冒頭）。
+  OGP 画像は `tools/og_card.html` を Chrome でレンダリングして、英語は `web/assets/og.png`、日本語は `?lang=ja` を付けて `og-ja.png` に置く
+  （コマンドは同ファイル冒頭。右側の前後比較は `hero-before.webp` / `hero-after.webp` を読むので、ヒーロー画像を差し替えたら作り直す）。
   使い道の画像は全画面のスクリーンショットから 3:2 で切り出し、1200×800 の WebP にする（1 枚目は `use-edit.webp`、2・3 枚目は F12 でレンダリングした画像から作った `use-render.webp` / `use-props.webp`）。
   背景や小物のアセットは、ライセンス上レンダリング画像の公開だけを行い、ファイル自体は `_local/` から出さない。
   ヒーローの読み込み前後（`hero-before.webp` / `hero-after.webp`）は、同じカメラで撮った 2 枚のスクリーンショット（`_local/shots/`）を
