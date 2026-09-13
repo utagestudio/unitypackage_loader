@@ -6,7 +6,7 @@
 
 内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
-.mat を割り当てる prefab。
+.mat を割り当てる prefab。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
 """
 
 from __future__ import annotations
@@ -128,17 +128,25 @@ def model_meta(guid: str, materials: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def prefab_yaml(renderers: list[tuple[str, list[str]]]) -> str:
-    """(GameObject 名, m_Materials に並べる .mat GUID) の組から prefab を作る。m_Materials は Unity のサブメッシュ順。"""
+def prefab_yaml(renderers: list[tuple[str, str, list[str]]]) -> str:
+    """(GameObject 名, メッシュを持つモデルの GUID, m_Materials に並べる .mat GUID) の組から prefab を作る。
+
+    Renderer の fileID は 100 * (番号 + 1) + 1。m_Materials は Unity のサブメッシュ順。
+    """
     lines = ["%YAML 1.1", "%TAG !u! tag:unity3d.com,2011:"]
-    for i, (game_object, mat_guids) in enumerate(renderers):
-        go_id, renderer_id = 100 * (i + 1), 100 * (i + 1) + 1
+    for i, (game_object, model_guid, mat_guids) in enumerate(renderers):
+        go_id, renderer_id, filter_id = 100 * (i + 1), 100 * (i + 1) + 1, 100 * (i + 1) + 2
         lines += [
             f"--- !u!1 &{go_id}",
             "GameObject:",
             f"  m_Name: {game_object}",
             "  m_Component:",
+            f"  - component: {{fileID: {filter_id}}}",
             f"  - component: {{fileID: {renderer_id}}}",
+            f"--- !u!33 &{filter_id}",
+            "MeshFilter:",
+            f"  m_GameObject: {{fileID: {go_id}}}",
+            f"  m_Mesh: {{fileID: 4300000, guid: {model_guid}, type: 3}}",
             f"--- !u!23 &{renderer_id}",
             "MeshRenderer:",
             f"  m_GameObject: {{fileID: {go_id}}}",
@@ -146,6 +154,10 @@ def prefab_yaml(renderers: list[tuple[str, list[str]]]) -> str:
         ]
         lines += [f"  - {{fileID: 2100000, guid: {guid}, type: 2}}" for guid in mat_guids]
     return "\n".join(lines) + "\n"
+
+
+def prefab_meta(pathname: str) -> str:
+    return f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nPrefabImporter:\n  externalObjects: {{}}\n"
 
 
 def texture_meta(guid: str, normal: bool) -> str:
@@ -286,11 +298,24 @@ def main() -> None:
 
     prefab_path = "Assets/Synthetic/Prefabs/Cone.prefab"
     prefab = prefab_yaml([
-        ("SyntheticCone", [mat_guids["CylinderMat"]]),
-        ("SyntheticPair", [mat_guids["PairB"], mat_guids["PairA"]]),
+        ("SyntheticCone", guid_of(cone_path), [mat_guids["CylinderMat"]]),
+        ("SyntheticPair", guid_of(pair_path), [mat_guids["PairB"], mat_guids["PairA"]]),
     ])
-    add(prefab_path, prefab.encode(),
-        f"fileFormatVersion: 2\nguid: {guid_of(prefab_path)}\nPrefabImporter:\n  externalObjects: {{}}\n")
+    add(prefab_path, prefab.encode(), prefab_meta(prefab_path))
+
+    # 同じ名前のオブジェクトを持つ別々のモデルと、それぞれを使う prefab（Issue #25）。
+    # prefab の表を名前だけで全モデルに当てはめると、パス順で先の TwinA の割り当てが TwinB にも使われてしまう
+    for twin, kind, mode in (("TwinA", "cube", 0), ("TwinB", "sphere", 3)):
+        mat_path = f"Assets/Synthetic/Materials/{twin}Mat.mat"
+        mat_guid = add(mat_path, mat_yaml(f"{twin}Mat", tex_a, None, (1, 1, 1), mode).encode(),
+                       f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+        path = tmp / f"{twin.lower()}.fbx"
+        export_model(kind, f"{twin}FbxMat", path, name="SyntheticTwin")
+        model_path = f"Assets/Synthetic/Models/{twin}.fbx"
+        add(model_path, path.read_bytes(), model_meta(guid_of(model_path), {}))
+        twin_prefab_path = f"Assets/Synthetic/Prefabs/{twin}.prefab"
+        add(twin_prefab_path, prefab_yaml([("SyntheticTwin", guid_of(model_path), [mat_guid])]).encode(),
+            prefab_meta(twin_prefab_path))
 
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():

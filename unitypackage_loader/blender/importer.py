@@ -16,7 +16,7 @@ from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_ord
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, merge_prefab_tables, parse_prefab_materials
+from ..core.prefab import RendererMaterials, merge_prefab_tables, parse_prefab, tables_by_model
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -60,7 +60,8 @@ class ImportOptions:
     use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
     outline_width_scale: float = 0.01
-    prefab: str = ""  # マテリアル割り当てに使う prefab の pathname（空なら全 prefab を先勝ちで統合）
+    # モデル GUID → マテリアル割り当てに使う prefab の pathname（無い・空ならそのモデルを参照する prefab を先勝ちで統合）
+    prefabs: dict[str, str] = field(default_factory=dict)
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -99,22 +100,29 @@ class PreparedPackage:
     models: list[ModelSummary]
     referenced_textures: set[str]
     missing_textures: set[str]
-    prefab_tables: dict[str, dict[str, RendererMaterials]] = field(default_factory=dict)  # pathname → 表
+    # prefab の pathname → モデル GUID → GameObject 名をキーにした表
+    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     @property
     def supported_models(self) -> list[ModelSummary]:
         return [m for m in self.models if m.supported]
 
-    @property
-    def prefab_table(self) -> dict[str, RendererMaterials]:
-        return self.table_for("")
+    def prefabs_for(self, model_guid: str) -> list[str]:
+        """そのモデルのメッシュを使う Renderer を持つ prefab の pathname（パス順）。"""
+        return sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
 
-    def table_for(self, prefab_pathname: str) -> dict[str, RendererMaterials]:
-        """指定 prefab の表。未指定・不明なら全 prefab をパス順に先勝ちで統合したもの。"""
-        if prefab_pathname and prefab_pathname in self.prefab_tables:
-            return self.prefab_tables[prefab_pathname]
-        return merge_prefab_tables([self.prefab_tables[k] for k in sorted(self.prefab_tables)])
+    @property
+    def has_prefab_choice(self) -> bool:
+        """使う prefab を選べるモデル（候補が複数）があるか。"""
+        return any(len(self.prefabs_for(m.guid)) > 1 for m in self.supported_models)
+
+    def table_for(self, model_guid: str, prefab_pathname: str = "") -> dict[str, RendererMaterials]:
+        """モデルに当てはめる表。指定 prefab が候補に無ければ、候補をパス順に先勝ちで統合したもの。"""
+        candidates = self.prefabs_for(model_guid)
+        if prefab_pathname in candidates:
+            return self.prefab_tables[prefab_pathname][model_guid]
+        return merge_prefab_tables([self.prefab_tables[p][model_guid] for p in candidates])
 
 
 def build_shader_table(extra_path: str = "") -> ShaderTable:
@@ -193,15 +201,17 @@ def prepare_package(
         referenced.update(norm.extra_texture_guids())
     missing = {g for g in referenced if pkg.get(g) is None}
 
-    prefab_tables: dict[str, dict[str, RendererMaterials]] = {}
+    model_guids = [m.guid for m in models]
+    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     for entry in pkg.prefabs():
         try:
-            table = parse_prefab_materials(pkg.read_text(entry.guid))
+            document = parse_prefab(pkg.read_text(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
             continue
-        if table:
-            prefab_tables[entry.pathname] = table
+        tables = tables_by_model(document.renderers.values(), model_guids)
+        if tables:
+            prefab_tables[entry.pathname] = tables
     return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings)
 
 
@@ -472,7 +482,6 @@ def run_import(
         store_props=opts.store_props,
     )
 
-    prefab_table = prepared.table_for(opts.prefab)
     built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
 
     try:
@@ -480,6 +489,7 @@ def run_import(
             model = summary.entry
             step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
             model_info = _model_info(model, report.warn)
+            prefab_table = prepared.table_for(model.guid, opts.prefabs.get(model.guid, ""))
             before = _snapshot()
             existing_materials = {m.name: m for m in bpy.data.materials}
             delegated = _import_model(context, paths[model.guid], model, opts, collection, report)
