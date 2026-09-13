@@ -82,7 +82,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 - **アドオン自身はパッケージ内のコードを一切実行しません。** C#、シェーダー、Python などのアセットは無視します。
   ディスクに展開・読み込みするのは次のものだけです: モデル（`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`。`.blend` は上のオプションが
   ON のときのみ）、マテリアルが参照するテクスチャ（"Import Unreferenced Images" なら全画像）、`.obj` と同じフォルダの `.mtl`、
-  `.gltf` と同じフォルダの `.bin`。`.mat` `.meta` `.prefab` はアドオン専用の YAML リーダーでメモリ上でテキストとして解析するだけで、
+  `.gltf` と同じフォルダの `.bin`。`.mat` `.meta` `.prefab` はアドオン専用のリーダー（Unity YAML のテキスト、または Unity のバイナリ形式）でメモリ上で解析するだけで、
   書き出しません。
 - **モデルと画像の解析は Blender 本体が行います。** FBX / OBJ / glTF / Collada は Blender のインポーター、PNG / TIFF / TGA / EXR /
   PSD などは Blender の画像ライブラリ（OpenImageIO 等）が処理するため、それらの脆弱性を突く細工ファイルはこのアドオンでは防げません。

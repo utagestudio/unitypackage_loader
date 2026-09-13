@@ -29,6 +29,8 @@
   画像には `unity_guid` 等。これにより元パッケージ無しで別モードに再構築できる（`operators/rebuild_material.py`）。
 - **パッケージ読み取り**（`core/package.py`）: tar.gz を 1 度走査して索引化し、必要な GUID だけ 2 度目の走査で展開する。
   Unity YAML は依存無しの専用パーサー（`core/unity_yaml.py`。Blender 同梱 Python に PyYAML は無い）。
+  Asset Serialization が Force Binary のプロジェクト由来の .mat / .prefab はバイナリの SerializedFile なので、
+  `core/unity_binary.py` が TypeTree をたどって同じ `UnityDocument` に変換する（`load_documents` が自動判定）。
 
 ## ディレクトリ構成
 

@@ -279,6 +279,7 @@ unitypackage_loader/
 ├─ core/                         # bpy 非依存。純 Python で単体テスト可能
 │   ├─ package.py                # tar 走査・索引・オンデマンド展開
 │   ├─ unity_yaml.py             # Unity YAML サブセットパーサー
+│   ├─ unity_binary.py           # バイナリ形式の SerializedFile リーダー（TypeTree 付き）
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
@@ -372,6 +373,23 @@ class UnityPackage:
   万一の `RecursionError` も `UnityYamlError` に揃える。呼び出し側（`.mat` / `.meta` / prefab）は `ValueError` を捕捉してそのアセットだけスキップする。
 - 検証: サンプルパッケージ内の全 `.mat` と全 `.meta` をパースして例外ゼロ。
 - 将来 PyYAML を wheel 同梱する余地は残す（`blender_manifest.toml` の `wheels`）が、初期は専用パーサーで十分。
+
+### 4.4.1 `core/unity_binary.py` — バイナリ形式の `.mat` / `.prefab`
+
+プロジェクト設定の Asset Serialization が Mixed / Force Binary だと、`.mat` や `.prefab` は YAML ではなく
+バイナリの SerializedFile でパッケージに入る（工業製品系アセットで確認。古い Unity の書き出しでは externalObjects も無いため、
+prefab が読めないとマテリアルが一つも当たらない）。
+
+- 判定: 先頭 20 バイトのヘッダー（ビッグエンディアン）の version と、ファイルサイズが実際の長さと一致するか（version 22 以降は 64 ビットの欄）。
+  `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `parse_prefab` は bytes をそのまま受け取る。
+- 対応範囲: version 14〜22（Unity 5.0 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
+  形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。共通文字列表も同じ表を持つ。
+- 読み方: 型ごとの TypeTree（blob 形式。ノードは 24 バイト、version 19 以降は 32 バイト）をたどり、値を YAML パーサーと同じ形に変換する。
+  クラスは dict、配列は list、`map` は 1 要素 dict の list、`FastPropertyName` は中の文字列、`PPtr<...>` は externals の GUID
+  （各バイトの上下 4 ビットが入れ替わった並び）から作った `UnityRef`。境界揃え（meta flag 0x4000）はオブジェクト先頭基準。
+  組み込みリソース（`Resources/unity_builtin_extra`）は YAML と同じ GUID `0000000000000000f000000000000000` にする。
+- 安全性: 全ての読み取りに範囲チェックを置き、件数は残りバイト数で上限を掛ける。TypeTree の階層は 1 バイトなので再帰は 256 段まで。
+  例外は `UnityBinaryError`（`ValueError` 派生）に揃える。`[SerializeReference]` のデータなど読めないオブジェクトはそれだけ飛ばす。
 
 ### 4.5 `core/material.py` と プロファイル
 
@@ -523,6 +541,7 @@ def run(ctx, filepath, opts) -> Report:
 
 ### 4.10 テスト
 
+- `tests/test_unity_binary.py`: `tests/unity_binary_writer.py`（手書きの SerializedFile 生成器）で作ったバイナリの .mat / prefab を読み、同じ内容の YAML と結果が一致すること、エンディアン・version 22 の違い、切り詰めやバイト破壊で `ValueError` 以外の例外が出ないことを確認。合成パッケージにもバイナリの .mat と prefab を入れて統合テストで割り当てを確認する。
 - `tests/test_unity_yaml.py`: リポジトリ同梱の **合成フィクスチャ**（手書きの最小 .mat / .meta）でパーサーを検証。`_BaseMap` の GUID、`_Cutoff`、`_Color` を assert。加えて `_local/` にサンプルがあれば、その全 .mat / .meta をパースして例外ゼロを確認（無ければ skip）。
 - `tests/test_mapping.py`: externalObjects の `.001` 解決、名前一致フォールバック。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
