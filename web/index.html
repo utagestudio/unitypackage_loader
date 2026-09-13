@@ -238,45 +238,21 @@
       <div class="split">
         <div>
           <div class="section-head">
-            <span class="eyebrow">Material modes</span>
-            <h2>Toon when it should be, PBR when it should be</h2>
-            <p>Auto picks a mode per material from the shader. You can force one at import, or rebuild the selected meshes in another mode later from the sidebar.</p>
+            <span class="eyebrow">Switch the look</span>
+            <h2>Toon in EEVEE, PBR in Cycles</h2>
+            <p>Toon shaders such as lilToon come in with a toon look made for EEVEE, while Standard and URP come in as Blender's Principled BSDF. Want to render in Cycles? Switch later from the sidebar, no original package needed.</p>
           </div>
           <div class="modes">
-            <div class="mode default"><span class="name" data-default="default">Auto</span><span>Toon node group for toon shaders, Principled for PBR</span></div>
-            <div class="mode"><span class="name">Toon (Node Group)</span><span>Shadow color with border and blur, MatCap blend modes, rim light, emission, alpha. EEVEE only.</span></div>
-            <div class="mode"><span class="name">Principled BSDF</span><span>Base color, normal, emission, metallic and roughness. Renders in Cycles too.</span></div>
-            <div class="mode"><span class="name">Unlit (Emission)</span><span>Texture straight into Emission, no lighting</span></div>
-            <div class="mode"><span class="name">Names Only</span><span>Empty materials with the right names, for your own setup</span></div>
+            <div class="mode default"><span class="name">Auto (recommended)</span><span>Looks at each material's shader and picks toon or PBR</span></div>
+            <div class="mode"><span class="name">Toon</span><span>Recreates shadow color, MatCap and rim light. Made for EEVEE</span></div>
+            <div class="mode"><span class="name">PBR (Principled BSDF)</span><span>Renders as it is in Cycles too</span></div>
           </div>
+          <p class="modes-note">There are also Unlit, which ignores lighting, and Names Only, which creates empty materials with the right names.</p>
         </div>
         <figure class="shot">
-          <div class="frame"><img src="assets/shot-modes.webp" width="1200" height="789" alt="The same avatar twice: on the left built with the Toon node group, on the right rebuilt as Principled BSDF" loading="lazy"></div>
-          <figcaption>The same meshes twice. Left: the Toon node group. Right: rebuilt as Principled BSDF from the stored Unity data, without the package.</figcaption>
+          <div class="frame"><img src="assets/shot-modes.webp" width="1200" height="789" alt="The same avatar twice: toon on the left, switched to PBR (Principled BSDF) on the right" loading="lazy"></div>
+          <figcaption>Left: toon. Right: the same avatar switched to PBR, without using the original package.</figcaption>
         </figure>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="how">
-    <div class="wrap">
-      <div class="split reverse">
-        <figure class="shot">
-          <div class="frame"><img src="assets/shot-nodes.webp" width="1100" height="1274" alt="Shader Editor showing base colour, normal, MatCap and emission textures feeding the UnityToon node group" loading="lazy"></div>
-          <figcaption>One material after import. The textures from the package feed the <code>UnityToon</code> group, which carries shadow colour, MatCap, rim light and emission.</figcaption>
-        </figure>
-        <div>
-          <div class="section-head">
-            <span class="eyebrow">How it works</span>
-            <h2>Two stages, no guesswork</h2>
-            <p>Unity shaders and Blender nodes do not map one to one, so the add-on never converts directly.</p>
-          </div>
-          <ol class="steps-inline">
-            <li><span class="n">1</span><span><b>Read the package once.</b> The tar.gz is indexed, then only the GUIDs you need are extracted. YAML is parsed by the add-on's own reader, in memory.</span></li>
-            <li><span class="n">2</span><span><b>Normalize the material.</b> A shader profile turns raw .mat properties into a shader-independent description: colors, maps, shadow, MatCap, rim, alpha.</span></li>
-            <li><span class="n">3</span><span><b>Build the nodes.</b> That description becomes a Toon group or Principled tree. It is also stored on the material, so you can rebuild in another mode without the package.</span></li>
-          </ol>
-        </div>
       </div>
     </div>
   </section>

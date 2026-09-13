@@ -238,45 +238,21 @@
       <div class="split">
         <div>
           <div class="section-head">
-            <span class="eyebrow">マテリアルモード</span>
-            <h2>トゥーンはトゥーンに、<wbr>PBR は PBR に</h2>
-            <p>Auto はシェーダーからマテリアルごとにモードを選びます。インポート時に固定することも、後からサイドバーで選択メッシュを別モードに再構築することもできます。</p>
+            <span class="eyebrow">見た目の切り替え</span>
+            <h2>EEVEE ではトゥーンのまま、<wbr>Cycles では PBR で</h2>
+            <p>lilToon などのトゥーン系は EEVEE 向けのトゥーンの見た目で、Standard や URP は Blender 標準の Principled BSDF で読み込みます。Cycles でレンダリングしたくなったら、あとからサイドバーで切り替えられます。元のパッケージは要りません。</p>
           </div>
           <div class="modes">
-            <div class="mode default"><span class="name" data-default="既定">Auto</span><span>トゥーン系は Toon ノードグループ、PBR 系は Principled</span></div>
-            <div class="mode"><span class="name">Toon（ノードグループ）</span><span>境界とぼかし付きの影色、MatCap のブレンドモード、リムライト、エミッション、アルファ。EEVEE 専用</span></div>
-            <div class="mode"><span class="name">Principled BSDF</span><span>ベースカラー、ノーマル、エミッション、メタリックとラフネス。Cycles でも描画可能</span></div>
-            <div class="mode"><span class="name">Unlit（Emission）</span><span>テクスチャをそのままエミッションへ。ライティング無し</span></div>
-            <div class="mode"><span class="name">名前のみ</span><span>正しい名前の空マテリアルだけを作り、あとは自分で組む</span></div>
+            <div class="mode default"><span class="name">自動（おすすめ）</span><span>シェーダーを見て、トゥーンか PBR かをマテリアルごとに選びます</span></div>
+            <div class="mode"><span class="name">トゥーン</span><span>影色、MatCap、リムライトを再現します。EEVEE 向け</span></div>
+            <div class="mode"><span class="name">PBR（Principled BSDF）</span><span>Cycles でもそのままレンダリングできます</span></div>
           </div>
+          <p class="modes-note">ほかに、ライティングの影響を受けない Unlit と、名前だけの空マテリアルを作るモードもあります。</p>
         </div>
         <figure class="shot">
-          <div class="frame"><img src="../assets/shot-modes.webp" width="1200" height="789" alt="同じアバターを 2 体並べた比較。左は Toon ノードグループ、右は Principled BSDF で組み直したもの" loading="lazy"></div>
-          <figcaption>同じメッシュを 2 体。左が Toon ノードグループ、右が保存済みの Unity 情報から Principled BSDF に組み直したもので、元パッケージは使っていません。</figcaption>
+          <div class="frame"><img src="../assets/shot-modes.webp" width="1200" height="789" alt="同じアバターを 2 体並べた比較。左はトゥーン、右は PBR（Principled BSDF）に切り替えたもの" loading="lazy"></div>
+          <figcaption>左がトゥーン、右が同じアバターを PBR に切り替えたもの。切り替えに元のパッケージは使っていません。</figcaption>
         </figure>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="how">
-    <div class="wrap">
-      <div class="split reverse">
-        <figure class="shot">
-          <div class="frame"><img src="../assets/shot-nodes.webp" width="1100" height="1274" alt="ベースカラー・ノーマル・MatCap・エミッションのテクスチャが UnityToon ノードグループに繋がったシェーダーエディター" loading="lazy"></div>
-          <figcaption>インポート後のマテリアル 1 つ分。パッケージ内のテクスチャが <code>UnityToon</code> グループに繋がり、影色・MatCap・リムライト・エミッションを担います。</figcaption>
-        </figure>
-        <div>
-          <div class="section-head">
-            <span class="eyebrow">仕組み</span>
-            <h2>2 段階で、推測しない</h2>
-            <p>Unity のシェーダーと Blender のノードは 1 対 1 に対応しないので、直接変換はしません。</p>
-          </div>
-          <ol class="steps-inline">
-            <li><span class="n">1</span><span><b>パッケージを 1 度だけ読む。</b>tar.gz を索引化し、必要な GUID だけを展開します。YAML はアドオン専用のパーサーがメモリ上で読みます。</span></li>
-            <li><span class="n">2</span><span><b>マテリアルを正規化する。</b>シェーダープロファイルが生の .mat プロパティを、シェーダーに依存しない記述（色、マップ、影、MatCap、リム、アルファ）に変換します。</span></li>
-            <li><span class="n">3</span><span><b>ノードを組む。</b>その記述から Toon グループか Principled のツリーを作ります。記述自体もマテリアルに保存されるので、パッケージ無しで別モードに再構築できます。</span></li>
-          </ol>
-        </div>
       </div>
     </div>
   </section>
