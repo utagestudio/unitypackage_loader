@@ -129,7 +129,7 @@ def setup_viewport(sidebar: bool = True) -> None:
     space.show_region_ui = sidebar
 
 
-def select_sidebar_tab(category: str = "Unity Package") -> None:
+def select_sidebar_tab(category: str = "UPI") -> None:
     """サイドバーのタブを選ぶ。領域が一度描画されるまで書き込めないので、手順の中で呼ぶ。"""
     area, _ = view3d()
     ui = next((r for r in area.regions if r.type == "UI"), None)
