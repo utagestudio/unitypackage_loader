@@ -137,6 +137,25 @@ li + li { margin-top: .35em; }
 .ba-label-after { right: 12px; background: #f07f2a; color: #3a322c; }
 @media (max-width: 480px) { .ba-label { top: 8px; font-size: .74rem; padding: 4px 9px; } .ba-label-before { left: 8px; } .ba-label-after { right: 8px; } }
 
+/* ---------- the usual way vs. this add-on ---------- */
+.versus { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; margin-bottom: clamp(24px, 4vw, 40px); }
+.vs-col { border-radius: var(--radius); padding: clamp(20px, 3vw, 28px); display: grid; gap: 16px; align-content: start; }
+.vs-before { background: var(--surface-2); border: 1px solid var(--line); }
+.vs-before h3 { color: var(--muted); }
+.vs-after { background: var(--peach); }
+.vs-after h3 { color: var(--ink-strong); }
+.vs-after p { color: var(--text); }
+.vs-steps { list-style: none; padding: 0; display: grid; gap: 10px; counter-reset: vs; }
+.vs-steps li { counter-increment: vs; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start; margin: 0; }
+.vs-steps li::before { content: counter(vs); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: .85rem; background: var(--bg); color: var(--muted); border: 1px solid var(--line); margin-top: 1px; }
+.vs-before li { color: var(--muted); }
+.vs-after li { font-size: clamp(1.15rem, 1rem + .6vw, 1.4rem); font-weight: 800; line-height: 1.45; }
+.vs-after li::before { background: var(--accent); color: var(--on-accent); border: 0; margin-top: 4px; }
+html[lang="ja"] .vs-after li span { word-break: keep-all; overflow-wrap: anywhere; }
+.shot.demo { max-width: 880px; margin-inline: auto; }
+.shot.demo figcaption { text-align: center; }
+@media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
+
 /* ---------- feature cards ---------- */
 .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .card { background: var(--surface); border-radius: var(--radius); padding: 22px 22px 24px; display: grid; gap: 10px; align-content: start; }
