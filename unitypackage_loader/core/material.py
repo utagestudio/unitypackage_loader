@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
-from .unity_yaml import UnityRef, parse_documents
+from .unity_binary import load_documents
+from .unity_yaml import UnityRef
 
 __all__ = ["TexRef", "UnityMaterial", "NormalizedMaterial", "parse_material", "MaterialParseError"]
 
@@ -125,8 +126,9 @@ def _items(seq: Any):
                 yield str(key), value
 
 
-def parse_material(text: str, guid: str = "", pathname: str = "") -> UnityMaterial:
-    docs = [d for d in parse_documents(text) if d.type_name == "Material"]
+def parse_material(text: str | bytes, guid: str = "", pathname: str = "") -> UnityMaterial:
+    """.mat を読む。``bytes`` ならテキスト（YAML）かバイナリかを判定して読む。"""
+    docs = [d for d in load_documents(text) if d.type_name == "Material"]
     if not docs:
         raise MaterialParseError("no Material document found")
     body = docs[0].body
