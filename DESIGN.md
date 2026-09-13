@@ -42,9 +42,11 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
    `FBX 内マテリアル名 → .mat の GUID` の対応表。サンプルでは全マテリアルがここに登録されており、これが正解データ。
    - Unity は同名マテリアルを `Body.001` `.002` のように連番化して登録している場合がある（FBX 内の実マテリアルには連番が無い）。→ **完全一致 → 連番サフィックス除去で再検索** の 2 段で解決する。
 2. **フォールバック A: 名前一致** — `.mat` の `m_Name` と FBX マテリアル名が同じものを探す（externalObjects が空のパッケージ向け）。
-3. **フォールバック B: prefab の `MeshRenderer` / `SkinnedMeshRenderer` の `m_Materials`** — prefab 内の同名 GameObject が同じスロットに持つ .mat を採用する。ネストされた PrefabInstance の上書き（`m_Modifications`）は対象 fileID が FBX 内部 ID のため名前に結び付けられず対象外。
+3. **フォールバック B: prefab の `MeshRenderer` / `SkinnedMeshRenderer` の `m_Materials`** — prefab 内の同名 GameObject が同じサブメッシュに持つ .mat を採用する（サブメッシュとスロットの対応は下記）。ネストされた PrefabInstance の上書き（`m_Modifications`）は対象 fileID が FBX 内部 ID のため名前に結び付けられず対象外。
 
 **スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。prefab が複数ある（車体色違いなど）場合は、モデル選択ダイアログで使用する prefab を選ぶ（既定はパス順で最初）。
+
+**サブメッシュ順とスロット順**: `m_Materials` の並びは Unity のサブメッシュ順で、Unity の FBX インポーターはポリゴン列で最初に使われた順にサブメッシュを作り、ポリゴンの無いマテリアルはサブメッシュにしない。一方 Blender のスロットは FBX 内のマテリアル順なので、両者は一致しないことがある。スロット番号のまま突き合わせると別パーツの .mat に差し替わる（VRChat 向けアバターで、パーツ間のマテリアルが入れ替わって別パーツのテクスチャが半透明の層のように見えた。Issue #22）。そこでメッシュのポリゴンから「最初に使われた順のスロット番号列」を作り（`core/mapping.py` の `submesh_slot_order`）、`m_Materials[i]` をその i 番目のスロットに対応させる。フォールバック B とスロット単位の分割の両方がこの対応を使う。
 
 Blender 標準 FBX インポーターが生成するマテリアル名は FBX 内の名前そのまま（サンプルで検証済み）。よって **Blender のマテリアル名 → externalObjects → .mat** で引ける。
 

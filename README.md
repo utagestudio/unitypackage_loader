@@ -101,13 +101,15 @@ Materials are resolved in this order:
 
 1. The "material name → .mat" entries in the model's `.meta` (ModelImporter externalObjects)
 2. A `.mat` with a matching name (if several share the name, the one closest to the model's folder wins)
-3. The .mat held in the same slot by the Renderer of a GameObject with the same name inside a prefab
+3. The .mat held for the same submesh by the Renderer of a GameObject with the same name inside a prefab
 
 Materials that match none of these are left as the importer created them and are reported as warnings.
 
 For packages where the FBX shares a small number of materials and the prefab assigns a different .mat per part
 on the Unity side, Blender materials are split per slot following the prefab's assignments. When there are
 multiple prefabs (for example, body color variants), a selection dialog lets you choose which prefab to use.
+A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
+which can differ from Blender's slot order, so the entries are matched to slots in that order.
 
 Selecting multiple `.unitypackage` files in the file browser imports them in one batch (one Collection per package).
 
