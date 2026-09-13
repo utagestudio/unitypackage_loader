@@ -16,7 +16,15 @@ from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_ord
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, merge_prefab_tables, parse_prefab, tables_by_model
+from ..core.prefab import (
+    PrefabDocument,
+    RendererMaterials,
+    merge_prefab_tables,
+    parse_prefab,
+    resolve_renderers,
+    tables_by_model,
+    unresolved_material_overrides,
+)
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -201,15 +209,26 @@ def prepare_package(
         referenced.update(norm.extra_texture_guids())
     missing = {g for g in referenced if pkg.get(g) is None}
 
-    model_guids = [m.guid for m in models]
-    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
+    # Prefab Variant / ネストの元をたどれるよう、先に全 prefab を読んでから Renderer を解決する
+    documents: dict[str, PrefabDocument] = {}
     for entry in pkg.prefabs():
         try:
-            document = parse_prefab(pkg.read_text(entry.guid))
+            documents[entry.guid.lower()] = parse_prefab(pkg.read_text(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
+    model_guids = [m.guid for m in models]
+    resolved: dict[str, dict[int, RendererMaterials]] = {}
+    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
+    for entry in pkg.prefabs():
+        if entry.guid.lower() not in documents:
             continue
-        tables = tables_by_model(document.renderers.values(), model_guids)
+        unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
+        if unresolved:
+            warnings.append(
+                f"prefab {entry.pathname}: {unresolved} material override(s) on objects inside a model "
+                "are not read yet; the model's own assignments are used for them"
+            )
+        tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
         if tables:
             prefab_tables[entry.pathname] = tables
     return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings)

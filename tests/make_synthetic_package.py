@@ -7,6 +7,7 @@
 内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
 .mat を割り当てる prefab。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
+Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
 """
 
 from __future__ import annotations
@@ -153,6 +154,38 @@ def prefab_yaml(renderers: list[tuple[str, str, list[str]]]) -> str:
             "  m_Materials:",
         ]
         lines += [f"  - {{fileID: 2100000, guid: {guid}, type: 2}}" for guid in mat_guids]
+    return "\n".join(lines) + "\n"
+
+
+def variant_prefab_yaml(base_guid: str, material_overrides: list[tuple[int, str]]) -> str:
+    """元 prefab の Renderer（fileID）の m_Materials[0] を .mat（GUID）に上書きする Prefab Variant。"""
+    lines = [
+        "%YAML 1.1",
+        "%TAG !u! tag:unity3d.com,2011:",
+        "--- !u!1001 &5000",
+        "PrefabInstance:",
+        "  m_ObjectHideFlags: 0",
+        "  serializedVersion: 2",
+        "  m_Modification:",
+        "    serializedVersion: 3",
+        "    m_TransformParent: {fileID: 0}",
+        "    m_Modifications:",
+        f"    - target: {{fileID: 100, guid: {base_guid}, type: 3}}",
+        "      propertyPath: m_Name",
+        "      value: SyntheticVariantAlt",
+        "      objectReference: {fileID: 0}",
+    ]
+    for renderer_id, mat_guid in material_overrides:
+        lines += [
+            f"    - target: {{fileID: {renderer_id}, guid: {base_guid}, type: 3}}",
+            "      propertyPath: m_Materials.Array.data[0]",
+            "      value: ",
+            f"      objectReference: {{fileID: 2100000, guid: {mat_guid}, type: 2}}",
+        ]
+    lines += [
+        "    m_RemovedComponents: []",
+        f"  m_SourcePrefab: {{fileID: 100100000, guid: {base_guid}, type: 3}}",
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -316,6 +349,24 @@ def main() -> None:
         twin_prefab_path = f"Assets/Synthetic/Prefabs/{twin}.prefab"
         add(twin_prefab_path, prefab_yaml([("SyntheticTwin", guid_of(model_path), [mat_guid])]).encode(),
             prefab_meta(twin_prefab_path))
+
+    # Renderer を直接持つ prefab（VariantBase）と、そのマテリアルだけを上書きした Prefab Variant（VariantAlt）。
+    # パス順で先の VariantAlt は Renderer を直接持たないので、上書きを読まないと VariantBase の割り当てになる
+    variant_mats = {}
+    for name, mode in (("VariantBaseMat", 0), ("VariantAltMat", 1)):
+        mat_path = f"Assets/Synthetic/Materials/{name}.mat"
+        variant_mats[name] = add(mat_path, mat_yaml(name, tex_a, None, (1, 1, 1), mode).encode(),
+                                 f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "variant.fbx"
+    export_model("cube", "VariantFbxMat", path, name="SyntheticVariant")
+    variant_model_path = "Assets/Synthetic/Models/Variant.fbx"
+    add(variant_model_path, path.read_bytes(), model_meta(guid_of(variant_model_path), {}))
+    base_path = "Assets/Synthetic/Prefabs/VariantBase.prefab"
+    base_guid = add(base_path, prefab_yaml([
+        ("SyntheticVariant", guid_of(variant_model_path), [variant_mats["VariantBaseMat"]]),
+    ]).encode(), prefab_meta(base_path))
+    alt_path = "Assets/Synthetic/Prefabs/VariantAlt.prefab"
+    add(alt_path, variant_prefab_yaml(base_guid, [(101, variant_mats["VariantAltMat"])]).encode(), prefab_meta(alt_path))
 
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():

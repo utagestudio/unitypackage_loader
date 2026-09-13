@@ -185,5 +185,108 @@ class SlotAssignmentTests(unittest.TestCase):
         self.assertEqual(result, {("Body", 2): MAT_A, ("Body", 0): MAT_B})
 
 
+BASE = "7" * 32
+VARIANT = "6" * 32
+MAT_C = "5" * 32
+
+
+def variant_yaml(instance_id: int, source: str, modifications: list[tuple[int, str, str, str | None]]) -> str:
+    """(対象 fileID, propertyPath, value, objectReference の GUID) を並べた PrefabInstance だけの prefab。"""
+    lines = [
+        "%YAML 1.1",
+        "%TAG !u! tag:unity3d.com,2011:",
+        f"--- !u!1001 &{instance_id}",
+        "PrefabInstance:",
+        "  serializedVersion: 2",
+        "  m_Modification:",
+        "    serializedVersion: 3",
+        "    m_TransformParent: {fileID: 0}",
+        "    m_Modifications:",
+    ]
+    for target, path, value, ref in modifications:
+        obj = f"{{fileID: 2100000, guid: {ref}, type: 2}}" if ref else "{fileID: 0}"
+        lines += [
+            f"    - target: {{fileID: {target}, guid: {source}, type: 3}}",
+            f"      propertyPath: {path}",
+            f"      value: {value}",
+            f"      objectReference: {obj}",
+        ]
+    lines += ["    m_RemovedComponents: []", f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}"]
+    return "\n".join(lines) + "\n"
+
+
+class PrefabVariantTests(unittest.TestCase):
+    def test_variant_overrides_base_materials(self):
+        from unitypackage_loader.core.prefab import resolve_renderers
+
+        variant = variant_yaml(5000, BASE, [
+            (201, "m_Materials.Array.data[1]", "", MAT_C),
+            (201, "m_Name", "Renamed", None),  # マテリアル以外の上書きは無視する
+            (301, "m_Materials.Array.data[0]", "", None),  # 参照を外す上書き
+        ])
+        documents = {BASE: parse_prefab(PREFAB), VARIANT: parse_prefab(variant)}
+        renderers = resolve_renderers(VARIANT, documents)
+        body = renderers[5000 ^ 201]
+        self.assertEqual((body.game_object, body.materials, body.mesh_guid), ("Body", [MAT_A, MAT_C], MODEL_A))
+        self.assertEqual(renderers[5000 ^ 301].materials, [None, None])
+        self.assertEqual(renderers[5000 ^ 601].materials, [MAT_B])  # 上書きの無い Renderer はそのまま
+        # 元 prefab 自体の表は変わらない
+        self.assertEqual(resolve_renderers(BASE, documents)[201].materials, [MAT_A, MAT_B])
+        table = tables_by_model(renderers.values(), [MODEL_A])[MODEL_A]
+        self.assertEqual(table["Body"].materials, [MAT_A, MAT_C])
+
+    def test_variant_of_variant_uses_combined_file_ids(self):
+        from unitypackage_loader.core.prefab import resolve_renderers
+
+        outer = "4" * 32
+        documents = {
+            BASE: parse_prefab(PREFAB),
+            VARIANT: parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])),
+            # Variant の Variant は、中間の Variant の中での fileID（5000 XOR 201）を対象にする
+            outer: parse_prefab(variant_yaml(9000, VARIANT, [(5000 ^ 201, "m_Materials.Array.data[1]", "", MAT_A)])),
+        }
+        renderers = resolve_renderers(outer, documents)
+        self.assertEqual(renderers[9000 ^ 5000 ^ 201].materials, [MAT_C, MAT_A])
+
+    def test_array_size_override(self):
+        from unitypackage_loader.core.prefab import resolve_renderers
+
+        variant = variant_yaml(5000, BASE, [
+            (201, "m_Materials.Array.size", "1", None),
+            (201, "m_Materials.Array.data[1]", "", MAT_C),  # 縮めた長さの外は使わない
+            (601, "m_Materials.Array.size", "2", None),
+            (601, "m_Materials.Array.data[1]", "", MAT_A),
+        ])
+        renderers = resolve_renderers(VARIANT, {BASE: parse_prefab(PREFAB), VARIANT: parse_prefab(variant)})
+        self.assertEqual(renderers[5000 ^ 201].materials, [MAT_A])
+        self.assertEqual(renderers[5000 ^ 601].materials, [MAT_B, MAT_A])
+
+    def test_huge_slot_index_is_ignored(self):
+        variant = parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[99999999]", "", MAT_C)]))
+        self.assertEqual(variant.instances[0].material_overrides, {})
+
+    def test_cyclic_instances_terminate(self):
+        from unitypackage_loader.core.prefab import resolve_renderers
+
+        documents = {
+            BASE: parse_prefab(variant_yaml(5000, VARIANT, [])),
+            VARIANT: parse_prefab(variant_yaml(6000, BASE, [])),
+        }
+        self.assertEqual(resolve_renderers(BASE, documents), {})
+
+    def test_overrides_on_model_objects_are_counted(self):
+        from unitypackage_loader.core.prefab import unresolved_material_overrides
+
+        # 元がモデル（documents に無い GUID）なので、対象の Renderer を特定できない
+        on_model = parse_prefab(variant_yaml(5000, MODEL_A, [
+            (123456789, "m_Materials.Array.data[0]", "", MAT_C),
+            (123456789, "m_Name", "Renamed", None),
+        ]))
+        documents = {VARIANT: on_model, BASE: parse_prefab(PREFAB)}
+        self.assertEqual(unresolved_material_overrides(VARIANT, documents), 1)
+        resolvable = parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)]))
+        self.assertEqual(unresolved_material_overrides(VARIANT, {VARIANT: resolvable, BASE: documents[BASE]}), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
