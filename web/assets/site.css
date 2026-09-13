@@ -156,6 +156,14 @@ html[lang="ja"] .vs-after li span { word-break: keep-all; overflow-wrap: anywher
 .shot.demo figcaption { text-align: center; }
 @media (max-width: 860px) { .versus { grid-template-columns: 1fr; } }
 
+/* ---------- use cases ---------- */
+.uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.use { background: var(--surface); border-radius: var(--radius); overflow: hidden; display: grid; grid-template-rows: auto 1fr; }
+.use img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; background: var(--line); }
+.use .body { padding: 18px 22px 24px; display: grid; gap: 8px; align-content: start; }
+.use p { color: var(--muted); font-size: .98rem; }
+@media (max-width: 860px) { .uses { grid-template-columns: 1fr; } }
+
 /* ---------- feature cards ---------- */
 .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .card { background: var(--surface); border-radius: var(--radius); padding: 22px 22px 24px; display: grid; gap: 10px; align-content: start; }
