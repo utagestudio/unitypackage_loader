@@ -8,6 +8,7 @@
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
 .mat を割り当てる prefab。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
 Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
+バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
 """
 
 from __future__ import annotations
@@ -22,6 +23,13 @@ import zlib
 from pathlib import Path
 
 import bpy
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests.unity_binary_writer import material as binary_material  # noqa: E402
+from tests.unity_binary_writer import prefab_with_renderers as binary_prefab  # noqa: E402
 
 
 def guid_of(name: str) -> str:
@@ -367,6 +375,20 @@ def main() -> None:
     ]).encode(), prefab_meta(base_path))
     alt_path = "Assets/Synthetic/Prefabs/VariantAlt.prefab"
     add(alt_path, variant_prefab_yaml(base_guid, [(101, variant_mats["VariantAltMat"])]).encode(), prefab_meta(alt_path))
+
+    # バイナリ形式の .mat と prefab（Issue #36）。externalObjects も名前一致も無く、割り当ての手掛かりはバイナリの prefab だけ
+    binary_mat_path = "Assets/Synthetic/Materials/BinaryMat.mat"
+    binary_mat = add(binary_mat_path, binary_material(
+        "BinaryMat", textures=[("_MainTex", tex_a, (1.0, 1.0), (0.0, 0.0))],
+        floats=[("_Cutoff", 0.5), ("_Mode", 1.0)], colors=[("_Color", (1.0, 1.0, 1.0, 1.0))],
+    ), f"fileFormatVersion: 2\nguid: {guid_of(binary_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "binary.fbx"
+    export_model("cube", "BinaryFbxMat", path, name="SyntheticBinary")
+    binary_model_path = "Assets/Synthetic/Models/Binary.fbx"
+    add(binary_model_path, path.read_bytes(), model_meta(guid_of(binary_model_path), {}))
+    binary_prefab_path = "Assets/Synthetic/Prefabs/Binary.prefab"
+    add(binary_prefab_path, binary_prefab([("SyntheticBinary", guid_of(binary_model_path), [binary_mat])]),
+        prefab_meta(binary_prefab_path))
 
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():

@@ -85,7 +85,7 @@ from one package would exceed it or the free space of the destination.
   Only the following are extracted to disk or read: model files (`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`, and `.blend`
   only with the option above), the textures referenced by materials (every image with "Import Unreferenced Images"),
   the `.mtl` next to an `.obj` and the `.bin` next to a `.gltf`. `.mat`, `.meta` and `.prefab` files are parsed in memory
-  as text with the add-on's own YAML reader and never written out.
+  with the add-on's own readers (Unity YAML text, or Unity's binary serialized format) and never written out.
 - **Parsing the model and image files is done by Blender itself**, not by this add-on: FBX / OBJ / glTF / Collada by
   Blender's importers, and PNG / TIFF / TGA / EXR / PSD etc. by its image libraries (OpenImageIO and friends).
   A crafted file that targets a bug in those components cannot be blocked here. Keep Blender on the latest LTS release,

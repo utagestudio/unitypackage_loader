@@ -21,7 +21,8 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 
-from .unity_yaml import UnityRef, parse_documents
+from .unity_binary import load_documents
+from .unity_yaml import UnityRef
 
 CLASS_GAME_OBJECT = 1
 CLASS_MESH_FILTER = 33
@@ -109,9 +110,12 @@ def _parse_instance(file_id: int, source_guid: str, modification: object) -> Pre
     return instance
 
 
-def parse_prefab(text: str) -> PrefabDocument:
-    """prefab に直接置かれた MeshRenderer / SkinnedMeshRenderer と、PrefabInstance のマテリアル上書きを読む。"""
-    docs = parse_documents(text)
+def parse_prefab(text: str | bytes) -> PrefabDocument:
+    """prefab に直接置かれた MeshRenderer / SkinnedMeshRenderer と、PrefabInstance のマテリアル上書きを読む。
+
+    ``bytes`` ならテキスト（YAML）かバイナリかを判定して読む。
+    """
+    docs = load_documents(text)
     names: dict[int, str] = {}
     meshes: dict[int, str] = {}  # GameObject の fileID → MeshFilter が指すメッシュの GUID
     result = PrefabDocument()

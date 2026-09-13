@@ -1,7 +1,7 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL" },
-  "objects": { "count": 10, "mesh_count": 10, "armature_count": 0 },
-  "materials": { "count": 11, "mapped": 11, "families": ["standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
+  "objects": { "count": 11, "mesh_count": 11, "armature_count": 0 },
+  "materials": { "count": 12, "mapped": 12, "families": ["standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
   "images": { "count": 2 },
   "warnings_max": 2,
   "split_slots": 0,
@@ -10,6 +10,7 @@
     { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard" },
     { "name": "TwinAFbxMat", "alpha_mode": "opaque" },
     { "name": "TwinBFbxMat", "alpha_mode": "blend" },
-    { "name": "VariantFbxMat", "alpha_mode": "cutout" }
+    { "name": "VariantFbxMat", "alpha_mode": "cutout" },
+    { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" }
   ]
 }
