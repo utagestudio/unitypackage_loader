@@ -10,6 +10,7 @@
 Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
 バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
 HDRP/Lit の .mat 2 つ（白い _EmissionColor を持つが光らないものと、_EmissiveColor で光るもの）を割り当てた Hdrp。
+CylinderMat は m_ShaderKeywords が次の行に折り返されている（Unity が長い値を折り返して保存する形）。
 """
 
 from __future__ import annotations
@@ -51,8 +52,15 @@ def png_bytes(size: int, rgb: tuple[int, int, int]) -> bytes:
     )
 
 
-def mat_yaml(name: str, tex_guid: str, normal_guid: str | None, color, mode: int) -> str:
+def mat_yaml(name: str, tex_guid: str, normal_guid: str | None, color, mode: int, folded_keywords: bool = False) -> str:
     normal_ref = f"{{fileID: 2800000, guid: {normal_guid}, type: 3}}" if normal_guid else "{fileID: 0}"
+    # 長い値は親より深いインデントの行に折り返される。読めないと .mat ごと割り当てから外れる
+    keywords = (
+        "  m_ShaderKeywords: _SYNTHETIC_LONG_KEYWORD_A _SYNTHETIC_LONG_KEYWORD_B _SYNTHETIC_LONG_KEYWORD_C\n"
+        "    _ALPHAPREMULTIPLY_ON\n"
+        if folded_keywords
+        else ""
+    )
     return f"""%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!21 &2100000
@@ -61,7 +69,7 @@ Material:
   m_Name: {name}
   m_Shader: {{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}}
   m_ValidKeywords: []
-  m_CustomRenderQueue: -1
+{keywords}  m_CustomRenderQueue: -1
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
@@ -326,7 +334,7 @@ def main() -> None:
     mat_guids = {}
     for name, (t, n, color, mode) in mats.items():
         pathname = f"Assets/Synthetic/Materials/{name}.mat"
-        mat_guids[name] = add(pathname, mat_yaml(name, t, n, color, mode).encode(), f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+        mat_guids[name] = add(pathname, mat_yaml(name, t, n, color, mode, folded_keywords=name == "CylinderMat").encode(), f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
 
     for kind, mat_name, ext in (("cube", "CubeMat", ".fbx"), ("sphere", "SphereMat", ".fbx"), ("cylinder", "CylinderMat", ".obj")):
         path = tmp / f"{kind}{ext}"
