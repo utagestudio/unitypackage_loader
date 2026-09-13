@@ -9,6 +9,7 @@ from unittest import mock
 from tests import _paths
 from unitypackage_loader.core import package as package_module
 from unitypackage_loader.core.package import PackageError, UnityPackage, safe_relative_path
+from unitypackage_loader.core.unity_binary import is_serialized_file
 
 GUID_FOLDER = "0" * 32
 GUID_MAT = "1" * 32
@@ -286,7 +287,9 @@ class LocalSampleTests(unittest.TestCase):
             self.assertTrue(pkg.materials())
             self.assertTrue(pkg.textures())
             for entry in pkg.materials():
-                self.assertTrue(pkg.read_asset(entry.guid).startswith(b"%YAML"))
+                # テキスト（Unity YAML）か、Force Binary のプロジェクト由来のバイナリのどちらか
+                data = pkg.read_asset(entry.guid)
+                self.assertTrue(data.startswith(b"%YAML") or is_serialized_file(data), entry.pathname)
 
 
 if __name__ == "__main__":
