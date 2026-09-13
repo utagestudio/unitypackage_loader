@@ -100,6 +100,7 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
   OGP 画像は `tools/og_card.html` を Chrome でレンダリングして `web/assets/og.png` に置く（コマンドは同ファイル冒頭）。
+  `web/assets/placeholder-*.svg` は必要な構図を書き込んだダミー画像（ヒーローの読み込み前後、操作デモ、使い道）で、実際のスクリーンショットや動画に差し替える前提。
   ページの画面写真（`web/assets/shot-*.webp`）は `tools/shoot_screenshots.py` で撮る。他アドオンが写り込まないよう
   `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/` に置き、追跡ファイルには名前を書かない。
 
