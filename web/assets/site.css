@@ -111,6 +111,7 @@ li + li { margin-top: .35em; }
 .btn svg { width: 18px; height: 18px; }
 .hero-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: .9rem; color: var(--muted); }
 .hero-meta span::before { content: "✓"; color: var(--accent-2); font-weight: 800; margin-right: 6px; }
+.hero .lede sup { font-size: .6em; line-height: 0; vertical-align: super; margin-left: 1px; }
 .hero-note { font-size: .82rem; color: var(--muted); margin-top: -10px; text-wrap: pretty; }
 @media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; } }
 
