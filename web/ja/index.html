@@ -262,38 +262,44 @@
       <div class="install">
         <div class="section-head" style="margin-bottom:0">
           <span class="eyebrow">導入</span>
-          <h2>3 ステップ。<wbr>以後の更新は自動で届く</h2>
-          <p>このサイトを Extension Repository として 1 度登録すれば、Blender がアドオンを一覧に出し、更新も管理してくれます。</p>
+          <h2>2 ステップで、<wbr>すぐに使えます</h2>
+          <p>Blender 4.2 以降に対応しています。どちらの入れ方でも、使える機能は同じです。</p>
         </div>
-        <div class="steps">
-          <div class="step">
-            <h3>リポジトリを追加</h3>
-            <p>Blender で 編集 &gt; プリファレンス &gt; エクステンション入手 &gt; リポジトリ を開き、<b>+</b> から <b>リモートリポジトリを追加</b> を選んで、この URL を貼り付けます。</p>
-            <div class="repo-url">
-              <code id="repo-url">{{BASE_URL}}/index.json</code>
-              <button class="btn btn-primary copy-btn" type="button" data-copy="{{BASE_URL}}/index.json" data-copied-label="コピーしました">コピー</button>
+        <div class="install-step">
+          <h3><span class="num">1</span>アドオンを入れる</h3>
+          <div class="routes">
+            <div class="route route-easy">
+              <span class="route-tag">いちばん簡単</span>
+              <h4>zip をダウンロードして入れる</h4>
+              <a class="btn btn-primary" href="{{ZIP_URL}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>zip をダウンロード（{{VERSION}}）</a>
+              <p>ダウンロードした zip を Blender のウィンドウにドラッグ＆ドロップすると、インストールの確認が出ます。プリファレンスの「エクステンション入手」右上のメニューにある「ディスクからインストール」からも入れられます。</p>
+            </div>
+            <div class="route">
+              <span class="route-tag route-tag-alt">更新が自動で届く</span>
+              <h4>リポジトリを登録して入れる</h4>
+              <p>Blender で 編集 &gt; プリファレンス &gt; エクステンション入手 &gt; リポジトリ を開き、<b>+</b> から <b>リモートリポジトリを追加</b> を選んで、この URL を貼り付けます。</p>
+              <div class="repo-url">
+                <code id="repo-url">{{BASE_URL}}/index.json</code>
+                <button class="btn btn-primary copy-btn" type="button" data-copy="{{BASE_URL}}/index.json" data-copied-label="コピーしました">コピー</button>
+              </div>
+              <p>あとは「エクステンション入手」で <b>Unity Package Importer</b> を検索して、インストールします。</p>
             </div>
           </div>
-          <div class="step">
-            <h3>Extension をインストール</h3>
-            <p>エクステンション入手で <b>Unity Package Importer</b> を検索してインストールします。ファイルから入れたい場合は <a href="{{ZIP_URL}}">バージョン {{VERSION}} の zip</a> をダウンロードし、「ディスクからインストール」を使います。</p>
-          </div>
-          <div class="step">
-            <h3>パッケージをドロップ</h3>
-            <p><code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unity Package を選びます。ポップアップでオプションを調整してインポート。複数ファイルを一度にドロップしても構いません。</p>
+        </div>
+        <div class="install-step">
+          <h3><span class="num">2</span>パッケージをドロップ</h3>
+          <p><code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unity Package を選びます。ポップアップで Import を押せば読み込みが始まります。複数のファイルを一度にドロップしても大丈夫です。</p>
+          <div class="shots">
+            <figure class="shot">
+              <div class="frame"><img src="../assets/shot-menu.webp" width="520" height="487" alt="Blender のファイル > インポートメニューに Unity Package (.unitypackage) の項目が並んでいるところ" loading="lazy"></div>
+              <figcaption>ファイル &gt; インポート に項目が追加されます。ビューポートへのドラッグ＆ドロップでも同じオプションが開きます。</figcaption>
+            </figure>
+            <figure class="shot">
+              <div class="frame"><img src="../assets/shot-dialog.webp" width="620" height="1284" alt="モデル・マテリアル・テクスチャの節に分かれたインポートオプションのポップアップ" loading="lazy"></div>
+              <figcaption>オプションはモデル・マテリアル・テクスチャの 3 節。既定値はアドオンのプリファレンスで変えられます。</figcaption>
+            </figure>
           </div>
         </div>
-        <div class="shots">
-          <figure class="shot">
-            <div class="frame"><img src="../assets/shot-menu.webp" width="520" height="487" alt="Blender のファイル > インポートメニューに Unity Package (.unitypackage) の項目が並んでいるところ" loading="lazy"></div>
-            <figcaption>ファイル &gt; インポート に項目が追加されます。ビューポートへのドラッグ＆ドロップでも同じオプションが開きます。</figcaption>
-          </figure>
-          <figure class="shot">
-            <div class="frame"><img src="../assets/shot-dialog.webp" width="620" height="1284" alt="モデル・マテリアル・テクスチャの節に分かれたインポートオプションのポップアップ" loading="lazy"></div>
-            <figcaption>オプションはモデル・マテリアル・テクスチャの 3 節。既定値はアドオンのプリファレンスで変えられます。</figcaption>
-          </figure>
-        </div>
-        <p class="alt">各オプションの既定値はアドオンのプリファレンスで変えられます。サイドバー（N キー）の「Unity Package」タブに、読み込んだ内容、マテリアルごとの解決結果、警告が表示されます。</p>
       </div>
     </div>
   </section>

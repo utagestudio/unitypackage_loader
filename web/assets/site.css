@@ -209,11 +209,20 @@ details.more[open] > summary { margin-bottom: 18px; }
 
 /* ---------- install ---------- */
 .install { background: var(--surface); border-radius: calc(var(--radius) + 8px); padding: clamp(24px, 4vw, 48px); display: grid; gap: 28px; }
-.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
-.step { display: grid; gap: 10px; align-content: start; }
-.step::before { counter-increment: step; content: counter(step); width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 800; display: grid; place-items: center; }
-.step p { color: var(--muted); font-size: .98rem; }
-@media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
+.install-step { display: grid; gap: 16px; }
+.install-step > h3 { display: flex; align-items: center; gap: 12px; font-size: 1.3rem; }
+.install-step .num { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 800; display: grid; place-items: center; font-size: 1rem; flex: none; }
+.install-step > p { color: var(--muted); max-width: 70ch; }
+.routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.route { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: clamp(18px, 3vw, 26px); display: grid; gap: 12px; align-content: start; }
+.route-easy { border: 2px solid var(--accent); }
+.route h4 { margin: 0; font-size: 1.1rem; font-weight: 800; line-height: 1.4; }
+.route p { color: var(--muted); font-size: .95rem; }
+.route .btn { justify-self: start; }
+.route .repo-url { background: var(--surface-2); }
+.route-tag { width: fit-content; font-size: .78rem; font-weight: 800; line-height: 1.4; padding: 3px 10px; border-radius: 999px; background: var(--peach); color: var(--ink-strong); }
+.route-tag-alt { background: color-mix(in srgb, var(--mint) 18%, var(--bg)); color: var(--accent-2); }
+@media (max-width: 860px) { .routes { grid-template-columns: 1fr; } }
 .repo-url { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 16px; }
 .repo-url code { background: transparent; padding: 0; font-size: .92rem; overflow-x: auto; white-space: nowrap; display: block; }
 .copy-btn { padding: 10px 16px; font-size: .92rem; }
