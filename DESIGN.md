@@ -454,6 +454,12 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 `_EmissionColor` が黒でなければ emission を有効にするが、`_EMISSION` が `m_InvalidKeywords` にある場合は
 現在のシェーダーに emission が無い（別シェーダーから切り替えた名残）とみなして無効にし、警告を出す。
 
+HDRP（HDRP/Lit と HDRP 向け Shader Graph。`_EmissiveColor` を持つかで判定）は、発光しなくても `_EmissionColor` を白で持っている
+（ベイク向けの互換用）ので、`_EmissionColor` は使わない。発光は `_EmissiveColor`（線形の HDR 色。`_UseEmissiveIntensity` なら
+`_EmissiveColorLDR` × `_EmissiveIntensity`）と `_EmissiveColorMap` で決め、`_EmissiveColor` が黒なら光らせない。
+HDRP の強度は物理単位（nits / EV100）で Blender の Emission Strength と対応しないため、発光色は最大成分で割った色味、
+強さは 1.0 とし、元の色・強度・単位は `extras["hdrp_emissive"]` に残す。
+
 **VRChat Mobile プロファイル（`vrchat_mobile.py`）**
 
 VRChat SDK 同梱の Quest 向けシェーダー。機能が少なく、Standard から切り替えたマテリアルには `_Color` や
@@ -536,6 +542,7 @@ def run(ctx, filepath, opts) -> Report:
 | .mat が参照するテクスチャ GUID がパッケージ内に無い（別パッケージ依存） | 警告、ノードは未接続で作る |
 | 未知シェーダー | 警告、generic プロファイル |
 | `_EMISSION` が無効キーワード（別シェーダーからの切り替え残骸） | emission を無効化し警告 |
+| HDRP の白い `_EmissionColor`（`_EmissiveColor` が黒） | 発光させない（`_EmissiveColor` / `_EmissiveColorMap` だけを見る） |
 | 非対応画像形式（PSD 等） | 警告、展開のみ |
 | .mat の YAML 解析失敗 | 警告、そのマテリアルのみスキップ |
 
