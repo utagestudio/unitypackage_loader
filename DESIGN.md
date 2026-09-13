@@ -42,9 +42,15 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
    `FBX 内マテリアル名 → .mat の GUID` の対応表。サンプルでは全マテリアルがここに登録されており、これが正解データ。
    - Unity は同名マテリアルを `Body.001` `.002` のように連番化して登録している場合がある（FBX 内の実マテリアルには連番が無い）。→ **完全一致 → 連番サフィックス除去で再検索** の 2 段で解決する。
 2. **フォールバック A: 名前一致** — `.mat` の `m_Name` と FBX マテリアル名が同じものを探す（externalObjects が空のパッケージ向け）。
-3. **フォールバック B: prefab の `MeshRenderer` / `SkinnedMeshRenderer` の `m_Materials`** — prefab 内の同名 GameObject が同じサブメッシュに持つ .mat を採用する（サブメッシュとスロットの対応は下記）。ネストされた PrefabInstance の上書き（`m_Modifications`）は対象 fileID が FBX 内部 ID のため名前に結び付けられず対象外。
+3. **フォールバック B: prefab の `MeshRenderer` / `SkinnedMeshRenderer` の `m_Materials`** — prefab 内の同名 GameObject が同じサブメッシュに持つ .mat を採用する（サブメッシュとスロットの対応は下記）。
 
-**スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。prefab が複数ある（車体色違いなど）場合は、モデル選択ダイアログで使用する prefab を選ぶ（既定はパス順で最初）。
+1〜3 は「FBX マテリアル 1 つに .mat を 1 つ」決める順序。Unity で実際に表示されるのは Renderer の `m_Materials` で、externalObjects は FBX を置いたときの既定値にすぎないので、prefab に割り当てがあれば下記のスロット単位の分割で 1・2 の結果より優先する。
+
+**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。インポート時は、モデルごとに「そのモデルを使う prefab」だけを候補にし、既定は候補をパス順に先勝ちで統合する。候補が複数あるモデル（色違いなど）はモデル選択ダイアログの行で prefab を選べる（`ImportOptions.prefabs` = {モデル GUID: prefab の pathname}）。
+
+**Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
+
+**スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。
 
 **サブメッシュ順とスロット順**: `m_Materials` の並びは Unity のサブメッシュ順で、Unity の FBX インポーターはポリゴン列で最初に使われた順にサブメッシュを作り、ポリゴンの無いマテリアルはサブメッシュにしない。一方 Blender のスロットは FBX 内のマテリアル順なので、両者は一致しないことがある。スロット番号のまま突き合わせると別パーツの .mat に差し替わる（VRChat 向けアバターで、パーツ間のマテリアルが入れ替わって別パーツのテクスチャが半透明の層のように見えた。Issue #22）。そこでメッシュのポリゴンから「最初に使われた順のスロット番号列」を作り（`core/mapping.py` の `submesh_slot_order`）、`m_Materials[i]` をその i 番目のスロットに対応させる。フォールバック B とスロット単位の分割の両方がこの対応を使う。
 
@@ -209,20 +215,21 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 ### 3.3 モデル選択ダイアログ（`invoke_props_dialog`）
 
-「Ask」指定で、パッケージ内に複数モデルがある時、または prefab が複数ある時に表示。prefab が複数あれば、マテリアル割り当てに使う prefab のドロップダウンも出す。
+「Ask」指定で、パッケージ内に複数モデルがある時、または同じモデルを使う prefab が複数あるモデルがある時に表示。そのようなモデルの行には、マテリアル割り当てに使う prefab のドロップダウン（既定は「All (first wins)」）を出す。
 
 ```
-┌ Import from Avatar_v1.0.unitypackage ─────────────────┐
-│ Models                                                 │
-│  [x] Assets/Avatar/FBX/Avatar_v1.0.fbx   12.3 MB  5 mat│
-│  [ ] Assets/Avatar/Prefabs/Avatar_LOD.fbx ...          │
-│                                                        │
-│ Materials: 7 found (7 resolved, 0 unresolved)          │
-│ Textures : 20 referenced, 3 missing from package       │
-│                                       [Cancel] [Import]│
-└────────────────────────────────────────────────────────┘
+┌ Import from Avatar_v1.0.unitypackage ──────────────────────────────┐
+│ Models                                                              │
+│  [x] Assets/Avatar/FBX/Avatar_v1.0.fbx   12.3 MB  5 mat [All (first…▾]│
+│  [ ] Assets/Avatar/Prefabs/Avatar_LOD.fbx ...                       │
+│                                                                     │
+│ Materials: 7 found (7 resolved, 0 unresolved)                       │
+│ Textures : 20 referenced, 3 missing from package                    │
+│ Prefab: choose per model which prefab's material assignments to use │
+│                                                    [Cancel] [Import]│
+└─────────────────────────────────────────────────────────────────────┘
 ```
-`UIList` + `CollectionProperty`。行に「マッピング解決数」を出して、読み込む前に問題が見える状態にする。
+`UIList` + `CollectionProperty`。行に「マッピング解決数」を出して、読み込む前に問題が見える状態にする。prefab のドロップダウンの識別子は候補の番号にし、パッケージ由来の pathname は表示用に `sanitize_display` を通す。
 
 ### 3.4 完了レポート
 
