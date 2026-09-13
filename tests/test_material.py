@@ -284,7 +284,7 @@ class LocalSampleTests(unittest.TestCase):
         for path in packages:
             pkg = UnityPackage(path)
             pkg.scan()
-            mats = {e.guid: parse_material(pkg.read_text(e.guid), e.guid, e.pathname) for e in pkg.materials()}
+            mats = {e.guid: parse_material(pkg.read_asset(e.guid), e.guid, e.pathname) for e in pkg.materials()}
             self.assertTrue(mats)
             for mat in mats.values():
                 n = normalize_material(mat)
