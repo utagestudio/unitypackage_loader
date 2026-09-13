@@ -105,9 +105,14 @@ Materials are resolved in this order:
 
 Materials that match none of these are left as the importer created them and are reported as warnings.
 
-For packages where the FBX shares a small number of materials and the prefab assigns a different .mat per part
-on the Unity side, Blender materials are split per slot following the prefab's assignments. When there are
-multiple prefabs (for example, body color variants), a selection dialog lets you choose which prefab to use.
+What Unity actually renders is the material set on a prefab's Renderer, so when a prefab assigns a .mat, it takes
+precedence over steps 1 and 2. For packages where the FBX shares a small number of materials and the prefab assigns
+a different .mat per part on the Unity side, Blender materials are split per slot following the prefab's assignments.
+A prefab's Renderers are applied only to the model whose mesh they reference, so objects with the same name in
+another model are not affected. When several prefabs use the same model (for example, color variants), the
+selection dialog shows a prefab dropdown on that model's row; the default merges them, with the first one by path
+taking precedence. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
+the package; overrides applied directly to a model (FBX) instance are not read yet and are reported as a warning.
 A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
 which can differ from Blender's slot order, so the entries are matched to slots in that order.
 

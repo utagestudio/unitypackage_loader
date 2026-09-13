@@ -18,8 +18,11 @@
 - **メッシュとマテリアルの対応付け**（`core/mapping.py`）:
   1. モデル `.meta` の externalObjects（完全一致 → 連番サフィックス除去）
   2. `.mat` 名との一致（同名複数ならモデルに近いフォルダ優先）
-  3. prefab の Renderer.m_Materials（同名 GameObject の同じスロット）
+  3. prefab の Renderer.m_Materials（同名 GameObject の同じサブメッシュ）
   さらに、prefab がスロットごとに別の .mat を指す場合は **スロット単位で Blender マテリアルを分割**する（`blender/importer.py`）。
+  prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
+  候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。Prefab Variant / ネストは元が prefab なら
+  上書きを重ねる（fileID は PrefabInstance の fileID XOR 元の fileID）。元が FBX の上書きは未対応（Issue #31）。
 - **マテリアルモード**: Auto（トゥーン系 → Toon ノードグループ、PBR 系 → Principled）/ Principled / Toon / Unlit / Names Only。
   Toon は `blender/toon_group.py` の `UnityToon`（Shader to RGB を使うため EEVEE 向け）。
 - **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）。
