@@ -30,6 +30,8 @@
       "base_colorspace": "sRGB",
       "normal_image": "<画像名>",
       "normal_colorspace": "Non-Color",
+      "emission_strength": 0.0,
+      "emission_color": [1.0, 1.0, 1.0],
       "node_types": ["ShaderNodeMixShader"]
     }
   ],
@@ -50,6 +52,7 @@
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
+| `material_checks[].emission_strength` / `emission_color` | Principled BSDF の Emission Strength と、リンクされていない Emission Color（RGB、小数 4 桁で比較） |
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 

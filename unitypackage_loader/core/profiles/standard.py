@@ -29,16 +29,19 @@ class StandardProfile(ShaderProfile):
             n.normal_tex = mat.tex("_BumpMap", "_NormalMap")
             n.normal_strength = mat.f("_BumpScale", mat.f("_NormalScale", 1.0))
 
-        # _EMISSION が m_InvalidKeywords にある = 現在のシェーダーに emission が無い。
-        # 以前のシェーダーの _EmissionColor が残っていても光らせない
-        emission_color = mat.color("_EmissionColor", default=BLACK)
-        emission_tex = mat.tex("_EmissionMap")
-        if "_EMISSION" in mat.invalid_keywords:
-            if emission_tex is not None or not is_black(emission_color):
-                n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
-        elif emission_tex is not None or not is_black(emission_color):
-            n.emission_tex = emission_tex
-            n.emission_color = emission_color
+        if mat.has("_EmissiveColor"):
+            _hdrp_emission(mat, n)
+        else:
+            # _EMISSION が m_InvalidKeywords にある = 現在のシェーダーに emission が無い。
+            # 以前のシェーダーの _EmissionColor が残っていても光らせない
+            emission_color = mat.color("_EmissionColor", default=BLACK)
+            emission_tex = mat.tex("_EmissionMap")
+            if "_EMISSION" in mat.invalid_keywords:
+                if emission_tex is not None or not is_black(emission_color):
+                    n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
+            elif emission_tex is not None or not is_black(emission_color):
+                n.emission_tex = emission_tex
+                n.emission_color = emission_color
 
         n.metallic = mat.f("_Metallic", 0.0)
         smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))
@@ -73,6 +76,31 @@ class StandardProfile(ShaderProfile):
         if info is not None and info.alpha is not None:
             return info.alpha
         return alpha_mode_from_blend_state(mat, default="opaque")
+
+
+def _hdrp_emission(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """HDRP（HDRP/Lit と HDRP 向け Shader Graph）の発光。
+
+    HDRP の発光は ``_EmissiveColor``（線形の HDR 色。``_UseEmissiveIntensity`` なら ``_EmissiveColorLDR`` × 強度）と
+    ``_EmissiveColorMap`` で決まり、色が黒なら光らない。HDRP のマテリアルは発光しなくても ``_EmissionColor`` を
+    白で持っている（ベイク向けの互換用）ので、そちらは使わない。
+
+    強度は物理単位（nits / EV100）で Blender の Emission Strength とは対応しないため、色は最大成分で割った色味だけを使い、
+    強さは 1.0 にする。元の値は ``extras["hdrp_emissive"]`` に残す。
+    """
+    color = tuple(max(0.0, c) for c in mat.color("_EmissiveColor", default=BLACK)[:3])
+    peak = max(color)
+    if not 0.0 < peak < float("inf"):
+        return
+    n.emission_color = (color[0] / peak, color[1] / peak, color[2] / peak, 1.0)
+    n.emission_tex = mat.tex("_EmissiveColorMap")
+    n.emission_strength = 1.0
+    n.extras["hdrp_emissive"] = {
+        "color": list(color),
+        "intensity": mat.f("_EmissiveIntensity", 1.0),
+        "unit": "ev100" if int(mat.f("_EmissiveIntensityUnit", 0.0)) == 1 else "nits",
+        "use_intensity": mat.flag("_UseEmissiveIntensity"),
+    }
 
 
 class GenericProfile(StandardProfile):

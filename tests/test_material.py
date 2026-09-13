@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _paths
-from unitypackage_loader.core.material import TexRef, matcap_blend_mode, parse_material
+from unitypackage_loader.core.material import NormalizedMaterial, TexRef, matcap_blend_mode, parse_material
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.meta import ModelImporterInfo
 from unitypackage_loader.core.profiles import ShaderTable, normalize_material, select_profile
@@ -297,6 +297,63 @@ class LocalSampleTests(unittest.TestCase):
                 if info.external_materials:
                     res = resolve_materials(list(info.external_materials), info, mats, model.pathname)
                     self.assertTrue(all(r.guid for r in res.values()), "all externalObjects should resolve")
+
+
+HDRP_LIT = "{fileID: 4800000, guid: 6e4ae4064600d784cac1e41a9e6f2e59, type: 3}"  # HDRP/Lit（公開 GUID）
+HDRP_GRAPH = "{fileID: -6465566751694194690, guid: " + "d" * 32 + ", type: 3}"  # 表に無い HDRP 向け Shader Graph
+
+
+def hdrp_mat_yaml(shader, emissive=(0, 0, 0, 1), ldr=(0, 0, 0, 1), intensity=1, unit=0, use_intensity=0, emissive_map=None):
+    """HDRP のマテリアル。発光の有無に関わらず _EmissionColor は白で持っている。"""
+    return mat_yaml(
+        "HdrpMat", shader,
+        tex=[("_BaseColorMap", TEX_A, (1, 1), (0, 0)), ("_EmissiveColorMap", emissive_map, (1, 1), (0, 0))],
+        floats=[("_EmissiveIntensity", intensity), ("_EmissiveIntensityUnit", unit), ("_UseEmissiveIntensity", use_intensity),
+                ("_Metallic", 0), ("_Smoothness", 0.5)],
+        colors=[("_BaseColor", (1, 1, 1, 1)), ("_EmissionColor", (1, 1, 1, 1)), ("_EmissiveColor", emissive),
+                ("_EmissiveColorLDR", ldr)],
+    )
+
+
+class HdrpEmissionTests(unittest.TestCase):
+    def test_white_emission_color_is_ignored(self):
+        for shader in (HDRP_LIT, HDRP_GRAPH):
+            with self.subTest(shader=shader):
+                n = normalize_material(parse_material(hdrp_mat_yaml(shader)))
+                self.assertEqual(n.base_color_tex.guid, TEX_A)
+                self.assertFalse(n.has_emission)
+                self.assertIsNone(n.emission_tex)
+                self.assertNotIn("hdrp_emissive", n.extras)
+
+    def test_emissive_map_without_color_does_not_emit(self):
+        n = normalize_material(parse_material(hdrp_mat_yaml(HDRP_LIT, emissive_map=TEX_E)))
+        self.assertFalse(n.has_emission)
+        self.assertIsNone(n.emission_tex)
+
+    def test_emissive_color_uses_hue_and_keeps_intensity(self):
+        yaml = hdrp_mat_yaml(HDRP_LIT, emissive=(30000, 15000, 7500, 1), ldr=(1, 0.73, 0.53, 1), intensity=30000,
+                             use_intensity=1, emissive_map=TEX_E)
+        n = normalize_material(parse_material(yaml))
+        self.assertEqual(n.family, "hdrp")
+        self.assertTrue(n.has_emission)
+        self.assertEqual(n.emission_tex.guid, TEX_E)
+        self.assertEqual(n.emission_color, (1.0, 0.5, 0.25, 1.0))
+        self.assertEqual(n.emission_strength, 1.0)
+        self.assertEqual(n.extras["hdrp_emissive"],
+                         {"color": [30000.0, 15000.0, 7500.0], "intensity": 30000.0, "unit": "nits", "use_intensity": True})
+
+    def test_hdr_color_without_intensity_mode(self):
+        n = normalize_material(parse_material(hdrp_mat_yaml(HDRP_GRAPH, emissive=(8, 8, 4, 1), intensity=32, unit=1)))
+        self.assertEqual(n.emission_color, (1.0, 1.0, 0.5, 1.0))
+        self.assertIsNone(n.emission_tex)
+        self.assertEqual(n.extras["hdrp_emissive"]["unit"], "ev100")
+        self.assertFalse(n.extras["hdrp_emissive"]["use_intensity"])
+
+    def test_extras_survive_round_trip(self):
+        n = normalize_material(parse_material(hdrp_mat_yaml(HDRP_LIT, emissive=(2, 1, 0, 1))))
+        restored = NormalizedMaterial.from_dict(n.to_dict())
+        self.assertEqual(restored.emission_color, n.emission_color)
+        self.assertEqual(restored.extras["hdrp_emissive"], n.extras["hdrp_emissive"])
 
 
 if __name__ == "__main__":
