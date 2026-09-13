@@ -72,8 +72,7 @@
     <a class="brand" href="#top"><img src="assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
     <nav class="nav" aria-label="Sections">
       <a href="#uses">Uses</a>
-      <a href="#features">Features</a>
-      <a href="#shaders">Shaders</a>
+      <a href="#support">Supported</a>
       <a href="#install">Install</a>
       <a href="#security">Security</a>
       <a class="gh" href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>
@@ -187,69 +186,50 @@
     </div>
   </section>
 
-  <section class="section" id="features">
+  <section class="section" id="support">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">What comes through</span>
-        <h2>Everything worth keeping, in one import</h2>
-        <p>The add-on reads the package like Unity would, then rebuilds what Blender can actually use. What it cannot map is kept as custom properties so nothing is lost.</p>
+        <h2>Everything your avatar needs comes in together</h2>
       </div>
-      <div class="cards">
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg></div>
-          <h3>Meshes</h3>
-          <p>FBX, OBJ, glTF, VRM and Collada models, with armatures and shape keys intact. Bundled .blend files can be appended too, but only when you opt in.</p>
-          <ul>
-            <li>New FBX importer preferred when available</li>
-            <li>VRM handed to the VRM add-on if installed</li>
-            <li>One Collection per package</li>
-          </ul>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18"/><circle cx="8.5" cy="10" r="1.2" fill="currentColor"/><circle cx="12" cy="7.5" r="1.2" fill="currentColor"/><circle cx="8" cy="14.5" r="1.2" fill="currentColor"/></svg></div>
-          <h3>Materials</h3>
-          <p>Each .mat is matched to its mesh, then converted through a shader profile into a Toon node group or a Principled BSDF. Shadow color, MatCap, rim light, emission and alpha survive the trip.</p>
-          <ul>
-            <li>Matched via .meta, name, or prefab slot</li>
-            <li>Per-slot split when a prefab reassigns .mat files</li>
-            <li>Rebuild in another mode later, without the package</li>
-          </ul>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5-8 8"/></svg></div>
-          <h3>Textures</h3>
-          <p>Only the images a material references are extracted, next to your .blend or into the add-on cache. Pack them into the file if you prefer, or pull in unreferenced masks and icons as well.</p>
-          <ul>
-            <li>Cutout and transparent modes carried over</li>
-            <li>Non-color data for normal and mask maps</li>
-            <li>Size guard before anything is written</li>
-          </ul>
-        </article>
+      <div class="included">
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Bones (armature)</b><span>Ready to pose as soon as it lands.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Facial shape keys</b><span>Blinks and mouth shapes work as they are.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Textures</b><span>The images each material uses are extracted and connected for you.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Shadow color, MatCap, rim light</b><span>Rebuilt as nodes close to the original toon look.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Transparency and cutout</b><span>Hair tips and lace stay see-through.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Color variations</b><span>When a prefab picks a different material for each part, every part gets the right one.</span></div></div>
       </div>
-    </div>
-  </section>
-
-  <section class="section" id="shaders">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Shader profiles</span>
-        <h2>Made for the shaders avatars actually use</h2>
-        <p>A profile knows which Unity properties matter and where they go in Blender. Profiles are picked by shader GUID first, then by property fingerprint, so renamed or repackaged shaders still resolve.</p>
+      <div class="support-shaders">
+        <h3>Supported shaders</h3>
+        <div class="chips">
+          <span class="chip">lilToon</span>
+          <span class="chip">Poiyomi</span>
+          <span class="chip">MToon <small>VRM</small></span>
+          <span class="chip">VRChat Mobile <small>Quest</small></span>
+          <span class="chip">Standard</span>
+          <span class="chip">URP</span>
+          <span class="chip">HDRP</span>
+        </div>
+        <p class="note">Other shaders are converted as far as their common setting names allow. Models can be FBX, OBJ, glTF, VRM or Collada.</p>
       </div>
-      <div class="shaders">
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>lilToon</b><span>Shadow colors, border and blur, MatCap, rim light, emission, outline</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>MToon</b><span>VRM's toon shader, including shade color and MatCap</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>Poiyomi</b><span>Toon lighting with shadow strength, gated emission, reflection-aware metallic, outlines</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>Standard</b><span>Built-in PBR: albedo, metallic, smoothness, normal, emission</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP Lit</b><span>Same PBR mapping as Standard, with surface type and alpha clip detected</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>HDRP Lit</b><span>Same PBR mapping as Standard, with surface type detected</span></div></div>
-        <div class="shader"><span class="tag tag-full">Profile</span><div><b>VRChat Mobile</b><span>Quest shaders: Toon Lit, Standard Lite, Toon Standard, Bumped Specular, MatCap Lit</span></div></div>
-        <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. Add your own GUID table for custom shaders.</span></div></div>
-      </div>
-      <div class="legend">
-        <span><span class="tag tag-full">Profile</span>Dedicated mapping, tested against real materials</span>
-        <span><span class="tag tag-generic">Generic</span>Rules that work on any shader, results vary</span>
-      </div>
+      <details class="more">
+        <summary>See which settings carry over for each shader</summary>
+        <div class="shaders">
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>lilToon</b><span>Shadow colors, border and blur, MatCap, rim light, emission, outline</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>MToon</b><span>VRM's toon shader, including shade color and MatCap</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>Poiyomi</b><span>Toon lighting with shadow strength, gated emission, reflection-aware metallic, outlines</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>Standard</b><span>Built-in PBR: albedo, metallic, smoothness, normal, emission</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP Lit</b><span>Same PBR mapping as Standard, with surface type and alpha clip detected</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>HDRP Lit</b><span>Same PBR mapping as Standard, with surface type detected</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>VRChat Mobile</b><span>Quest shaders: Toon Lit, Standard Lite, Toon Standard, Bumped Specular, MatCap Lit</span></div></div>
+          <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. Add your own GUID table for custom shaders.</span></div></div>
+        </div>
+        <div class="legend">
+          <span><span class="tag tag-full">Profile</span>Dedicated mapping, tested against real materials</span>
+          <span><span class="tag tag-generic">Generic</span>Rules that work on any shader, results vary</span>
+        </div>
+      </details>
     </div>
   </section>
 
