@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
@@ -10,7 +11,7 @@ from .material import UnityMaterial
 from .meta import ModelImporterInfo, strip_numeric_suffix
 from .prefab import RendererMaterials
 
-__all__ = ["MaterialResolution", "resolve_materials", "slot_assignments"]
+__all__ = ["MaterialResolution", "resolve_materials", "slot_assignments", "submesh_slot_order"]
 
 Method = Literal["external", "name", "prefab", "none"]
 
@@ -40,13 +41,15 @@ def resolve_materials(
     model_pathname: str = "",
     prefab_table: dict[str, RendererMaterials] | None = None,
     object_slots: dict[str, list[str]] | None = None,
+    submesh_order: dict[str, list[int]] | None = None,
 ) -> dict[str, MaterialResolution]:
     """各 FBX マテリアル名に対して .mat の GUID を決める。
 
     1. ModelImporter の externalObjects（完全一致 → 連番除去）
     2. .mat の m_Name / ファイル名との一致（複数あればモデルと同じフォルダに近いもの）
     3. prefab の Renderer.m_Materials（``object_slots`` = Blender 上の {オブジェクト名: スロット順の
-       マテリアル名} を使い、同名 GameObject の同じスロットに入っている .mat を採用）
+       マテリアル名} を使い、同名 GameObject の同じサブメッシュに入っている .mat を採用。
+       サブメッシュとスロットの対応は ``submesh_order``、無ければスロット順）
     4. 解決不能
     """
     by_name: dict[str, list[UnityMaterial]] = {}
@@ -67,7 +70,7 @@ def resolve_materials(
             best = max(candidates, key=lambda m: _common_prefix_len(m.pathname, model_pathname))
             result[fbx_name] = MaterialResolution(fbx_name, best.guid, "name")
             continue
-        prefab_guid, warning = _from_prefab(fbx_name, prefab_table, object_slots, materials)
+        prefab_guid, warning = _from_prefab(fbx_name, prefab_table, object_slots, materials, submesh_order)
         if prefab_guid:
             result[fbx_name] = MaterialResolution(fbx_name, prefab_guid, "prefab", warning)
             continue
@@ -75,23 +78,55 @@ def resolve_materials(
     return result
 
 
+def submesh_slot_order(material_indices: Iterable[int], slot_count: int) -> list[int]:
+    """Unity のサブメッシュ順に並べた Blender のスロット番号。
+
+    Unity の FBX インポーターはポリゴン列で最初に使われた順にサブメッシュを作り、ポリゴンの無いマテリアルは
+    サブメッシュにしない。Blender のスロット順（FBX 内のマテリアル順）とは一致しないことがあるので、
+    Renderer.m_Materials[i] はこの並びの i 番目のスロットに対応させる。
+    """
+    order: list[int] = []
+    seen: set[int] = set()
+    for index in material_indices:
+        if index in seen or not 0 <= index < slot_count:
+            continue
+        seen.add(index)
+        order.append(index)
+        if len(order) == slot_count:
+            break
+    return order
+
+
+def _prefab_slots(
+    obj_name: str,
+    slot_count: int,
+    prefab_table: dict[str, RendererMaterials],
+    submesh_order: dict[str, list[int]] | None,
+) -> list[tuple[int, str | None]]:
+    """オブジェクトの (Blender スロット番号, prefab がそのサブメッシュに指す .mat GUID) の組。"""
+    rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
+    if rm is None:
+        return []
+    order = submesh_order.get(obj_name) if submesh_order is not None else None
+    if order is None:
+        order = list(range(slot_count))
+    return [(slot, guid) for slot, guid in zip(order, rm.materials) if 0 <= slot < slot_count]
+
+
 def _from_prefab(
     fbx_name: str,
     prefab_table: dict[str, RendererMaterials] | None,
     object_slots: dict[str, list[str]] | None,
     materials: dict[str, UnityMaterial],
+    submesh_order: dict[str, list[int]] | None = None,
 ) -> tuple[str | None, str | None]:
     if not prefab_table or not object_slots:
         return None, None
     votes: dict[str, int] = {}
     for obj_name, slots in object_slots.items():
-        rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
-        if rm is None:
-            continue
-        for index, slot_name in enumerate(slots):
-            if slot_name != fbx_name or index >= len(rm.materials):
+        for index, guid in _prefab_slots(obj_name, len(slots), prefab_table, submesh_order):
+            if slots[index] != fbx_name:
                 continue
-            guid = rm.materials[index]
             if guid and guid in materials:
                 votes[guid] = votes.get(guid, 0) + 1
     if not votes:
@@ -110,17 +145,18 @@ def slot_assignments(
     object_slots: dict[str, list[str]],
     prefab_table: dict[str, RendererMaterials] | None,
     materials: dict[str, UnityMaterial],
+    submesh_order: dict[str, list[int]] | None = None,
 ) -> dict[tuple[str, int], str]:
-    """prefab が (オブジェクト名, スロット番号) ごとに指す .mat GUID。パッケージ内に無い GUID は除く。"""
+    """prefab が (オブジェクト名, スロット番号) ごとに指す .mat GUID。パッケージ内に無い GUID は除く。
+
+    m_Materials の並びは Unity のサブメッシュ順なので、``submesh_order``（{オブジェクト名: サブメッシュ順の
+    スロット番号}、``submesh_slot_order`` の結果）でスロットに読み替える。無いオブジェクトはスロット順とみなす。
+    """
     result: dict[tuple[str, int], str] = {}
     if not prefab_table:
         return result
     for obj_name, slots in object_slots.items():
-        rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
-        if rm is None:
-            continue
-        for index in range(min(len(slots), len(rm.materials))):
-            guid = rm.materials[index]
+        for index, guid in _prefab_slots(obj_name, len(slots), prefab_table, submesh_order):
             if guid and guid in materials:
                 result[(obj_name, index)] = guid
     return result
