@@ -1,6 +1,6 @@
 # CLAUDE.md — unitypackage_loader 開発ガイド
 
-このリポジトリは、`.unitypackage` を Blender に直接読み込む Extension「Unity Package Importer」の開発用です。
+このリポジトリは、`.unitypackage` を Blender に直接読み込む Extension「Unitypackage Importer」の開発用です。
 新しいセッションで作業を始める前に、このファイルと `DESIGN.md` に目を通してください。
 非公開の補足（検証用データの詳細、ローカル環境）は `CLAUDE.local.md`（gitignore 対象）にあります。
 
@@ -34,7 +34,7 @@ unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.2
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
   blender/                bpy 依存（importer / materials / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
-  ui/                     Preferences、サイドバー "Unity Package" タブ
+  ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
 tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、スクリーンショット撮影（shoot_screenshots.py）
 web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
