@@ -74,7 +74,7 @@
       <a href="#uses">使い道</a>
       <a href="#support">対応</a>
       <a href="#install">導入</a>
-      <a href="#security">安全性</a>
+      <a href="#faq">よくある質問</a>
       <a class="gh" href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>
       <a class="lang" href="../" hreflang="en" lang="en">English</a>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="ライトとダークの表示を切り替える">
@@ -298,54 +298,67 @@
     </div>
   </section>
 
-  <section class="section" id="security">
+  <section class="section" id="faq">
     <div class="wrap">
       <div class="section-head">
-        <span class="eyebrow">安全性</span>
-        <h2>自分で作っていない<wbr>パッケージを開くために</h2>
-        <p>アバターはいろいろな人の手を経て届きます。アドオンはすべてのパッケージを信頼できない入力として扱います。</p>
+        <span class="eyebrow">よくある質問</span>
+        <h2>気になるところ</h2>
       </div>
-      <div class="trust">
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
-          <h3>パッケージ内のコードは一切実行しない</h3>
-          <p>C# スクリプト、シェーダー、その他のアセットは無視します。ディスクに書き出すのはモデルファイルと、マテリアルが参照するテクスチャだけ。.mat / .meta / .prefab はテキストとしてメモリ上で解析します。</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-          <h3>同梱の .blend は既定で開かない</h3>
-          <p>.blend は、Auto Run が有効なときに Blender が実行する Python を含めます。他人のパッケージの .blend をアペンドするのは、インポートごとの明示的な選択で、ドキュメントにも記載しています。</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
-          <h3>アーカイブ処理は堅牢化済み</h3>
-          <p>パスを検証し、シンボリックリンクは辿らず、大きすぎるメタデータは無視し、展開する合計サイズを上限と空き容量に対して書き出し前に確認します。</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></div>
-          <h3>Blender が解析する部分は Blender が守る</h3>
-          <p>FBX、glTF、画像のデコードは Blender 自身が行います。Blender は最新の LTS に保ち、出所不明のパッケージは別のインストールやサンドボックスで開いてください。</p>
-        </article>
+      <div class="faq">
+        <details>
+          <summary>Unity は必要ですか？</summary>
+          <div class="answer">
+            <p>いいえ。Unity も Unity Hub もインストールしなくて大丈夫です。パッケージの中身はアドオンが直接読み取ります。</p>
+          </div>
+        </details>
+        <details>
+          <summary>料金はかかりますか？</summary>
+          <div class="answer">
+            <p>無料です。GPL-3.0 のフリーソフトウェアで、ソースコードも <a href="https://github.com/utagestudio/unitypackage_loader">GitHub</a> で公開しています。</p>
+          </div>
+        </details>
+        <details>
+          <summary>対応している Blender のバージョンは？</summary>
+          <div class="answer">
+            <p>Blender 4.2 以降です。Windows / macOS / Linux で動きます。</p>
+          </div>
+        </details>
+        <details>
+          <summary>どのアバターでも使えますか？</summary>
+          <div class="answer">
+            <p>lilToon、Poiyomi、MToon など、よく使われるシェーダーのアバターに対応しています。それ以外のシェーダーも、一般的な設定名から可能な範囲で変換します。</p>
+            <p>Unity のシェーダーと Blender のノードは仕組みが違うため、見た目は完全には一致しません。仕上げは Blender 側で調整してください。</p>
+          </div>
+        </details>
+        <details>
+          <summary>読み込まれないものはありますか？</summary>
+          <div class="answer">
+            <p>目的は「Blender で正しく見えるモデル」なので、次のものは読み込みません。</p>
+            <ul>
+              <li>シェーダー本体（マテリアルの設定は変換します）</li>
+              <li>C# スクリプトとコンポーネント</li>
+              <li>アニメーションと Animator Controller</li>
+              <li>prefab の階層（マテリアルの割り当てを調べるためだけに使います）</li>
+              <li>VRChat の Expression メニューとパラメーター</li>
+              <li>PhysBone などの揺れもの、物理、コライダー</li>
+            </ul>
+          </div>
+        </details>
+        <details>
+          <summary>他の人が作ったパッケージを開いても安全ですか？</summary>
+          <div class="answer">
+            <p>パッケージ内のスクリプトは一切実行しません。ディスクに書き出すのはモデルと、マテリアルが使うテクスチャだけです。同梱の .blend は Python を含められるため、インポートのたびに自分で有効にしない限り開きません。ファイルのパスや展開サイズも、書き出す前に確認します。</p>
+            <p>FBX や画像の読み込みは Blender 自身が行うので、Blender は最新の LTS を使ってください。詳しくは <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/README_ja.md">README（日本語）</a>にあります。</p>
+          </div>
+        </details>
+        <details>
+          <summary>うまく読み込めないときは？</summary>
+          <div class="answer">
+            <p>サイドバー（N キー）の「Unity Package」タブに、読み込んだ内容、マテリアルごとの結果、警告が表示されます。それでも解決しないときは、<a href="https://github.com/utagestudio/unitypackage_loader/issues">GitHub の Issues</a> で知らせてください。</p>
+          </div>
+        </details>
       </div>
-      <p class="alt" style="margin-top:18px">詳細は <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/README_ja.md">README（日本語）</a> にあります。</p>
-    </div>
-  </section>
-
-  <section class="section" id="limits">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">範囲</span>
-        <h2>読み込まないもの</h2>
-        <p>目的は Blender で正しく見えるメッシュであって、Blender の中に Unity プロジェクトを作ることではありません。次のものは Unity 側に残ります。</p>
-      </div>
-      <ul class="plain-list">
-        <li>シェーダー本体（マテリアルは変換しますが、シェーダーは変換しません）</li>
-        <li>C# スクリプトとコンポーネント</li>
-        <li>アニメーションと Animator Controller</li>
-        <li>prefab の階層（prefab はマテリアル割り当ての参照にだけ使います）</li>
-        <li>VRChat の Expression メニューとパラメーター</li>
-        <li>物理、コライダー、揺れもの</li>
-      </ul>
+      <p class="alt faq-more">仕組みや細かい仕様は、開発者向けの <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/DESIGN.md">DESIGN.md</a> にまとめています。</p>
     </div>
   </section>
 

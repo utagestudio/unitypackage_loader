@@ -74,7 +74,7 @@
       <a href="#uses">Uses</a>
       <a href="#support">Supported</a>
       <a href="#install">Install</a>
-      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
       <a class="gh" href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>
       <a class="lang" href="ja/" hreflang="ja" lang="ja">日本語</a>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light and dark theme">
@@ -298,54 +298,67 @@
     </div>
   </section>
 
-  <section class="section" id="security">
+  <section class="section" id="faq">
     <div class="wrap">
       <div class="section-head">
-        <span class="eyebrow">Security</span>
-        <h2>Built to open packages you did not make</h2>
-        <p>Avatars come from many hands. The add-on treats every package as untrusted input.</p>
+        <span class="eyebrow">FAQ</span>
+        <h2>Questions you might have</h2>
       </div>
-      <div class="trust">
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
-          <h3>No code from the package ever runs</h3>
-          <p>C# scripts, shaders and other assets are ignored. Only model files and the textures a material references are written to disk. Material, meta and prefab files are parsed in memory as text.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-          <h3>Bundled .blend files stay closed by default</h3>
-          <p>A .blend can carry Python that Blender runs when Auto Run is on. Appending one from a stranger's package is opt-in, per import, and documented.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
-          <h3>Archive handling is hardened</h3>
-          <p>Paths are validated, symbolic links are never followed, oversized metadata is ignored, and the total size is checked against a limit and the free disk space before anything is written.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></div>
-          <h3>What Blender parses, Blender must protect</h3>
-          <p>FBX, glTF and image decoding are done by Blender itself. Keep Blender on the latest LTS, and open packages from unknown sources in a separate installation or a sandbox.</p>
-        </article>
+      <div class="faq">
+        <details>
+          <summary>Do I need Unity?</summary>
+          <div class="answer">
+            <p>No. You don't need to install Unity or Unity Hub. The add-on reads the package contents itself.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Does it cost anything?</summary>
+          <div class="answer">
+            <p>No, it is free software under the GPL-3.0 license, and the source code is on <a href="https://github.com/utagestudio/unitypackage_loader">GitHub</a>.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Which Blender versions does it support?</summary>
+          <div class="answer">
+            <p>Blender 4.2 and later, on Windows, macOS and Linux.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Will it work with my avatar?</summary>
+          <div class="answer">
+            <p>Avatars using common shaders such as lilToon, Poiyomi and MToon are supported. Other shaders are converted as far as their common setting names allow.</p>
+            <p>Unity shaders and Blender nodes work differently, so the result will not match Unity exactly. Expect to finish the look in Blender.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Is anything left out?</summary>
+          <div class="answer">
+            <p>The goal is a model that looks right in Blender, so these are not imported:</p>
+            <ul>
+              <li>Shader source code (material settings are converted)</li>
+              <li>C# scripts and components</li>
+              <li>Animations and animator controllers</li>
+              <li>Prefab hierarchies (prefabs are only read to assign materials)</li>
+              <li>VRChat Expression menus and parameters</li>
+              <li>PhysBones and other dynamics, physics and colliders</li>
+            </ul>
+          </div>
+        </details>
+        <details>
+          <summary>Is it safe to open packages made by someone else?</summary>
+          <div class="answer">
+            <p>No code from the package ever runs. Only model files and the textures their materials use are written to disk. Bundled .blend files can carry Python, so they stay closed unless you opt in for that import. File paths and extracted sizes are checked before anything is written.</p>
+            <p>FBX and image decoding are done by Blender itself, so keep Blender on the latest LTS. The full notes are in the <a href="https://github.com/utagestudio/unitypackage_loader#security-notes">README</a>.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Something did not import right. What now?</summary>
+          <div class="answer">
+            <p>The "Unity Package" tab in the sidebar (N key) shows what was imported, how each material was resolved, and any warnings. If that does not help, please let us know in <a href="https://github.com/utagestudio/unitypackage_loader/issues">GitHub Issues</a>.</p>
+          </div>
+        </details>
       </div>
-      <p class="alt" style="margin-top:18px">The full notes are in the <a href="https://github.com/utagestudio/unitypackage_loader#security-notes">README</a>.</p>
-    </div>
-  </section>
-
-  <section class="section" id="limits">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Scope</span>
-        <h2>What is not imported</h2>
-        <p>The goal is a mesh that looks right in Blender, not a Unity project inside Blender. These stay on the Unity side.</p>
-      </div>
-      <ul class="plain-list">
-        <li>Shader source code (materials are converted, shaders are not)</li>
-        <li>C# scripts and components</li>
-        <li>Animations and animator controllers</li>
-        <li>Prefab hierarchies (prefabs are read only for material assignment)</li>
-        <li>VRChat Expression menus and parameters</li>
-        <li>Physics, colliders and dynamic bones</li>
-      </ul>
+      <p class="alt faq-more">Curious how it works under the hood? The developer notes are in <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/DESIGN.md">DESIGN.md</a>.</p>
     </div>
   </section>
 
