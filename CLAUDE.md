@@ -105,11 +105,12 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
   ヒーローの読み込み前後（`hero-before.webp` / `hero-after.webp`）は、同じカメラで撮った 2 枚のスクリーンショット（`_local/shots/`）を
   同じ範囲で 4:5 に切り出したもの。スライダーで重ねるので、撮り直すときもカメラと切り出し範囲を揃えること。
   操作デモは `web/assets/demo.mp4`（音声なし・自動ループ）と、最後のコマから作った poster `demo-poster.webp`。録画の元ファイルは `_local/recording/` に置く。
-  ページの画面写真（`web/assets/shot-*.webp`）は `tools/shoot_screenshots.py` で撮る。他アドオンが写り込まないよう
+  導入手順の画面写真（`web/assets/shot-menu.webp` / `shot-dialog.webp`）は `tools/shoot_screenshots.py` で撮る。モード比較（`shot-modes.webp`）は
+  サイドバーで切り替えた 2 体を手で撮ったスクリーンショットから切り出す。スクリプトで撮る場合も手で撮る場合も、他アドオンが写り込まないよう
   `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/` に置き、追跡ファイルには名前を書かない。
 
 ```sh
-blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> main    # hero / nodes / modes
+blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> main    # hero / nodes / modes（現在のページでは未使用）
 blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> dialog  # インポートのポップアップ
 blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> menu    # File > Import メニュー
 ```
