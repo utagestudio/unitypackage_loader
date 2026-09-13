@@ -8,7 +8,7 @@ YAML サブセットだけを依存無しで扱う。対応する構文:
   シーケンス」および ``- key: value`` 形式の 1 要素マッピング
 * フローマッピング ``{fileID: 0, guid: x, type: 3}``（複数行に折り返されたものも可）
 * フローシーケンス ``[]`` / ``[a, b]``
-* スカラー: int / float / 文字列（クォート有無）
+* スカラー: int / float / 文字列（クォート有無）。次の行以降に折り返された長い値も 1 つにつなぐ
 
 ``--- !u!<classID> &<fileID>`` で区切られた複数ドキュメントにも対応する。
 """
@@ -281,6 +281,11 @@ def _flow_balanced(text: str) -> bool:
     return depth <= 0 and not quote
 
 
+def _escaped_line_end(text: str) -> bool:
+    """ダブルクォート内の行末が ``\\``（エスケープされた改行）か。``\\\\`` は文字の ``\\`` なので数える。"""
+    return (len(text) - len(text.rstrip("\\"))) % 2 == 1
+
+
 # ---------------------------------------------------------------------------
 # ブロック構文
 # ---------------------------------------------------------------------------
@@ -347,7 +352,7 @@ class _BlockParser:
                     # ``key: `` （値が空）は Unity では空文字列
                     value, i = "", i + 1
             else:
-                value, i = self._inline(i, rest, key)
+                value, i = self._inline(i, rest, key, indent)
             result[key] = value
         return result, i
 
@@ -367,7 +372,7 @@ class _BlockParser:
                 else:
                     value, i = None, i + 1
             elif content[0] in "{[" or content[0] in "'\"":
-                value, i = self._inline(i, content, None)
+                value, i = self._inline(i, content, None, indent)
             elif _is_seq_item(content) or ": " in content or content.endswith(":"):
                 # ``- key: value`` / ``- - item`` → ダッシュ以降を仮想的なインデントの
                 # ブロックとして読み直す
@@ -375,11 +380,11 @@ class _BlockParser:
                 self.lines[i] = _Line(virtual_indent, content, line.number)
                 value, i = self._block(i, virtual_indent, depth + 1)
             else:
-                value, i = self._inline(i, content, None)
+                value, i = self._inline(i, content, None, indent)
             items.append(value)
         return items, i
 
-    def _inline(self, i: int, text: str, key: str | None) -> tuple[Any, int]:
+    def _inline(self, i: int, text: str, key: str | None, indent: int) -> tuple[Any, int]:
         if text[0] in "{[":
             joined = text
             while not _flow_balanced(joined):
@@ -388,7 +393,30 @@ class _BlockParser:
                     raise UnityYamlError(f"unterminated flow value: {text!r}")
                 joined += " " + self.lines[i].content
             return _FlowParser(joined).parse(), i + 1
+        text, i = self._fold(i, text, indent)
         return _scalar(text, key), i + 1
+
+    def _fold(self, i: int, text: str, indent: int) -> tuple[str, int]:
+        """親（``indent``）より深いインデントで続く行を、折り返されたスカラーの続きとしてつなぐ。
+
+        Unity は長い値（``m_ShaderKeywords`` など）を次の行に折り返して書く。YAML と同じく行の区切りは空白 1 つにし、
+        ダブルクォート内で行末が ``\\`` のときは空白を入れない。クォート付きは閉じるまで読む。
+        空行は ``_split_lines`` で落ちるので、値の中の改行は保持しない（読み込みで使うキーには出てこない）。
+        """
+        n = len(self.lines)
+        quoted = text[0] in "'\""
+        while i + 1 < n and self.lines[i + 1].indent > indent:
+            if quoted and _flow_balanced(text):
+                break
+            line = self.lines[i + 1]
+            if not quoted and (": " in line.content or line.content.endswith(":")):
+                raise UnityYamlError(f"line {line.number}: unexpected indentation: {line.content!r}")
+            if quoted and text[0] == '"' and _escaped_line_end(text):
+                text = text[:-1] + line.content
+            else:
+                text = f"{text} {line.content}"
+            i += 1
+        return text, i
 
 
 # ---------------------------------------------------------------------------
