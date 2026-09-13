@@ -222,7 +222,7 @@ details.more[open] > summary { margin-bottom: 18px; }
 .install-step > h3 { display: flex; align-items: center; gap: 12px; font-size: 1.3rem; }
 .install-step .num { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 800; display: grid; place-items: center; font-size: 1rem; flex: none; }
 .install-step > p { color: var(--muted); max-width: 70ch; }
-.routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.routes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .route { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: clamp(18px, 3vw, 26px); display: grid; gap: 12px; align-content: start; }
 .route-easy { border: 2px solid var(--accent); }
 .route h4 { margin: 0; font-size: 1.1rem; font-weight: 800; line-height: 1.4; }
