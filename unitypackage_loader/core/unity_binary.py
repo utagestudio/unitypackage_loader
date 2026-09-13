@@ -108,6 +108,7 @@ class _Reader:
         self.data = data
         self.endian = endian
         self.pos = pos
+        self.base = pos  # 境界揃えの基準（オブジェクトの先頭）
         self.end = len(data) if end is None else end
 
     @property
@@ -148,7 +149,7 @@ class _Reader:
         return text
 
     def align(self, size: int = 4) -> None:
-        self.pos = min(self.end, (self.pos + size - 1) // size * size)
+        self.pos = min(self.end, self.base + (self.pos - self.base + size - 1) // size * size)
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +296,7 @@ class _ValueReader:
             values = list(st.unpack(self.r.bytes(st.size)))
             return [int(v) for v in values] if fmt == "?" else values
         items = [self.read(element) for _ in range(size)]
-        if element.type == "pair":
+        if element.type == "pair" and len(element.children) == 2:
             return [
                 {k: v} if isinstance(k, str) else {"first": k, "second": v}
                 for k, v in items
@@ -415,7 +416,7 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
     first_error: UnityBinaryError | None = None
     for path_id, start, size, typ, stripped in objects:
         try:
-            if start + size > len(data):
+            if start < header.data_offset or start + size > len(data):
                 raise UnityBinaryError(f"object {path_id} lies outside the file")
             reader = _ValueReader(_Reader(data, header.endian, start, start + size), externals)
             tree = typ.tree
