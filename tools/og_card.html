@@ -1,29 +1,43 @@
 <!DOCTYPE html>
-<!-- OGP 画像（1200×630）の元。ローカルの Chrome でレンダリングして web/assets/og.png にする:
-     google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,630 --screenshot=web/assets/og.png tools/og_card.html
+<!-- OGP 画像（1200×630）の元。英語と日本語の 2 枚を、ローカルの Chrome でレンダリングして web/assets/ に置く:
+     google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,630 --screenshot=web/assets/og.png "file://$PWD/tools/og_card.html"
+     google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,630 --screenshot=web/assets/og-ja.png "file://$PWD/tools/og_card.html?lang=ja"
+     リポジトリのルートで実行すること（右側の前後比較は web/assets/hero-*.webp を相対パスで読む）。
      フォントは Google Fonts から読むので、オンラインで実行すること。 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&family=Zen+Maru+Gothic:wght@700;900&display=swap">
 <style>
   html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
   body { background: #ffffff; color: #3a322c; font-family: "Nunito", system-ui, sans-serif; position: relative; }
+  html[lang="ja"] body { font-family: "Zen Maru Gothic", "Nunito", system-ui, sans-serif; }
   .blob { position: absolute; border-radius: 50%; pointer-events: none; }
   .b1 { width: 760px; height: 760px; right: -260px; top: -300px; background: radial-gradient(closest-side, #ffe3cc, rgba(255,227,204,0) 72%); }
   .b2 { width: 420px; height: 420px; left: -120px; bottom: -220px; background: radial-gradient(closest-side, #ffd2b0, rgba(255,210,176,0) 72%); }
-  .card { position: absolute; inset: 0; padding: 72px 80px; display: grid; grid-template-columns: 1fr 360px; align-items: center; gap: 40px; }
-  .logo { display: flex; align-items: center; gap: 18px; font-weight: 800; font-size: 28px; margin-bottom: 28px; }
-  .logo svg { width: 56px; height: 56px; }
-  h1 { margin: 0 0 22px; font-size: 58px; line-height: 1.08; font-weight: 800; letter-spacing: -0.015em; }
+  .card { position: absolute; inset: 0; padding: 56px 64px 56px 72px; display: grid; grid-template-columns: minmax(0, 1fr) 392px; align-items: center; gap: 48px; }
+  .logo { display: flex; align-items: center; gap: 16px; font-family: "Nunito", system-ui, sans-serif; font-weight: 800; font-size: 26px; margin-bottom: 26px; }
+  .logo svg { width: 52px; height: 52px; }
+  h1 { margin: 0 0 22px; font-size: 56px; line-height: 1.12; font-weight: 800; letter-spacing: -0.015em; }
+  html[lang="ja"] h1 { font-size: 58px; line-height: 1.3; font-weight: 900; letter-spacing: 0; }
   h1 em { font-style: normal; background: linear-gradient(90deg, #ad5410, #f07f2a); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  p { margin: 0; font-size: 24px; line-height: 1.4; color: #7d7169; max-width: 640px; font-weight: 700; }
-  .pill { display: inline-flex; align-items: center; gap: 10px; margin-top: 26px; background: #fff5ec; color: #ad5410; font-weight: 800; font-size: 22px; padding: 10px 22px; border-radius: 999px; }
+  h1 .nb { white-space: nowrap; }
+  p { margin: 0; font-size: 23px; line-height: 1.45; color: #72665d; max-width: 600px; font-weight: 700; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; margin-top: 24px; background: #fff5ec; color: #ad5410; font-weight: 800; font-size: 21px; padding: 9px 20px; border-radius: 999px; }
   .pill::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: #f07f2a; }
-  .art { position: relative; width: 360px; height: 360px; }
-  .art .box { position: absolute; inset: 30px; border-radius: 76px; background: linear-gradient(135deg, #ffc26a, #f07f2a); box-shadow: 0 30px 60px -30px rgba(173,84,16,.5); }
-  .art svg.arrow { position: absolute; inset: 30px; width: 300px; height: 300px; }
-  .art .dot { position: absolute; width: 74px; height: 74px; border-radius: 50%; background: #4fc4a8; right: 14px; top: 14px; }
+
+  /* before / after, split in the middle like the slider on the page */
+  .art { display: grid; gap: 10px; justify-items: center; }
+  .frame { position: relative; width: 392px; height: 490px; border-radius: 28px; overflow: hidden; background: #393939; box-shadow: 0 30px 60px -30px rgba(58,50,44,.55); }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .frame img.after { clip-path: inset(0 0 0 50%); }
+  .frame .line { position: absolute; top: 0; bottom: 0; left: 50%; width: 4px; margin-left: -2px; background: #fff; }
+  .frame .knob { position: absolute; top: 50%; left: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: #f07f2a; border: 4px solid #fff; box-sizing: border-box; display: grid; place-items: center; }
+  .frame .knob svg { width: 26px; height: 26px; }
+  .tag { position: absolute; top: 14px; font-size: 16px; font-weight: 800; line-height: 1.3; padding: 5px 12px; border-radius: 999px; }
+  .tag.before { left: 14px; background: rgba(35,29,25,.82); color: #fff; }
+  .tag.after { right: 14px; background: #f07f2a; color: #3a322c; }
+  .credit { font-size: 13px; color: #9a8e85; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -35,15 +49,32 @@
         <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc26a"/><stop offset="1" stop-color="#f07f2a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="16" fill="url(#g)"/><path d="M32 22v20M24 34l8 8 8-8" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="14" r="7" fill="#4fc4a8"/></svg>
         Unitypackage Importer
       </div>
-      <h1>Bring your .unitypackage into Blender, <em>materials and all.</em></h1>
-      <p>Meshes, textures and Unity material settings rebuilt as Blender nodes. lilToon, MToon, Poiyomi, Standard, URP, HDRP.</p>
-      <span class="pill">Free Blender extension · 4.2 and later</span>
+      <h1 data-en="Bring the avatar you bought into Blender, &lt;em&gt;textures and all.&lt;/em&gt;"
+          data-ja="&lt;span class=&quot;nb&quot;&gt;買ったアバターを、&lt;/span&gt;&lt;br&gt;&lt;em class=&quot;nb&quot;&gt;テクスチャ付きで&lt;/em&gt;&lt;br&gt;&lt;span class=&quot;nb&quot;&gt;Blender へ。&lt;/span&gt;"></h1>
+      <p data-en="Just drag and drop a .unitypackage. No Unity needed."
+         data-ja=".unitypackage をドロップするだけ。Unity は不要です。"></p>
+      <span class="pill" data-en="For VRChat avatars · Free Blender add-on" data-ja="VRChat アバター向け · 無料の Blender アドオン"></span>
     </div>
     <div class="art">
-      <div class="box"></div>
-      <svg class="arrow" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 18v26M22 34l10 10 10-10" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div class="dot"></div>
+      <div class="frame">
+        <img src="../web/assets/hero-before.webp" alt="">
+        <img class="after" src="../web/assets/hero-after.webp" alt="">
+        <span class="line"></span>
+        <span class="knob"><svg viewBox="0 0 24 24" fill="none" stroke="#3a322c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 7-5 5 5 5M15 7l5 5-5 5"/></svg></span>
+        <span class="tag before" data-en="Plain FBX" data-ja="FBX だけ"></span>
+        <span class="tag after" data-en="This add-on" data-ja="このアドオン"></span>
+      </div>
+      <span class="credit">Model: Tohoku Zunko © SSS LLC.</span>
     </div>
   </div>
+  <script>
+    (function () {
+      var lang = new URLSearchParams(location.search).get("lang") === "ja" ? "ja" : "en";
+      document.documentElement.lang = lang;
+      document.querySelectorAll("[data-en]").forEach(function (el) {
+        el.innerHTML = el.getAttribute("data-" + lang);
+      });
+    })();
+  </script>
 </body>
 </html>
