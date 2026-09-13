@@ -39,6 +39,26 @@ def _human_size(size: int) -> str:
     return f"{size:.1f} GB"
 
 
+PREFAB_ALL = "ALL"
+
+# EnumProperty の動的 items は Python 側で文字列を保持しておかないと表示が壊れるので、モデル GUID ごとに持つ
+_prefab_enum_cache: dict[str, list[tuple[str, str, str]]] = {}
+
+
+def _prefab_candidates(model_guid: str) -> list[str]:
+    return _pending.prepared.prefabs_for(model_guid) if _pending is not None else []
+
+
+def _prefab_items(self, context):
+    """モデル行の prefab ドロップダウン。識別子は候補の番号（pathname はパッケージ由来の文字列なので使わない）。"""
+    items = [(PREFAB_ALL, "All (first wins)", "Merge every prefab using this model; the first one by path takes precedence")]
+    for index, pathname in enumerate(_prefab_candidates(self.guid)):
+        shown = sanitize_display(pathname)
+        items.append((str(index), shown.rsplit("/", 1)[-1], shown))
+    _prefab_enum_cache[self.guid] = items
+    return items
+
+
 class UNITYPKG_ModelItem(bpy.types.PropertyGroup):
     guid: StringProperty()
     pathname: StringProperty()
@@ -46,6 +66,12 @@ class UNITYPKG_ModelItem(bpy.types.PropertyGroup):
     materials_text: StringProperty()
     selected: BoolProperty(default=True)
     supported: BoolProperty(default=True)
+    prefab_count: IntProperty(default=0)
+    prefab: EnumProperty(
+        name="Prefab",
+        items=_prefab_items,
+        description="Prefab whose renderer material assignments are used for this model",
+    )
 
 
 class UNITYPKG_UL_models(bpy.types.UIList):
@@ -59,14 +85,11 @@ class UNITYPKG_UL_models(bpy.types.UIList):
         right.alignment = "RIGHT"
         right.label(text=item.size_text)
         right.label(text=item.materials_text)
-
-
-def _prefab_items(self, context):
-    items = [("", "All (first wins)", "Merge every prefab; the first one by path takes precedence")]
-    if _pending is not None:
-        for pathname in sorted(_pending.prepared.prefab_tables):
-            items.append((pathname, pathname.rsplit("/", 1)[-1], pathname))
-    return items
+        if item.prefab_count > 1:
+            # 色違いなど、同じモデルを使う prefab が複数あるモデルだけ選べるようにする
+            prefab = right.row(align=True)
+            prefab.enabled = item.supported
+            prefab.prop(item, "prefab", text="", icon="PACKAGE")
 
 
 class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
@@ -80,11 +103,6 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
     package_name: StringProperty()
     summary_materials: StringProperty()
     summary_textures: StringProperty()
-    prefab: EnumProperty(
-        name="Prefab",
-        items=_prefab_items,
-        description="Prefab whose renderer material assignments are used when the model's own mapping is missing or shared",
-    )
 
     def invoke(self, context, event):
         if _pending is None:
@@ -105,14 +123,14 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
                 item.materials_text = "unsupported"
             item.supported = m.supported
             item.selected = m.supported
+            candidates = prepared.prefabs_for(m.guid)
+            item.prefab_count = len(candidates)
+            # 既定は「そのモデルを使う prefab を統合」。前回の指定があれば引き継ぐ
+            chosen = _pending.opts.prefabs.get(m.guid, "")
+            item.prefab = str(candidates.index(chosen)) if chosen in candidates else PREFAB_ALL
         self.package_name = sanitize_display(prepared.path.name)
         total = len(prepared.unity_mats)
         self.summary_materials = f"Materials: {total} found in package"
-        if len(prepared.prefab_tables) > 1 and not _pending.opts.prefab:
-            # 複数 prefab があるときは最初のものを既定にし、ユーザーが変えられるようにする
-            self.prefab = sorted(prepared.prefab_tables)[0]
-        elif _pending.opts.prefab in prepared.prefab_tables:
-            self.prefab = _pending.opts.prefab
         ref, missing = len(prepared.referenced_textures), len(prepared.missing_textures)
         self.summary_textures = f"Textures: {ref} referenced" + (f", {missing} missing from package" if missing else "")
         return context.window_manager.invoke_props_dialog(self, width=620)
@@ -128,8 +146,8 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         col = layout.column(align=True)
         col.label(text=self.summary_materials, icon="MATERIAL")
         col.label(text=self.summary_textures, icon="TEXTURE")
-        if _pending is not None and len(_pending.prepared.prefab_tables) > 1:
-            layout.prop(self, "prefab")
+        if any(it.prefab_count > 1 for it in self.items):
+            col.label(text="Prefab: choose per model which prefab's material assignments to use", icon="PACKAGE")
 
     def execute(self, context):
         from ..blender.importer import run_import
@@ -143,7 +161,11 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             return {"CANCELLED"}
         opts = _pending.opts
         opts.model_guids = selected
-        opts.prefab = self.prefab
+        opts.prefabs = {}
+        for it in self.items:
+            candidates = _prefab_candidates(it.guid)
+            if it.prefab != PREFAB_ALL and it.prefab.isdigit() and int(it.prefab) < len(candidates):
+                opts.prefabs[it.guid] = candidates[int(it.prefab)]
         wm = context.window_manager
         wm.progress_begin(0, 100)
         try:
