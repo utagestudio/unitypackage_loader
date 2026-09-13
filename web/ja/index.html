@@ -90,25 +90,33 @@
   <section class="hero">
     <div class="wrap">
       <div class="hero-copy">
-        <span class="eyebrow">無料の Blender Extension · 4.2 以降</span>
-        <h1><span class="nb">.unitypackage を</span><wbr><em>マテリアルごと</em><wbr><span class="nb">Blender へ。</span></h1>
-        <p class="lede">パッケージをビューポートにドラッグ＆ドロップするだけ。アーマチュアとシェイプキー付きのメッシュが入り、テクスチャが展開され、Unity 側のマテリアル設定が Blender のノードとして組み直されます。Unity プロジェクトは要りません。</p>
+        <span class="eyebrow">VRChat アバター向け · 無料の Blender アドオン</span>
+        <h1><span class="nb">買ったアバターを、</span><wbr><em class="nb">テクスチャ付きで</em><wbr><span class="nb">Blender へ。</span></h1>
+        <p class="lede">BOOTH などで手に入れた <code>.unitypackage</code> を、Blender にドラッグ＆ドロップするだけ。Unity を開かなくても、ボーンや表情（シェイプキー）はそのまま、lilToon や Poiyomi の見た目に近い状態で読み込めます。</p>
         <div class="cta">
           <a class="btn btn-primary" href="#install">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>
-            Blender に追加
+            無料で入手
           </a>
           <a class="btn btn-secondary" href="https://github.com/utagestudio/unitypackage_loader">GitHub で見る</a>
         </div>
         <div class="hero-meta">
-          <span>バージョン {{VERSION}}</span>
-          <span>GPL-3.0</span>
-          <span>Windows / macOS / Linux</span>
+          <span>無料</span>
+          <span>Unity 不要</span>
+          <span>パッケージ内のスクリプトは実行しません</span>
+          <span>Blender 4.2 以降</span>
         </div>
       </div>
       <figure class="shot">
-        <div class="frame"><img src="../assets/shot-hero.webp" width="1920" height="1010" alt="Blender で .unitypackage から読み込んだアバターと、14 個のマテリアルが VRM10/MToon10 に解決されたことを示すサイドバー" loading="eager"></div>
-        <figcaption>パッケージ 1 つを 1 回読み込んだ状態。サイドバーに各マテリアルと、対応付いたシェーダーが並びます。</figcaption>
+        <div class="frame ba">
+          <img src="../assets/placeholder-hero-before.svg" width="960" height="1200" alt="FBX だけを Blender に読み込んだアバター。テクスチャが無く全体が白っぽい" loading="eager">
+          <img class="ba-after" src="../assets/placeholder-hero-after.svg" width="960" height="1200" alt="同じアバターをこのアドオンで読み込んだ状態。髪や服にテクスチャと色が付いている" loading="eager">
+          <span class="ba-label ba-label-before">FBX だけ読み込むと</span>
+          <span class="ba-label ba-label-after">このアドオンなら</span>
+          <input class="ba-range" type="range" min="0" max="100" value="50" aria-label="読み込み前と後を見比べるスライダー">
+          <span class="ba-handle" aria-hidden="true"></span>
+        </div>
+        <figcaption>左右にドラッグして見比べられます。左が FBX だけを読み込んだ状態、右が同じパッケージをこのアドオンで読み込んだ状態です。</figcaption>
       </figure>
     </div>
   </section>

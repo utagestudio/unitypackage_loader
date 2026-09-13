@@ -90,25 +90,33 @@
   <section class="hero">
     <div class="wrap">
       <div class="hero-copy">
-        <span class="eyebrow">Free Blender extension · 4.2 and later</span>
-        <h1>Bring your .unitypackage into Blender, <em>materials and all.</em></h1>
-        <p class="lede">Drop the package on the viewport. Meshes come in with armatures and shape keys, textures are extracted, and the Unity material settings are rebuilt as Blender nodes. No Unity project required.</p>
+        <span class="eyebrow">For VRChat avatars · Free Blender add-on</span>
+        <h1>Bring the avatar you bought into Blender, <em>textures and all.</em></h1>
+        <p class="lede">Drag a <code>.unitypackage</code> from BOOTH or anywhere else onto Blender. No Unity needed: bones and facial shape keys stay intact, and the materials come in looking close to lilToon or Poiyomi.</p>
         <div class="cta">
           <a class="btn btn-primary" href="#install">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>
-            Add to Blender
+            Get it free
           </a>
           <a class="btn btn-secondary" href="https://github.com/utagestudio/unitypackage_loader">View on GitHub</a>
         </div>
         <div class="hero-meta">
-          <span>Version {{VERSION}}</span>
-          <span>GPL-3.0</span>
-          <span>Windows, macOS, Linux</span>
+          <span>Free</span>
+          <span>No Unity required</span>
+          <span>Never runs scripts from the package</span>
+          <span>Blender 4.2 and later</span>
         </div>
       </div>
       <figure class="shot">
-        <div class="frame"><img src="assets/shot-hero.webp" width="1920" height="1010" alt="Blender showing an avatar imported from a .unitypackage, with the Unity Package sidebar listing fourteen materials matched to VRM10/MToon10" loading="eager"></div>
-        <figcaption>One package, one import. The sidebar lists every material and the shader profile it was matched to.</figcaption>
+        <div class="frame ba">
+          <img src="assets/placeholder-hero-before.svg" width="960" height="1200" alt="An avatar imported into Blender from its FBX alone: no textures, almost entirely white" loading="eager">
+          <img class="ba-after" src="assets/placeholder-hero-after.svg" width="960" height="1200" alt="The same avatar imported with this add-on, with textures and colors on the hair and clothes" loading="eager">
+          <span class="ba-label ba-label-before">Plain FBX import</span>
+          <span class="ba-label ba-label-after">With this add-on</span>
+          <input class="ba-range" type="range" min="0" max="100" value="50" aria-label="Slider comparing the import before and after">
+          <span class="ba-handle" aria-hidden="true"></span>
+        </div>
+        <figcaption>Drag to compare. Left: the FBX imported on its own. Right: the same package through this add-on.</figcaption>
       </figure>
     </div>
   </section>
