@@ -173,6 +173,14 @@ def main() -> int:
                 c.eq(f"{name}.{key}", image.name if image else None, spec[key])
                 if image is not None and f"{role}_colorspace" in spec:
                     c.eq(f"{name}.{role}_colorspace", image.colorspace_settings.name, spec[f"{role}_colorspace"])
+        if "emission_strength" in spec or "emission_color" in spec:
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            c.true(f"{name} has Principled BSDF", bsdf is not None)
+            if bsdf is not None and "emission_strength" in spec:
+                c.eq(f"{name}.emission_strength", round(bsdf.inputs["Emission Strength"].default_value, 4), spec["emission_strength"])
+            if bsdf is not None and "emission_color" in spec:
+                actual = [round(v, 4) for v in bsdf.inputs["Emission Color"].default_value[:3]]
+                c.eq(f"{name}.emission_color", actual, spec["emission_color"])
         if "node_types" in spec:
             c.true(
                 f"{name}.node_types",

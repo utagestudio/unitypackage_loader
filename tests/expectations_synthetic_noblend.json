@@ -1,9 +1,9 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL" },
-  "objects": { "count": 11, "mesh_count": 11, "armature_count": 0 },
-  "materials": { "count": 12, "mapped": 12, "families": ["standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
+  "objects": { "count": 12, "mesh_count": 12, "armature_count": 0 },
+  "materials": { "count": 14, "mapped": 14, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
   "images": { "count": 2 },
-  "warnings_max": 2,
+  "warnings_max": 3,
   "split_slots": 0,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"] },
   "material_checks": [
@@ -11,6 +11,8 @@
     { "name": "TwinAFbxMat", "alpha_mode": "opaque" },
     { "name": "TwinBFbxMat", "alpha_mode": "blend" },
     { "name": "VariantFbxMat", "alpha_mode": "cutout" },
-    { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" }
+    { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" },
+    { "name": "HdrpMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "base_image": "ColorA.png", "emission_strength": 0.0 },
+    { "name": "HdrpEmissiveMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25] }
   ]
 }

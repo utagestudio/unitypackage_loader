@@ -9,6 +9,7 @@
 .mat を割り当てる prefab。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
 Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
 バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
+HDRP/Lit の .mat 2 つ（白い _EmissionColor を持つが光らないものと、_EmissiveColor で光るもの）を割り当てた Hdrp。
 """
 
 from __future__ import annotations
@@ -120,6 +121,46 @@ Material:
     m_Colors:
     - _Color: {{r: 0, g: 0, b: 0, a: 1}}
     - _EmissionColor: {{r: 1, g: 1, b: 1, a: 1}}
+"""
+
+
+def hdrp_mat_yaml(name: str, tex_guid: str, emissive) -> str:
+    """HDRP/Lit の .mat。HDRP は発光の有無に関わらず _EmissionColor を白で持ち、実際の発光は _EmissiveColor で決まる。"""
+    r, g, b = emissive
+    use = 1 if any(emissive) else 0
+    return f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_Name: {name}
+  m_Shader: {{fileID: 4800000, guid: 6e4ae4064600d784cac1e41a9e6f2e59, type: 3}}
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_CustomRenderQueue: -1
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseColorMap:
+        m_Texture: {{fileID: 2800000, guid: {tex_guid}, type: 3}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    - _EmissiveColorMap:
+        m_Texture: {{fileID: 0}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    m_Ints: []
+    m_Floats:
+    - _EmissiveIntensity: {max(emissive) or 1}
+    - _EmissiveIntensityUnit: 0
+    - _Metallic: 0
+    - _Smoothness: 0.5
+    - _SurfaceType: 0
+    - _UseEmissiveIntensity: {use}
+    m_Colors:
+    - _BaseColor: {{r: 1, g: 1, b: 1, a: 1}}
+    - _EmissionColor: {{r: 1, g: 1, b: 1, a: 1}}
+    - _EmissiveColor: {{r: {r}, g: {g}, b: {b}, a: 1}}
 """
 
 
@@ -389,6 +430,17 @@ def main() -> None:
     binary_prefab_path = "Assets/Synthetic/Prefabs/Binary.prefab"
     add(binary_prefab_path, binary_prefab([("SyntheticBinary", guid_of(binary_model_path), [binary_mat])]),
         prefab_meta(binary_prefab_path))
+
+    # HDRP/Lit（Issue #40）。HdrpMat は白い _EmissionColor を持つが光らない。HdrpEmissiveMat は _EmissiveColor（HDR）で光る
+    hdrp_mats = {}
+    for name, emissive in (("HdrpMat", (0, 0, 0)), ("HdrpEmissiveMat", (4000, 2000, 1000))):
+        mat_path = f"Assets/Synthetic/Materials/{name}.mat"
+        hdrp_mats[name] = add(mat_path, hdrp_mat_yaml(name, tex_a, emissive).encode(),
+                              f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "hdrp.fbx"
+    export_model("cube", "HdrpMat", path, name="SyntheticHdrp", first_used_mat="HdrpEmissiveMat")
+    hdrp_model_path = "Assets/Synthetic/Models/Hdrp.fbx"
+    add(hdrp_model_path, path.read_bytes(), model_meta(guid_of(hdrp_model_path), hdrp_mats))
 
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():
