@@ -22,6 +22,10 @@ PAGE = """<head>
 <body>
 {{GTM_BODY}}
 <p>{{VERSION}}</p>
+<footer>
+  <!-- gtm-only --><p id="privacy">cookie notice</p><!-- /gtm-only -->
+  <p>always</p>
+</footer>
 </body>
 """
 
@@ -84,6 +88,12 @@ class BuildTest(unittest.TestCase):
         self.assertNotIn("googletagmanager", html)
         self.assertNotIn("{{", html)
 
+    def test_without_gtm_notice_block_is_removed(self):
+        html = self._built("")
+        self.assertNotIn("cookie notice", html)
+        self.assertNotIn("gtm-only", html)
+        self.assertIn("<footer>\n  <p>always</p>", html)
+
     def test_with_gtm_head_and_body_are_embedded(self):
         html = self._built("GTM-AB12CD3")
         head, body = html.split("<body>", 1)
@@ -91,6 +101,11 @@ class BuildTest(unittest.TestCase):
         self.assertIn("'GTM-AB12CD3'", head)
         self.assertIn("ns.html?id=GTM-AB12CD3", body)
         self.assertNotIn("{{", html)
+
+    def test_with_gtm_notice_is_kept_without_markers(self):
+        html = self._built("GTM-AB12CD3")
+        self.assertIn('<p id="privacy">cookie notice</p>', html)
+        self.assertNotIn("gtm-only", html)
 
 
 if __name__ == "__main__":

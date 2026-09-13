@@ -14,6 +14,9 @@
     {{GTM_HEAD}}  Google Tag Manager の <head> 用タグ（GTM ID が無ければ空）
     {{GTM_BODY}}  Google Tag Manager の <body> 直後用 noscript タグ（GTM ID が無ければ空）
 
+``<!-- gtm-only -->`` と ``<!-- /gtm-only -->`` で囲んだ部分（アクセス解析と Cookie の案内など）は、
+GTM ID があるときだけ残し（囲みのコメントは外す）、無ければ丸ごと取り除く。
+
 GTM ID は環境変数 ``GTM_ID``、無ければ ``--env-file``（既定はリポジトリ直下の ``.env``）の
 ``GTM_ID=...`` から読む。``GTM-`` で始まる英大文字と数字の形式でなければ埋め込まない。
 GitHub Actions ではリポジトリの Variables の ``GTM_ID`` を環境変数として渡す（``.github/workflows/pages.yml``）。
@@ -34,6 +37,7 @@ from pathlib import Path
 TEXT_EXTS = {".html", ".xml", ".txt", ".css", ".js", ".svg", ".json", ".webmanifest"}
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GTM_ID_RE = re.compile(r"^GTM-[A-Z0-9]{4,12}$")
+GTM_ONLY_RE = re.compile(r"[ \t]*<!-- gtm-only -->(.*?)<!-- /gtm-only -->[ \t]*\n?", re.DOTALL)
 
 GTM_HEAD = """<!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -95,6 +99,13 @@ def resolve_gtm_id(environ: Mapping[str, str], env_file: Path) -> str:
     return raw
 
 
+def apply_gtm_blocks(text: str, enabled: bool) -> str:
+    """``gtm-only`` の囲みを、GTM が有効なら中身だけ残し、無効なら行ごと取り除く。"""
+    if enabled:
+        return GTM_ONLY_RE.sub(lambda m: m.group(0).replace("<!-- gtm-only -->", "").replace("<!-- /gtm-only -->", ""), text)
+    return GTM_ONLY_RE.sub("", text)
+
+
 def render(text: str, variables: dict[str, str]) -> str:
     for key, value in variables.items():
         text = text.replace("{{" + key + "}}", value)
@@ -120,7 +131,7 @@ def build(site: Path, base_url: str, web: Path, gtm_id: str = "") -> list[Path]:
         dst = site / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.suffix.lower() in TEXT_EXTS:
-            dst.write_text(render(src.read_text("utf-8"), variables), "utf-8")
+            dst.write_text(apply_gtm_blocks(render(src.read_text("utf-8"), variables), bool(gtm_id)), "utf-8")
         else:
             shutil.copy2(src, dst)
         written.append(dst)
