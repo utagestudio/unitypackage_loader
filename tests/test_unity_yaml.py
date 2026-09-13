@@ -182,6 +182,60 @@ class ParseTextTests(unittest.TestCase):
         self.assertEqual(importer["internalIDToNameTable"], [])
 
 
+class FoldedScalarTests(unittest.TestCase):
+    """Unity が長い値を次の行に折り返したもの（YAML の複数行スカラー）を 1 つの値につなぐ。"""
+
+    def test_plain_value_in_mapping(self):
+        body = parse_documents(
+            "--- !u!21 &2100000\nMaterial:\n"
+            "  m_Name: FoldedMat\n"
+            "  m_ShaderKeywords: _KEYWORD_A _KEYWORD_B\n"
+            "    _KEYWORD_C\n"
+            "  m_CustomRenderQueue: 3000\n"
+        )[0].body
+        self.assertEqual(body["m_ShaderKeywords"], "_KEYWORD_A _KEYWORD_B _KEYWORD_C")
+        self.assertEqual(body["m_CustomRenderQueue"], 3000)
+
+    def test_plain_value_in_sequence_items(self):
+        body = parse_text(
+            "calls:\n"
+            "- m_TypeName: Example.Type, Example.Assembly,\n"
+            "    Version=1.0.0.0\n"
+            "  m_Mode: 1\n"
+            "- first part\n"
+            "  second part\n"
+            "after: 2\n"
+        )
+        self.assertEqual(
+            body,
+            {
+                "calls": [
+                    {"m_TypeName": "Example.Type, Example.Assembly, Version=1.0.0.0", "m_Mode": 1},
+                    "first part second part",
+                ],
+                "after": 2,
+            },
+        )
+
+    def test_quoted_values(self):
+        body = parse_text(
+            "sq: 'first ''line''\n  second'\n"
+            'dq: "joined \\\n  here"\n'
+            'dq2: "a\\\\\n  b"\n'
+            "closed: 'one'\n"
+            "next: 1\n"
+        )
+        self.assertEqual(body["sq"], "first 'line' second")
+        self.assertEqual(body["dq"], "joined here")
+        self.assertEqual(body["dq2"], "a\\ b")
+        self.assertEqual(body["closed"], "one")
+        self.assertEqual(body["next"], 1)
+
+    def test_mapping_like_continuation_still_raises(self):
+        with self.assertRaises(UnityYamlError):
+            parse_text("a: 1\n  b: 2\n")
+
+
 class DepthLimitTests(unittest.TestCase):
     """ネストが深すぎる入力は RecursionError ではなく UnityYamlError（ValueError）で止まる。"""
 
