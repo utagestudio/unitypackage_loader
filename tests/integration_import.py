@@ -291,6 +291,39 @@ def main() -> int:
             files = sorted({s.material.get("unity_material_path", "").rsplit("/", 1)[-1] for s in obj.material_slots if s.material})
             c.eq(f"{label}.mat_files", files, sorted(spec["mat_files"]))
 
+    # シーンのライト・カメラ（#49）。direction はオブジェクトの -Z（ライト・カメラの向き）のワールドでの向き
+    bpy.context.view_layer.update()
+    for key, kind in (("lights", "LIGHT"), ("cameras", "CAMERA")):
+        for spec in exp.get(key, []):
+            obj = bpy.data.objects.get(spec["name"])
+            label = f"{kind.lower()} {spec['name']}"
+            c.true(f"{label} exists", obj is not None and obj.type == kind)
+            if obj is None or obj.type != kind:
+                continue
+            for attr in ("type", "sensor_fit", "shape", "use_shadow", "use_custom_distance", "use_temperature"):
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", getattr(obj.data, attr), spec[attr])
+            for attr in ("energy", "lens", "ortho_scale", "clip_end", "cutoff_distance", "temperature", "spot_size", "spot_blend", "size", "size_y"):
+                if attr in spec:
+                    actual = getattr(obj.data, attr)
+                    c.true(f"{label}.{attr}", abs(actual - spec[attr]) <= 1e-3 * max(1.0, abs(spec[attr])), f"expected {spec[attr]}, got {actual}")
+            if "direction" in spec:
+                direction = (obj.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
+                c.true(f"{label}.direction", (direction - Vector(spec["direction"])).length <= 1e-3,
+                       f"expected {spec['direction']}, got {[round(v, 4) for v in direction]}")
+            if "location" in spec:
+                c.true(f"{label}.location", (obj.matrix_world.translation - Vector(spec["location"])).length <= 1e-3,
+                       f"expected {spec['location']}, got {[round(v, 4) for v in obj.matrix_world.translation]}")
+            if "hidden" in spec:
+                c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+    if "scene_camera" in exp:
+        camera = bpy.context.scene.camera
+        c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])
+    if "light_count" in exp:
+        c.eq("report lights", report.lights, exp["light_count"])
+    if "camera_count" in exp:
+        c.eq("report cameras", report.cameras, exp["camera_count"])
+
     for spec in exp.get("shared_meshes", []):
         found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
         labels = "+".join(f"{o['top']}/{o['object']}" for o in spec["objects"])
