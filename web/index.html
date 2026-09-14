@@ -73,6 +73,7 @@
     <a class="brand" href="#top"><img src="assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
     <nav class="nav" aria-label="Sections">
       <a href="#uses">Uses</a>
+      <a href="#scenes">Scenes</a>
       <a href="#support">Supported</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
@@ -191,11 +192,35 @@
           <img src="assets/use-props.webp" width="1200" height="800" alt="An interior asset made for Unity, rendered in Blender: a potted plant, a mug and a TV remote on a wooden table next to a lit lamp" loading="lazy">
           <div class="body">
             <h3>Props and world assets, too</h3>
-            <p>Standard and URP materials are converted to Blender's standard shader, so furniture and props sold for Unity can go into your Blender scenes.</p>
+            <p>Standard and URP materials are converted to Blender's standard shader, so furniture, props and world assets sold for Unity can come in <a href="#scenes">with their scene layout intact</a>.</p>
           </div>
         </article>
       </div>
       <p class="alt uses-note">Whether you may edit an asset or publish renders of it depends on that asset's license. Check its terms first.</p>
+    </div>
+  </section>
+
+  <section class="section" id="scenes">
+    <div class="wrap">
+      <div class="split">
+        <div>
+          <div class="section-head">
+            <span class="eyebrow">Scene import</span>
+            <h2>Unity scenes,<wbr> <span class="nb">laid out as they were</span></h2>
+            <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing.</p>
+          </div>
+          <div class="modes">
+            <div class="mode default"><span class="name">Scenes</span><span>Everything placed in the scene, layout included, plus lights and cameras</span></div>
+            <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
+            <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
+          </div>
+          <p class="modes-note">Light brightness is converted to look close in EEVEE, but it will not match Unity exactly.</p>
+        </div>
+        <figure class="shot">
+          <div class="frame"><img src="assets/shot-select.webp" width="1044" height="468" alt="The dialog for choosing what to import, with Scenes, Prefabs and Models tabs at the top and a scene in the package ticked on the Scenes tab" loading="lazy"></div>
+          <figcaption>The dialog that opens after you drop a package. Switch between Scenes, Prefabs and Models at the top and tick what to import. If there is only one choice, it imports straight away.</figcaption>
+        </figure>
+      </div>
     </div>
   </section>
 

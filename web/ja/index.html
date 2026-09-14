@@ -73,6 +73,7 @@
     <a class="brand" href="#top"><img src="../assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
     <nav class="nav" aria-label="セクション">
       <a href="#uses">使い道</a>
+      <a href="#scenes">シーン</a>
       <a href="#support">対応</a>
       <a href="#install">導入</a>
       <a href="#faq">よくある質問</a>
@@ -191,11 +192,35 @@
           <img src="../assets/use-props.webp" width="1200" height="800" alt="Unity 向けの室内アセットを Blender でレンダリングした画像。木のテーブルに観葉植物、マグカップ、テレビのリモコンが置かれ、横でランプが灯っている" loading="lazy">
           <div class="body">
             <h3>小物やワールド素材にも</h3>
-            <p>Standard や URP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物も、Blender のシーン作りに使えます。</p>
+            <p>Standard や URP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物、ワールド素材も、<a href="#scenes">シーンの配置ごと</a>読み込めます。</p>
           </div>
         </article>
       </div>
       <p class="alt uses-note">改変や画像の公開ができるかどうかは、アセットごとの利用規約に従ってください。</p>
+    </div>
+  </section>
+
+  <section class="section" id="scenes">
+    <div class="wrap">
+      <div class="split">
+        <div>
+          <div class="section-head">
+            <span class="eyebrow">シーンの読み込み</span>
+            <h2>Unity のシーンを、<wbr>並べたそのままで</h2>
+            <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。</p>
+          </div>
+          <div class="modes">
+            <div class="mode default"><span class="name">Scenes</span><span>シーンに置かれたものを、配置ごと読み込みます。ライトとカメラも一緒に</span></div>
+            <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
+            <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
+          </div>
+          <p class="modes-note">ライトの明るさは EEVEE で近い見た目になるように換算しますが、Unity とまったく同じにはなりません。</p>
+        </div>
+        <figure class="shot">
+          <div class="frame"><img src="../assets/shot-select.webp" width="1044" height="468" alt="読み込むものを選ぶダイアログ。上に Scenes・Prefabs・Models のタブがあり、Scenes のタブでパッケージ内のシーンにチェックが入っている" loading="lazy"></div>
+          <figcaption>ドロップしたあとに開くダイアログ。上のタブで Scenes / Prefabs / Models を切り替えて、読み込むものにチェックを入れます。選べるものが 1 つだけなら、ダイアログは出ずにそのまま読み込みます。</figcaption>
+        </figure>
+      </div>
     </div>
   </section>
 
