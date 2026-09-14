@@ -130,20 +130,9 @@ class PreparedPackage:
         """ダイアログで選べる（読み込める）候補の総数。"""
         return choice_count(self.prefabs, len(self.supported_models))
 
-    def prefabs_for(self, model_guid: str) -> list[str]:
-        """そのモデルのメッシュを使う Renderer を持つ prefab の pathname（パス順）。"""
-        return sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
-
-    @property
-    def has_prefab_choice(self) -> bool:
-        """使う prefab を選べるモデル（候補が複数）があるか。"""
-        return any(len(self.prefabs_for(m.guid)) > 1 for m in self.supported_models)
-
-    def table_for(self, model_guid: str, prefab_pathname: str = "") -> dict[str, RendererMaterials]:
-        """モデルに当てはめる表。指定 prefab が候補に無ければ、候補をパス順に先勝ちで統合したもの。"""
-        candidates = self.prefabs_for(model_guid)
-        if prefab_pathname in candidates:
-            return self.prefab_tables[prefab_pathname][model_guid]
+    def table_for(self, model_guid: str) -> dict[str, RendererMaterials]:
+        """Models 単位でモデルに当てはめる表。そのモデルを使う prefab をパス順に先勝ちで統合したもの。"""
+        candidates = sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
         return merge_prefab_tables([self.prefab_tables[p][model_guid] for p in candidates])
 
 
