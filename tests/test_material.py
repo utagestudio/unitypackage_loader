@@ -95,6 +95,19 @@ STALE_EMISSION = mat_yaml(
     invalid_keywords=["_EMISSION"],
 )
 
+# 発光を切った Standard（#52）: _EmissionColor は白く残っているが、キーワードに _EMISSION が無い
+EMISSION_OFF = mat_yaml(
+    "Pole", "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+    tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_EmissionMap", None, (1, 1), (0, 0))],
+    floats=[("_Mode", 0), ("_Metallic", 0), ("_Glossiness", 0.5)],
+    colors=[("_Color", (1, 1, 1, 1)), ("_EmissionColor", (3.48, 3.48, 3.48, 1))],
+    keywords=["_METALLICGLOSSMAP", "_NORMALMAP"],
+)
+# 古い形式（m_ShaderKeywords の文字列）で _EMISSION を持つもの
+LEGACY_EMISSION_ON = EMISSION_OFF.replace("  m_ValidKeywords:\n  - _METALLICGLOSSMAP\n  - _NORMALMAP\n", "  m_ShaderKeywords: _EMISSION _NORMALMAP\n")
+# キーワードの記述が無いもの（手書き・古いツールの出力）
+NO_KEYWORD_DATA = EMISSION_OFF.replace("  m_ValidKeywords:\n  - _METALLICGLOSSMAP\n  - _NORMALMAP\n", "")
+
 UNKNOWN_TOON = mat_yaml(
     "Mystery", "{fileID: 4800000, guid: 99999999999999999999999999999999, type: 3}",
     tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_ShadeTexture", TEX_N, (1, 1), (0, 0))],
@@ -223,6 +236,21 @@ class NormalizeTests(unittest.TestCase):
         self.assertFalse(n.has_emission)
         self.assertIsNone(n.emission_tex)
         self.assertTrue(any("_EMISSION" in w for w in n.warnings))
+
+    def test_emission_needs_keyword_when_keywords_are_recorded(self):
+        n = normalize_material(parse_material(EMISSION_OFF))
+        self.assertFalse(n.has_emission)
+        self.assertTrue(parse_material(EMISSION_OFF).keywords_known)
+
+    def test_legacy_shader_keywords_enable_emission(self):
+        mat = parse_material(LEGACY_EMISSION_ON)
+        self.assertEqual((mat.keywords_known, "_EMISSION" in mat.keywords), (True, True))
+        self.assertTrue(normalize_material(mat).has_emission)
+
+    def test_missing_keyword_data_keeps_emission(self):
+        mat = parse_material(NO_KEYWORD_DATA)
+        self.assertFalse(mat.keywords_known)
+        self.assertTrue(normalize_material(mat).has_emission)
 
     def test_urp_transparent(self):
         n = normalize_material(parse_material(URP_TRANSPARENT))

@@ -90,6 +90,58 @@ class ModelImporterTests(unittest.TestCase):
         self.assertIsNone(info.material_import_mode)
 
 
+class LegacyRecycleNameTests(unittest.TestCase):
+    """Unity 2018.2 以前の形式の fileIDToRecycleName（モデルの中のオブジェクトの fileID → 名前）。"""
+
+    META = """\
+fileFormatVersion: 2
+guid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+ModelImporter:
+  serializedVersion: 22
+  fileIDToRecycleName:
+    100000: //RootNode
+    100002: door01
+    100004: door01_frame
+    400000: //RootNode
+    400002: door01
+    2300000: door01
+    4300000: door01
+  externalObjects: {}
+"""
+
+    def test_table_is_read(self):
+        info = ModelImporterInfo.from_meta(self.META)
+        self.assertEqual(info.recycle_names[400000], "//RootNode")
+        self.assertEqual(info.recycle_names[400002], "door01")
+        self.assertEqual(info.recycle_names[100004], "door01_frame")
+        self.assertEqual(len(info.recycle_names), 7)
+
+    def test_internal_id_table_is_read(self):
+        # 古い番号のまま新しい Unity で開き直したモデルの .meta
+        meta = """\
+fileFormatVersion: 2
+guid: ffffffffffffffffffffffffffffffff
+ModelImporter:
+  serializedVersion: 22200
+  internalIDToNameTable:
+  - first:
+      1: 100000
+    second: //RootNode
+  - first:
+      43: 4300104
+    second: AE_House_01_LOD0
+  - first:
+      43: bad
+    second: Broken
+  externalObjects: {}
+"""
+        info = ModelImporterInfo.from_meta(meta)
+        self.assertEqual(info.recycle_names, {100000: "//RootNode", 4300104: "AE_House_01_LOD0"})
+
+    def test_new_format_has_empty_table(self):
+        self.assertEqual(ModelImporterInfo.from_meta(MODEL_META).recycle_names, {})
+
+
 class TextureImporterTests(unittest.TestCase):
     def test_normal_map_linear_clamp(self):
         info = TextureImporterInfo.from_meta(TEXTURE_META)

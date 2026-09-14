@@ -29,7 +29,9 @@ from ..core.hierarchy import (
 from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
 from ..core.unity_yaml import UnityRef
-from ..core.transform import unity_to_blender
+from ..core.fbx_units import read_unit_scale
+from ..core.unity_ids import mesh_file_id
+from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
@@ -297,14 +299,16 @@ def _prepare_scenes(
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
             return None
 
-    expander = Expander(read, model_names)
+    # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
+    recycle = {m.guid: _model_info(m.entry, warn).recycle_names for m in models}
+    expander = Expander(read, model_names, recycle)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:
         contents = None
         try:
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
-            contents = summarize(hierarchy, model_names)
+            contents = summarize(hierarchy, model_names, recycle)
             hierarchies[entry.guid] = hierarchy
         except (HierarchyError, ValueError, PackageError, RecursionError) as exc:
             warn(f"could not read scene {entry.pathname}: {exc}")
@@ -674,6 +678,43 @@ def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.O
     return list(mapping.values())
 
 
+def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
+    """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
+
+    Unity のノード空間の行列 L と、原点に読み込んだ Blender のオブジェクトの行列 N の関係は N = C·L·A
+    （C は Unity → Blender の基底、A = diag(-f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）。
+    Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、Unity 6 が読んだノードの値と
+    突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はその値のまま使う。
+    当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
+    """
+    f = (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
+    basis_a = Matrix.Diagonal((-f, f, f, 1.0))
+    basis_a_inverse = Matrix.Diagonal((-1.0 / f, 1.0 / f, 1.0 / f, 1.0))
+    to_blender, to_unity = Matrix(UNITY_TO_BLENDER), Matrix(BLENDER_TO_UNITY)
+    members = set(objects)
+    skipped = 0
+    for original, obj in zip(template.objects, objects):
+        spec = overrides.get(strip_numeric_suffix(obj.name))
+        if spec is None:
+            continue
+        nested = obj.parent in members
+        deformed = obj.type == "ARMATURE" or any(m.type == "ARMATURE" for m in getattr(obj, "modifiers", []))
+        if nested or deformed:
+            skipped += 1
+            continue
+        location, rotation, scale = (to_unity @ template.basis[original] @ basis_a_inverse).decompose()
+        position = [location.x, location.y, location.z]
+        quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
+        scaling = [scale.x, scale.y, scale.z]
+        for values, key in ((position, "position"), (quaternion, "rotation"), (scaling, "scale")):
+            for index, value in enumerate(spec.get(key, [])):
+                if value is not None and index < len(values):
+                    values[index] = value
+        local = Matrix(trs(tuple(position), tuple(quaternion), tuple(scaling)))
+        obj.matrix_basis = to_blender @ local @ basis_a
+    return skipped
+
+
 def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> int:
     """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
 
@@ -958,6 +999,9 @@ def run_import(
         templates: dict[tuple, _SceneTemplate] = {}
         skipped_offsets = 0
         scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
+        unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
+        skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
+        hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
         count = len(scene_summary.placements)
         for index, placement in enumerate(scene_summary.placements):
             if index % 25 == 0:
@@ -985,13 +1029,31 @@ def run_import(
                 scales[summary.guid] = _model_info(summary.entry, report.warn).global_scale
             scale = scales[summary.guid]
             _attach_to_empty(objects, root, scale)
+            if placement.node_transforms:
+                if summary.guid not in unit_scales:
+                    unit_scales[summary.guid] = read_unit_scale(paths[summary.guid]) if summary.entry.ext == ".fbx" else None
+                skipped_nodes += _apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
             if placement.offsets:
                 skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale, view_layer)
             hidden = {name for name, r in placement.renderers.items() if not r.visible}
+            # 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけ。
+            # FBX にしかない部品（prefab が使っていない LOD や別のノード）は隠す（#58）。FBX 由来の名前に「.002」が
+            # 付いていることもあるので、表の名前は連番を外した形でも照合する
+            from_renderers = placement.root in hierarchy.nodes and hierarchy.nodes[placement.root].model_guid is None
+            used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
+            # 表で名前を引けないモデル（新しい形式）は、Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
+            mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
             for obj in objects:
-                if not placement.active or strip_numeric_suffix(obj.name) in hidden:
+                name = strip_numeric_suffix(obj.name)
+                unused = (
+                    from_renderers and obj.type == "MESH" and obj.name not in used and name not in used
+                    and mesh_file_id(obj.name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
+                )
+                if not placement.active or name in hidden or unused:
                     obj.hide_set(True)
                     obj.hide_render = True
+                if unused and placement.active:
+                    hidden_unused += 1
 
         # --- ライト・カメラ ---
         baked_lights = 0
@@ -1048,6 +1110,16 @@ def run_import(
             report.warn(
                 f"scene {pathname}: {contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
+            )
+        if hidden_unused:
+            report.warn(
+                f"scene {pathname}: {hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
+                "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
+            )
+        if skipped_nodes:
+            report.warn(
+                f"scene {pathname}: {skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
+                "were not applied"
             )
         if skipped_offsets:
             report.warn(

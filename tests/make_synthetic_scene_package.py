@@ -95,21 +95,26 @@ def transform(file_id, go, father=0, pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=(1, 
     )
 
 
-def mesh_renderer(filter_id, renderer_id, go, model_guid, mat_guid):
+def mesh_renderer(filter_id, renderer_id, go, model_guid, mat_guid, mesh_file_id=4300000):
     return (
         f"--- !u!33 &{filter_id}\nMeshFilter:\n  m_GameObject: {{fileID: {go}}}\n"
-        f"  m_Mesh: {{fileID: 4300000, guid: {model_guid}, type: 3}}\n"
+        f"  m_Mesh: {{fileID: {mesh_file_id}, guid: {model_guid}, type: 3}}\n"
         f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
         f"  m_Materials:\n  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}\n"
     )
 
 
-def skinned_renderer(renderer_id, go, model_guid, mat_guid):
+def skinned_renderer(renderer_id, go, model_guid, mat_guid, mesh_file_id=4300000):
     return (
         f"--- !u!137 &{renderer_id}\nSkinnedMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
         f"  m_Materials:\n  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}\n"
-        f"  m_Mesh: {{fileID: 4300000, guid: {model_guid}, type: 3}}\n"
+        f"  m_Mesh: {{fileID: {mesh_file_id}, guid: {model_guid}, type: 3}}\n"
     )
+
+
+# Unity 6 が Probe.fbx と同じ形の FBX を展開した prefab で、MeshFilter / SkinnedMeshRenderer の m_Mesh に付けた fileID
+# （xxHash64("Type:Mesh-><名前>0")）
+MESH_IDS = {"Child": -7630113837697264728, "Spike": 9188603553798411242, "Skinned": 2907845800280414690}
 
 
 def light_doc(file_id, go, light_type, intensity=1, light_range=10, spot=30, inner=21.80208, color=(1, 1, 1), enabled=1,
@@ -179,10 +184,22 @@ def main() -> None:
     fbx = tmp / "probe.fbx"
     export_probe_fbx(fbx)
     model_path = "Assets/Synthetic/Models/Probe.fbx"
-    model = add(model_path, fbx.read_bytes(), model_meta(guid_of(model_path), {"ProbeMat": mats["ProbeMat"]}))
+    # 古い形式（Unity 2018.2 以前）の表。新しい形式のシーンは中への上書きを持たないので、表があっても結果は変わらない
+    recycle = "\n".join(f"    {k}: {v}" for k, v in (
+        (100000, "//RootNode"), (100002, "Spike"), (100004, "Group"), (100006, "Child"),
+        (400000, "//RootNode"), (400002, "Spike"), (400004, "Group"), (400006, "Child"),
+        (2300000, "Spike"), (2300002, "Child"), (4300000, "Spike"), (4300002, "Child"),
+    ))
+    meta = model_meta(guid_of(model_path), {"ProbeMat": mats["ProbeMat"]}).replace(
+        "ModelImporter:\n", f"ModelImporter:\n  fileIDToRecycleName:\n{recycle}\n", 1
+    )
+    model = add(model_path, fbx.read_bytes(), meta)
 
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
-    def unpacked_prefab(name, mat_guid):
+    def unpacked_prefab(name, mat_guid, spike_only=False):
+        # spike_only: FBX を展開したあと Child と Skinned の Renderer を消した prefab（#58: Unity では Spike しか表示されない）
+        child_renderer = "" if spike_only else mesh_renderer(302, 303, 300, model, mat_guid, MESH_IDS["Child"])
+        skinned = "" if spike_only else skinned_renderer(702, 700, model, mat_guid, MESH_IDS["Skinned"])
         return (HEADER + "".join([
             game_object(100, name),
             transform(101, 100),
@@ -190,17 +207,17 @@ def main() -> None:
             transform(201, 200, father=101, pos=(0, 0, -1), rot=(-0.5735765, 0, 0, 0.819152), scale=(100, 99.99999, 99.99999)),
             game_object(300, "Child"),
             transform(301, 300, father=201, pos=(0, 0, 0.0050000004), rot=(0, -0.13052621, 0, 0.9914449), scale=(0.5, 0.50000006, 0.50000006)),
-            mesh_renderer(302, 303, 300, model, mat_guid),
+            child_renderer,
             game_object(400, "Spike"),
             transform(401, 400, father=101, pos=(-0.5, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100)),
-            mesh_renderer(402, 403, 400, model, mat_guid),
+            mesh_renderer(402, 403, 400, model, mat_guid, MESH_IDS["Spike"]),
             game_object(500, "Armature"),
             transform(501, 500, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
             game_object(600, "Hips"),
             transform(601, 600, father=501, rot=(0.7071068, 0, 0, 0.7071068)),
             game_object(700, "Skinned"),
             transform(701, 700, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
-            skinned_renderer(702, 700, model, mat_guid),
+            skinned,
         ])).encode()
 
     unpacked_path = "Assets/Synthetic/Prefabs/Unpacked.prefab"
@@ -209,6 +226,8 @@ def main() -> None:
     # 使われなくなって削除された後に、同じモデルを読み直す配置（A 以降）で ProbeMat を組み直せることを確かめる
     all_red_path = "Assets/Synthetic/Prefabs/AllRed.prefab"
     all_red = add(all_red_path, unpacked_prefab("AllRed", mats["ProbeRed"]), prefab_meta(all_red_path))
+    partial_path = "Assets/Synthetic/Prefabs/Partial.prefab"
+    partial = add(partial_path, unpacked_prefab("Partial", mats["ProbeMat"], spike_only=True), prefab_meta(partial_path))
 
     # FBX を中に置いた prefab
     nested_path = "Assets/Synthetic/Prefabs/Nested.prefab"
@@ -234,6 +253,7 @@ def main() -> None:
     scene_path = "Assets/Synthetic/Scenes/Probe.unity"
     add(scene_path, (HEADER + "".join([
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
+        instance(2600, partial, 0, [mod(101, partial, "m_LocalPosition.z", -12)]),
         instance(3000, nested, 0, [
             mod(11, nested, "m_LocalPosition.x", 1),
             mod(11, nested, "m_LocalPosition.y", 2),
@@ -296,6 +316,33 @@ def main() -> None:
         transform(9201, 9200, pos=(0, 10, 0), rot=(0.7071068, 0, 0, 0.7071068)),
         camera_doc(9202, 9200, orthographic=1, size=2.5),
     ])).encode(), f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
+
+    # 古い形式のシーン（#53）。FBX を X に 10 置き、中の Spike の位置 y を 2 に、Child のマテリアルを ProbeRed に上書きする。
+    # Spike の元のノードの位置は (-0.5, 0, 0)（Unity 6 で読んだ値）なので、Spike は Unity の +Y（Blender の +Z）に 2 動く
+    legacy_path = "Assets/Synthetic/Scenes/Legacy.unity"
+    add(legacy_path, (HEADER + (
+        "--- !u!1001 &100\nPrefab:\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {fileID: 0}\n"
+        "    m_Modifications:\n"
+        + mod(400000, model, "m_LocalPosition.x", 10)
+        + mod(100000, model, "m_Name", "LegacyProbe")
+        + mod(400002, model, "m_LocalPosition.x", -0.5)
+        + mod(400002, model, "m_LocalPosition.y", 2)
+        + mod(2300002, model, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}")
+        + "    m_RemovedComponents: []\n"
+        f"  m_ParentPrefab: {{fileID: 100100000, guid: {model}, type: 3}}\n  m_IsPrefabParent: 0\n"
+        f"--- !u!4 &101 stripped\nTransform:\n  m_PrefabParentObject: {{fileID: 400000, guid: {model}, type: 3}}\n"
+        "  m_PrefabInternal: {fileID: 100}\n"
+        # FBX から切り離した Spike を、部屋（Room）の下に 2 つ複製して置く（#60: 1 つに潰れていた）。回転・スケールは
+        # Unity が読んだ Spike のノードの値のまま、位置だけ変える。Unity の +X に 1.5 / -0.5、+Z に 20 動く
+        + game_object(7000, "Room")
+        + transform(7001, 7000, pos=(0, 0, 20))
+        + game_object(7100, "Spike (1)")
+        + transform(7101, 7100, father=7001, pos=(1, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100))
+        + mesh_renderer(7102, 7103, 7100, model, mats["ProbeMat"], 4300000)
+        + game_object(7200, "Spike (2)")
+        + transform(7201, 7200, father=7001, pos=(-1, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100))
+        + mesh_renderer(7202, 7203, 7200, model, mats["ProbeRed"], 4300000)
+    )).encode(), f"fileFormatVersion: 2\nguid: {guid_of(legacy_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
 
     menu_path = "Assets/Synthetic/Scenes/Menu.unity"
     add(menu_path, (HEADER + game_object(10, "Canvas") + transform(11, 10, class_id=224, kind="RectTransform")

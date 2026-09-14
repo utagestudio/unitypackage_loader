@@ -58,6 +58,9 @@ class ModelImporterInfo:
     global_scale: float = 1.0
     use_file_scale: bool = True
     import_blend_shapes: bool = True
+    # モデルの中のオブジェクトの fileID → 名前（//RootNode はルート）。Unity 2018.2 以前の形式の fileIDToRecycleName と、
+    # 古い番号を引き継いだ internalIDToNameTable から読む。新しい形式（ハッシュの fileID）では空
+    recycle_names: dict[int, str] = field(default_factory=dict)
 
     @classmethod
     def from_meta(cls, meta: MetaInfo | str) -> "ModelImporterInfo":
@@ -74,6 +77,24 @@ class ModelImporterInfo:
                 continue
             if str(first.get("type", "")).endswith("Material") and second.guid:
                 info.external_materials[str(first.get("name", ""))] = second.guid
+        table = data.get("fileIDToRecycleName")
+        if isinstance(table, dict):
+            for key, name in table.items():
+                try:
+                    info.recycle_names[int(key)] = str(name)
+                except (TypeError, ValueError):
+                    continue
+        # 古い番号のまま新しい Unity で開き直したモデルは、同じ表を internalIDToNameTable（first: {クラス ID: fileID}）に持つ
+        internal = data.get("internalIDToNameTable")
+        for item in internal if isinstance(internal, list) else []:
+            first = item.get("first") if isinstance(item, dict) else None
+            if not isinstance(first, dict) or item.get("second") is None:
+                continue
+            for file_id in first.values():
+                try:
+                    info.recycle_names.setdefault(int(file_id), str(item["second"]))
+                except (TypeError, ValueError):
+                    continue
         materials = data.get("materials") or {}
         if isinstance(materials, dict) and isinstance(materials.get("materialImportMode"), int):
             info.material_import_mode = materials["materialImportMode"]

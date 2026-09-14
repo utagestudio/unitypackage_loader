@@ -5,9 +5,9 @@
     "unit": "SCENES"
   },
   "scenes": {
-    "count": 1
+    "count": 2
   },
-  "warnings_max": 2,
+  "warnings_max": 4,
   "placed_objects": [
     {
       "top": "A",
@@ -120,6 +120,73 @@
       "mat_files": [
         "ProbeRed.mat"
       ]
+    },
+    {
+      "top": "LegacyProbe",
+      "object": "Spike",
+      "tip": [
+        -8.5412,
+        1.9392,
+        2.9
+      ],
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "LegacyProbe",
+      "object": "Child",
+      "tip": [
+        -10.5821,
+        0.9568,
+        1.2883
+      ],
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "Room",
+      "parent": "Spike (1)",
+      "object": "Spike",
+      "tip": [
+        -0.0412,
+        -18.0608,
+        0.9
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "Room",
+      "parent": "Spike (2)",
+      "object": "Spike",
+      "tip": [
+        1.9588,
+        -18.0608,
+        0.9
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "Partial",
+      "object": "Spike",
+      "hidden": false
+    },
+    {
+      "top": "Partial",
+      "object": "Child",
+      "hidden": true
+    },
+    {
+      "top": "Partial",
+      "object": "Skinned",
+      "hidden": true
     }
   ],
   "shared_meshes": [

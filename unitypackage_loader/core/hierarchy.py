@@ -21,9 +21,9 @@
 配置（``ModelPlacement``）は 2 種類:
 
 - モデルの PrefabInstance: そのルートの Node。
-- モデルのメッシュを直接指す Renderer（FBX を展開した prefab やシーン）: Transform を直接持つアセットでの最上位の祖先
-  （``Node.scope``）をモデルのルートとみなし、同じ scope・同じモデルの Renderer をまとめる。中のノードが上書きで
-  動いていれば、Renderer ごとに「そのノードから逆算したルートの行列」を ``offsets`` に持つ。
+- モデルのメッシュを直接指す Renderer（FBX を展開した prefab やシーン）: モデルのルートとみなす Node を Renderer ごとに
+  決め、同じルート・同じモデルの Renderer をまとめる。中のノードが上書きで動いていれば、Renderer ごとに
+  「そのノードから逆算したルートの行列」を ``offsets`` に持つ。ルートの決め方は ``placements`` を参照（Issue #60）。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import copy
 import math
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
@@ -100,6 +100,7 @@ class RendererInfo:
     materials: list[str | None]
     renderer_class: int
     enabled: bool = True
+    mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
 
 
 @dataclass
@@ -196,7 +197,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
         elif doc.class_id == CLASS_MESH_FILTER:
             mesh = _guid(body.get("m_Mesh"))
             if mesh:
-                meshes[_file_id(body.get("m_GameObject"))] = mesh
+                meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in _RENDERER_CLASSES:
             renderer_docs.append(doc)
         elif doc.class_id in _COMPONENT_CLASSES:
@@ -231,9 +232,12 @@ def parse_asset(data: str | bytes) -> RawAsset:
         go = _file_id(body.get("m_GameObject"))
         mats = body.get("m_Materials")
         materials = [ref.guid if isinstance(ref, UnityRef) and ref.guid else None for ref in (mats if isinstance(mats, list) else [])]
-        mesh = _guid(body.get("m_Mesh")) if doc.class_id == CLASS_SKINNED_MESH_RENDERER else meshes.get(go)
+        if doc.class_id == CLASS_SKINNED_MESH_RENDERER:
+            mesh, mesh_id = _guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+        else:
+            mesh, mesh_id = meshes.get(go, (None, 0))
         enabled = _number(body.get("m_Enabled"), 1.0) != 0
-        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled))
+        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
     return raw
 
 
@@ -261,6 +265,9 @@ class Node:
     scope: int = 0  # Transform を直接持つアセットでの最上位の祖先（自分自身のこともある）
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
     components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
+    # モデルの PrefabInstance で、古い形式の .meta（fileIDToRecycleName）から名前を引けた中への上書き
+    model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
+    model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
 
     @property
     def local(self) -> Mat4:
@@ -274,6 +281,8 @@ class Node:
             scale=list(self.scale),
             renderer=replace(self.renderer, materials=list(self.renderer.materials)) if self.renderer else None,
             components={k: (c, copy.deepcopy(body)) for k, (c, body) in self.components.items()},
+            model_materials={k: list(v) for k, v in self.model_materials.items()},
+            model_transforms=copy.deepcopy(self.model_transforms),
             **changes,
         )
 
@@ -303,9 +312,12 @@ class Expander:
         self,
         read_asset: Callable[[str], RawAsset | None],
         model_names: dict[str, str],
+        model_recycle_names: dict[str, dict[int, str]] | None = None,
     ):
         self._read = read_asset
         self._models = {g.lower(): name for g, name in model_names.items()}  # モデルの GUID → ルートの名前
+        # モデルの GUID → 古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける）
+        self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
         self._cache: dict[str, Hierarchy | None] = {}
 
     def expand_asset(self, guid: str) -> Hierarchy | None:
@@ -442,12 +454,64 @@ class Expander:
                 h.unresolved_overrides += 1
 
         added_keys = set(added.values())
+        root_key = remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
+        table = self._recycle.get(source, {}) if is_model else {}
         for file_id, guid, path, value, reference in instance.modifications:
             key = target_key(file_id, guid)
             if key is None:
                 continue
-            if not _apply_modification(h, added_keys, key, path, value, reference) and is_model and _is_tracked(path):
-                h.unresolved_overrides += 1
+            if _apply_modification(h, added_keys, key, path, value, reference) or not is_model or not _is_tracked(path):
+                continue
+            if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
+                continue
+            h.unresolved_overrides += 1
+
+
+_CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
+_ROOT_NODE_NAME = "//RootNode"
+
+
+def _model_object_name(table: dict[int, str], file_id: int) -> str | None:
+    """古い形式の fileID をモデルのオブジェクト名にする。//RootNode の Renderer は、そのメッシュの名前にする。"""
+    name = table.get(file_id)
+    if name is None:
+        return None
+    if name != _ROOT_NODE_NAME:
+        return name
+    # 1 メッシュの FBX では Renderer がルートに載り、Blender ではメッシュ名のオブジェクトになる
+    meshes = [n for k, n in sorted(table.items()) if k // 100000 == 43 and n != _ROOT_NODE_NAME]
+    return meshes[0] if len(meshes) == 1 else None
+
+
+def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int, path: str, value: object, reference: object) -> bool:
+    """モデルの中への上書きを、表で引いた名前付きで配置のルートに記録する。名前を引けなければ False。"""
+    if not table:
+        return False
+    class_id = file_id // 100000
+    name = _model_object_name(table, file_id)
+    if name is None:
+        return False
+    match = _TRS_PATH.fullmatch(path)
+    if match and class_id == _CLASS_PREFIX_TRANSFORM:
+        field_name = _TRS_FIELDS[match.group(1)]
+        size = 4 if field_name == "rotation" else 3
+        values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
+        index = _AXES[match.group(2)]
+        if index < size:
+            number = _number(value, float("nan"))
+            values[index] = None if math.isnan(number) else number
+        return True
+    material = _MATERIAL_PATH.fullmatch(path)
+    if material and class_id in (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER):
+        index = int(material.group(1))
+        if index >= MAX_SLOTS:
+            return False
+        slots = root.model_materials.setdefault(name, [])
+        if index >= len(slots):
+            slots.extend([None] * (index + 1 - len(slots)))
+        slots[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+        return True
+    return False
 
 
 def _is_tracked(path: str) -> bool:
@@ -641,6 +705,7 @@ class PlacedRenderer:
     materials: list[str | None]
     renderer_class: int
     visible: bool  # GameObject がアクティブで Renderer が有効
+    mesh_file_id: int = 0  # メッシュ参照の fileID（表で名前を引けなかったとき、読み込み側がハッシュで照合する）
 
 
 @dataclass
@@ -652,6 +717,8 @@ class ModelPlacement:
     # GameObject 名（Unity の複製番号「 (N)」を外したもの）→ Renderer（展開した Renderer のみ）
     renderers: dict[str, PlacedRenderer] = field(default_factory=dict)
     offsets: dict[str, Mat4] = field(default_factory=dict)  # 中のノードが動いた Renderer の名前 → そこから逆算したルートの行列
+    # モデルの PrefabInstance の中のノードへの上書き（古い形式の .meta で名前を引けたもの）。名前 → position/rotation/scale
+    node_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)
 
     def signature(self) -> tuple:
         """読み込み結果を使い回せるかの判定に使う値（モデルと、名前ごとのマテリアル）。"""
@@ -662,35 +729,178 @@ def _close(a: Mat4, b: Mat4) -> bool:
     return all(abs(x - y) <= _CLOSE * max(1.0, abs(x), abs(y)) for ra, rb in zip(a, b) for x, y in zip(ra, rb))
 
 
-def placements(h: Hierarchy, model_guids: Iterable[str]) -> list[ModelPlacement]:
-    """モデルの配置を、階層に現れた順に返す。"""
+_CLASS_PREFIX_MESH = 43
+
+
+def _node_names(table: dict[int, str]) -> set[str] | None:
+    """.meta の表にある、ルート以外の GameObject の名前（FBX のノード名）。
+
+    空の集合は 1 メッシュの FBX（GameObject はルートだけで、メッシュも 1 つ）。ノードが分からない表は None
+    （GameObject の行が無い表や、古い番号を引き継いだ ``internalIDToNameTable`` で一部の行しか無いもの）。
+    """
+    game_objects = {n for k, n in table.items() if k // 100000 == CLASS_GAME_OBJECT}
+    names = game_objects - {_ROOT_NODE_NAME}
+    if names:
+        return names
+    meshes = sum(1 for k in table if k // 100000 == _CLASS_PREFIX_MESH)
+    return set() if game_objects and meshes <= 1 else None
+
+
+def _fbx_node_name(node: Node, model_guid: str, table: dict[int, str], names: set[str]) -> str | None:
+    """Node が FBX のどのノードか。GameObject 名で引き、名前を変えてあれば Renderer のメッシュ名で引く。"""
+    base = unity_base_name(node.name)
+    if base in names:
+        return base
+    renderer = node.renderer
+    if renderer is not None and renderer.mesh_guid == model_guid:
+        mesh_name = table.get(renderer.mesh_file_id)
+        if mesh_name in names:
+            return mesh_name
+    return None
+
+
+def _root_candidates(
+    h: Hierarchy, key: int, model_guid: str, table: dict[int, str], names: set[str] | None
+) -> tuple[int, int]:
+    """Renderer の (まとめる先の候補, 候補を使わないときのルート) を返す。
+
+    ノードが分からなければ、最上位の祖先（scope）が候補。1 メッシュの FBX は Renderer の GameObject 自身がモデルの
+    ルート。それ以外は、FBX のノードが続く間は親をたどり（scope は越えない）、その 1 つ上を候補にする。
+    """
+    scope = h.nodes[key].scope if h.nodes[key].scope in h.nodes else key
+    if names is None:
+        return scope, key
+    if not names:
+        return key, key
+    current = key
+    while current != scope:
+        parent = h.nodes[current].parent
+        if parent is None or parent not in h.nodes:
+            break
+        if parent != scope and _fbx_node_name(h.nodes[parent], model_guid, table, names) is not None:
+            current = parent
+            continue
+        return parent, current
+    return current, current
+
+
+def _is_foreign(node: Node, model_guid: str, models: set[str]) -> bool:
+    """別のモデルの PrefabInstance か、別のモデルのメッシュを指す Renderer か。"""
+    if node.model_guid is not None:
+        return True
+    renderer = node.renderer
+    return renderer is not None and renderer.mesh_guid in models and renderer.mesh_guid != model_guid
+
+
+_IDENTITY_NODE = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+
+def placements(
+    h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None
+) -> list[ModelPlacement]:
+    """モデルの配置を、階層に現れた順に返す。
+
+    ``model_guids`` にモデルの GUID → ルートの名前の辞書を渡すと、下の「候補の名前がモデルの名前と同じか」に使う。
+
+    ``mesh_names``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
+    メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
+    変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
+
+    Renderer をまとめるモデルのルート（Issue #60）: 表の無いモデルは最上位の祖先（scope）。表のあるモデルは
+    ``_root_candidates`` の候補にまとめるが、次のときは候補をモデルのルートとみなさず、Renderer の GameObject
+    （たどった FBX のノード）自身をルートにする。シーンの共通の親の下に、FBX から切り離した小物を複製して並べた場合。
+
+    - まとめると同じメッシュの Renderer が重なる（複製を並べた入れ物）。
+    - 候補の直下に別のモデルがあり、候補の名前がモデルの名前と違う（部屋のような入れ物）。
+
+    FBX の中のノードをルートにした配置は、``node_transforms`` でそのノードを単位行列にする。Unity の GameObject の
+    行列がノードの元の変換を含んでいるので、Blender のオブジェクトの元の変換を掛けないようにするため。
+    """
     models = {g.lower() for g in model_guids}
+    root_names = {g.lower(): n for g, n in model_guids.items()} if isinstance(model_guids, Mapping) else {}
+    tables = {g.lower(): table for g, table in (mesh_names or {}).items()}
+    node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
+    # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
+    for node in h.nodes.values():
+        renderer = node.renderer
+        if (
+            renderer is not None and renderer.mesh_guid in node_names
+            and renderer.mesh_file_id and renderer.mesh_file_id not in tables[renderer.mesh_guid]
+        ):
+            del node_names[renderer.mesh_guid]
     worlds = world_matrices(h)
     active = effective_active(h)
-    result: list[ModelPlacement] = []
-    by_scope: dict[tuple[int, str], ModelPlacement] = {}
+    children = h.children()
+
+    # 1 回目: Renderer ごとに名前とルートの候補を決める。モデルの PrefabInstance はそのまま配置にする
+    items: list[ModelPlacement | tuple[int, str, int, int]] = []
+    groups: dict[tuple[int, str], list[tuple[int, str, int, int]]] = {}
     for key, node in h.nodes.items():
         if node.model_guid is not None:
-            result.append(ModelPlacement(node.model_guid, key, worlds[key], active[key]))
+            placement = ModelPlacement(node.model_guid, key, worlds[key], active[key])
+            for name, slots in node.model_materials.items():
+                placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
+            placement.node_transforms = copy.deepcopy(node.model_transforms)
+            items.append(placement)
             continue
         renderer = node.renderer
         if renderer is None or renderer.mesh_guid not in models:
             continue
-        scope = node.scope if node.scope in h.nodes else key
-        placement = by_scope.get((scope, renderer.mesh_guid))
-        if placement is None:
-            placement = ModelPlacement(renderer.mesh_guid, scope, worlds[scope], active[scope])
-            by_scope[(scope, renderer.mesh_guid)] = placement
-            result.append(placement)
+        # FBX のノード名と同じ GameObject 名を優先する（複数のノードが 1 つのメッシュを共有する FBX もあるため）
+        names = node_names.get(renderer.mesh_guid)
+        mesh_name = tables.get(renderer.mesh_guid, {}).get(renderer.mesh_file_id)
         name = unity_base_name(node.name)
+        if not (names and name in names) and mesh_name and mesh_name != _ROOT_NODE_NAME:
+            name = mesh_name
+        candidate, own = _root_candidates(h, key, renderer.mesh_guid, tables.get(renderer.mesh_guid, {}), names)
+        item = (key, name, candidate, own)
+        groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
+        items.append(item)
+
+    # 候補をモデルのルートとみなさないグループ
+    dissolved: set[tuple[int, str]] = set()
+    for (candidate, guid), rows in groups.items():
+        if guid not in node_names or all(own == candidate for _, _, _, own in rows):
+            continue
+        repeated = len({name for _, name, _, _ in rows}) < len(rows)
+        # 部品が 1 つだけのときに限る（照明の prefab にろうそくを足したような、モデルのルートに別のモデルを置いたものは分けない）
+        mixed = len(rows) == 1 and unity_base_name(h.nodes[candidate].name) != root_names.get(guid) and any(
+            _is_foreign(h.nodes[child], guid, models) for child in children.get(candidate, []) if child in h.nodes
+        )
+        if repeated or mixed:
+            dissolved.add((candidate, guid))
+
+    # 2 回目: 配置を作る
+    result: list[ModelPlacement] = []
+    by_root: dict[tuple[int, str], ModelPlacement] = {}
+    for item in items:
+        if isinstance(item, ModelPlacement):
+            result.append(item)
+            continue
+        key, name, candidate, own = item
+        node = h.nodes[key]
+        renderer = node.renderer
+        guid = renderer.mesh_guid
+        root = own if (candidate, guid) in dissolved else candidate
+        placement = by_root.get((root, guid))
+        if placement is None:
+            placement = ModelPlacement(guid, root, worlds[root], active[root])
+            names = node_names.get(guid)
+            if names and root == own:
+                label = _fbx_node_name(h.nodes[root], guid, tables.get(guid, {}), names)
+                if label is not None:  # FBX の中のノードをルートにした
+                    placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            by_root[(root, guid)] = placement
+            result.append(placement)
         if name in placement.renderers:
             continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
         placement.renderers[name] = PlacedRenderer(
-            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled
+            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled, renderer.mesh_file_id
         )
+        # ルートからこの Node までの、上書き前の行列の積で逆算する
         inverse = inverse_affine(node.scope_matrix)
-        if inverse is not None and key != scope:
-            implied = multiply(worlds[key], inverse)
+        if inverse is not None and key != root:
+            implied = multiply(multiply(worlds[key], inverse), h.nodes[root].scope_matrix)
             if not _close(implied, placement.world):
                 placement.offsets[name] = implied
     return result
@@ -716,9 +926,9 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: Iterable[str]) -> SceneContents:
+def summarize(h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None) -> SceneContents:
     models = {g.lower() for g in model_guids}
-    found = placements(h, models)
+    found = placements(h, model_guids if isinstance(model_guids, Mapping) else models, mesh_names)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )

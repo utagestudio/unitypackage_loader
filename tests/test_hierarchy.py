@@ -268,6 +268,146 @@ class DuplicateNameTest(unittest.TestCase):
         self.assertNotEqual(found[0].signature(), found[2].signature())  # マテリアルが違う
 
 
+class MeshNameTest(unittest.TestCase):
+    """展開した prefab で GameObject の名前を変えていても、.meta の表でメッシュ参照から名前を引く（#58）。"""
+
+    SCENE = HEADER + "".join([
+        game_object(10, "House"),  # FBX のノード名は House_LOD0 だが、prefab で名前を変えてある
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, MODEL, MAT_A, mesh_file_id=4300104),
+        game_object(20, "Door"),
+        transform(21, 20, father=11),
+        mesh_renderer(22, 23, 20, MODEL, MAT_B, mesh_file_id=4300999),  # 表に無い
+    ])
+
+    def test_renderer_named_by_mesh(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        placement = placements(h, [MODEL], {MODEL: {4300104: "House_LOD0"}})[0]
+        self.assertEqual(set(placement.renderers), {"House_LOD0", "Door"})
+        self.assertEqual(placement.renderers["House_LOD0"].materials, [MAT_A])
+        self.assertEqual(placement.renderers["Door"].mesh_file_id, 4300999)
+
+    def test_without_table_uses_game_object_names(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        self.assertEqual(set(placements(h, [MODEL])[0].renderers), {"House", "Door"})
+
+
+class ModelRootTest(unittest.TestCase):
+    """.meta の表のあるモデルで、Renderer ごとにモデルのルートを決める（Issue #60）。
+
+    シーンの共通の親の下に FBX から切り離した小物を並べると、同じモデルの Renderer が 1 つの配置に潰れていた。
+    """
+
+    SINGLE = "d" * 32  # 1 メッシュの FBX
+    PARTIAL = "9" * 32  # 古い番号を引き継いだ、一部の行しか無い表
+    TABLES = {
+        MODEL: {100000: "//RootNode", 100002: "Part", 100004: "Lid", 4300000: "Part", 4300002: "Lid"},
+        SINGLE: {100000: "//RootNode", 4300000: "Pot"},
+        PARTIAL: {100000: "//RootNode", 4300000: "Wall"},
+    }
+
+    SCENE = HEADER + "".join([
+        # 部屋: 同じ部品の複製と、別のモデルが並ぶ入れ物
+        game_object(10, "Room"),
+        transform(11, 10),
+        game_object(20, "Part (1)"),
+        transform(21, 20, father=11, pos=(1, 0, 0)),
+        mesh_renderer(22, 23, 20, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(30, "Part (2)"),
+        transform(31, 30, father=11, pos=(2, 0, 0)),
+        mesh_renderer(32, 33, 30, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(40, "Pot"),
+        transform(41, 40, father=11, pos=(3, 0, 0)),
+        mesh_renderer(42, 43, 40, SINGLE, MAT_A, mesh_file_id=4300000),
+        game_object(50, "Lid (1)"),
+        transform(51, 50, father=11, pos=(4, 0, 0)),
+        mesh_renderer(52, 53, 50, MODEL, MAT_A, mesh_file_id=4300002),
+        # FBX を展開して名前だけ変えたルート
+        game_object(60, "Kit"),
+        transform(61, 60, pos=(0, 0, 5)),
+        game_object(70, "Part"),
+        transform(71, 70, father=61),
+        mesh_renderer(72, 73, 70, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(80, "Lid"),
+        transform(81, 80, father=61, pos=(0, 0.5, 0)),
+        mesh_renderer(82, 83, 80, MODEL, MAT_B, mesh_file_id=4300002),
+        # 部品が 1 つだけで、別のモデルと並ぶ入れ物
+        game_object(90, "Shelf"),
+        transform(91, 90, pos=(0, 1, 0)),
+        game_object(100, "Lid (2)"),
+        transform(101, 100, father=91, pos=(5, 0, 0)),
+        mesh_renderer(102, 103, 100, MODEL, MAT_A, mesh_file_id=4300002),
+        game_object(110, "Pot (1)"),
+        transform(111, 110, father=91),
+        mesh_renderer(112, 113, 110, SINGLE, MAT_A, mesh_file_id=4300000),
+        # モデルと同じ名前のルートに別のモデルを足したもの（照明にろうそくを足した prefab など）
+        game_object(120, "Probe"),
+        transform(121, 120, pos=(0, 0, -5)),
+        game_object(130, "Part"),
+        transform(131, 130, father=121),
+        mesh_renderer(132, 133, 130, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(140, "Pot (2)"),
+        transform(141, 140, father=121),
+        mesh_renderer(142, 143, 140, SINGLE, MAT_A, mesh_file_id=4300000),
+        # 名前を変えた FBX のノード（Door = Part）の子に、別のノード
+        game_object(150, "Box"),
+        transform(151, 150, pos=(0, 2, 0)),
+        game_object(160, "Door"),
+        transform(161, 160, father=151),
+        mesh_renderer(162, 163, 160, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(170, "Lid"),
+        transform(171, 170, father=161),
+        mesh_renderer(172, 173, 170, MODEL, MAT_A, mesh_file_id=4300002),
+        # 表に無いメッシュ（LOD1）を指す Renderer があるので、表を当てにしない
+        game_object(180, "Wall"),
+        transform(181, 180, pos=(0, 3, 0)),
+        game_object(190, "Wall_LOD0"),
+        transform(191, 190, father=181),
+        mesh_renderer(192, 193, 190, PARTIAL, MAT_A, mesh_file_id=4300000),
+        game_object(200, "Wall_LOD1"),
+        transform(201, 200, father=181),
+        mesh_renderer(202, 203, 200, PARTIAL, MAT_A, mesh_file_id=-123456789),
+    ])
+
+    @classmethod
+    def setUpClass(cls):
+        names = {MODEL: "Probe", cls.SINGLE: "Pot", cls.PARTIAL: "Wall"}
+        cls.hierarchy = Expander(lambda guid: None, names).expand_raw(parse_asset(cls.SCENE))
+        cls.placements = placements(cls.hierarchy, names, cls.TABLES)
+
+    def roots(self, model):
+        return [self.hierarchy.nodes[p.root].name for p in self.placements if p.model_guid == model]
+
+    def by_root(self, name):
+        return next(p for p in self.placements if self.hierarchy.nodes[p.root].name == name)
+
+    def test_copies_in_a_room_are_placed_one_by_one(self):
+        self.assertEqual(self.roots(MODEL), ["Part (1)", "Part (2)", "Lid (1)", "Kit", "Lid (2)", "Probe", "Box"])
+        self.assertEqual(self.roots(self.SINGLE), ["Pot", "Pot (1)", "Pot (2)"])
+        self.assertEqual([round(v, 6) for v in transform_point(self.by_root("Part (2)").world, (0, 0, 0))], [2, 0, 0])
+        self.assertEqual(set(self.by_root("Lid (1)").renderers), {"Lid"})
+
+    def test_node_used_as_root_is_reset_to_identity(self):
+        # Unity の GameObject の行列がノードの変換を含むので、Blender では元の変換を掛けない
+        identity = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+        self.assertEqual(self.by_root("Part (1)").node_transforms, {"Part": identity})
+        self.assertEqual(self.by_root("Lid (2)").node_transforms, {"Lid": identity})
+        self.assertEqual(self.by_root("Pot").node_transforms, {})  # 1 メッシュの FBX は GameObject がモデルのルート
+
+    def test_unpacked_root_keeps_its_parts_together(self):
+        kit = self.by_root("Kit")
+        self.assertEqual(set(kit.renderers), {"Part", "Lid"})
+        self.assertEqual((kit.node_transforms, kit.offsets), ({}, {}))
+        self.assertEqual(set(self.by_root("Probe").renderers), {"Part"})
+
+    def test_renamed_node_is_followed_by_its_mesh(self):
+        self.assertEqual(set(self.by_root("Box").renderers), {"Part", "Lid"})
+
+    def test_partial_table_falls_back_to_the_top_ancestor(self):
+        self.assertEqual(self.roots(self.PARTIAL), ["Wall"])
+        self.assertEqual(set(self.by_root("Wall").renderers), {"Wall", "Wall_LOD1"})
+
+
 class LegacyFormatTest(unittest.TestCase):
     """Unity 2018.2 以前の形式（Prefab / m_ParentPrefab / m_PrefabParentObject / m_PrefabInternal、ルートは 400000）。"""
 
@@ -313,6 +453,31 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(found[1].world, (0, 0, 0)), (0.0, 0.0, -1.0))
         self.assertEqual(h.missing_sources, 0)
         self.assertEqual(h.unresolved_overrides, 1)  # モデルの中の Renderer（2300000）へのマテリアルの上書き
+
+    def test_recycle_table_resolves_overrides_inside_model(self):
+        # 1 メッシュの FBX: Renderer（2300000）は //RootNode に載り、Blender ではメッシュ名 Pot のオブジェクトになる
+        table = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 4300000: "Pot"}
+        exp = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table})
+        h = exp.expand_raw(parse_asset(self.scene()))
+        pot = placements(h, [MODEL])[0]
+        self.assertEqual(pot.renderers["Pot"].materials, [MAT_B])
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    def test_recycle_table_resolves_inner_transforms(self):
+        table = {100000: "//RootNode", 400000: "//RootNode", 400002: "Lid", 2300002: "Lid", 4300002: "Lid"}
+        scene = HEADER + self.legacy_instance(2000, MODEL, 0, [
+            mod(400002, MODEL, "m_LocalRotation.x", -0.5),
+            mod(400002, MODEL, "m_LocalRotation.w", 0.866),
+            mod(400002, MODEL, "m_LocalPosition.y", 0.8),
+            mod(2300002, MODEL, "m_Materials.Array.data[1]", "", f"{{fileID: 2100000, guid: {MAT_A}, type: 2}}"),
+            mod(123, MODEL, "m_LocalPosition.x", 1),  # 表に無い
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.node_transforms["Lid"], {"rotation": [-0.5, None, None, 0.866], "position": [None, 0.8, None]})
+        self.assertEqual(placement.renderers["Lid"].materials, [None, MAT_A])
+        self.assertEqual(h.unresolved_overrides, 1)
 
     def test_child_of_legacy_model_instance_uses_stripped_alias(self):
         exp = Expander(lambda g: None, {MODEL: "Probe"})
