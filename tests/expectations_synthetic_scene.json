@@ -1,0 +1,270 @@
+{
+  "options": {
+    "material_mode": "AUTO",
+    "models": "ALL",
+    "unit": "SCENES"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "warnings_max": 2,
+  "placed_objects": [
+    {
+      "top": "A",
+      "object": "Spike",
+      "tip": [
+        3.7824,
+        -3.9004,
+        1.4346
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "A",
+      "object": "Child",
+      "tip": [
+        1.005,
+        -1.8401,
+        4.4622
+      ]
+    },
+    {
+      "top": "A",
+      "object": "Skinned",
+      "tip": [
+        -4.0036,
+        -7.4898,
+        4.8779
+      ]
+    },
+    {
+      "top": "Holder",
+      "object": "Spike",
+      "tip": [
+        4.9088,
+        -3.5019,
+        0.9073
+      ],
+      "hidden": false
+    },
+    {
+      "top": "Holder",
+      "object": "Child",
+      "tip": [
+        3.4352,
+        -1.749,
+        3.4838
+      ]
+    },
+    {
+      "top": "Holder",
+      "object": "Skinned",
+      "tip": [
+        -1.9,
+        -3.1213,
+        2.1364
+      ]
+    },
+    {
+      "top": "C",
+      "object": "Spike",
+      "tip": [
+        -1.4588,
+        1.0608,
+        1.8
+      ],
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "C",
+      "object": "Child",
+      "tip": [
+        0.5821,
+        -44.9414,
+        36.7786
+      ],
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "C",
+      "object": "Skinned",
+      "tip": [
+        -0.7,
+        5.6,
+        2.6
+      ]
+    },
+    {
+      "top": "Hidden",
+      "object": "Spike",
+      "hidden": true
+    },
+    {
+      "top": "AllRed",
+      "object": "Spike",
+      "hidden": false,
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "AllRed",
+      "object": "Child",
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    }
+  ],
+  "shared_meshes": [
+    {
+      "objects": [
+        {
+          "top": "A",
+          "object": "Spike"
+        },
+        {
+          "top": "Holder",
+          "object": "Spike"
+        },
+        {
+          "top": "Hidden",
+          "object": "Spike"
+        }
+      ],
+      "shared": true
+    },
+    {
+      "objects": [
+        {
+          "top": "A",
+          "object": "Child"
+        },
+        {
+          "top": "C",
+          "object": "Child"
+        }
+      ],
+      "shared": false
+    }
+  ],
+  "light_count": 6,
+  "camera_count": 3,
+  "scene_camera": "Main Camera",
+  "lights": [
+    {
+      "name": "Directional Light",
+      "type": "SUN",
+      "energy": 14.435,
+      "direction": [
+        0.3214,
+        -0.5567,
+        -0.766
+      ],
+      "use_shadow": true,
+      "hidden": false
+    },
+    {
+      "name": "Point Light",
+      "type": "POINT",
+      "energy": 125.5813,
+      "location": [
+        -2,
+        0,
+        1
+      ],
+      "use_custom_distance": true,
+      "cutoff_distance": 5,
+      "use_temperature": true,
+      "temperature": 3863
+    },
+    {
+      "name": "Spot Light",
+      "type": "SPOT",
+      "energy": 109.3248,
+      "direction": [
+        0,
+        0,
+        -1
+      ],
+      "spot_size": 1.0472,
+      "spot_blend": 0.33333
+    },
+    {
+      "name": "Area Light",
+      "type": "AREA",
+      "shape": "RECTANGLE",
+      "size": 2,
+      "size_y": 0.5,
+      "energy": 3.1416,
+      "direction": [
+        0,
+        0,
+        -1
+      ],
+      "use_shadow": false
+    },
+    {
+      "name": "Disabled Light",
+      "type": "POINT",
+      "hidden": true
+    },
+    {
+      "name": "Lamp",
+      "type": "POINT",
+      "energy": 196.1127,
+      "location": [
+        -4,
+        0,
+        2
+      ],
+      "hidden": false
+    }
+  ],
+  "cameras": [
+    {
+      "name": "Main Camera",
+      "type": "PERSP",
+      "sensor_fit": "VERTICAL",
+      "lens": 32.9697,
+      "clip_end": 200,
+      "direction": [
+        0,
+        -1,
+        0
+      ],
+      "location": [
+        0,
+        10,
+        1
+      ]
+    },
+    {
+      "name": "Physical Camera",
+      "type": "PERSP",
+      "sensor_fit": "HORIZONTAL",
+      "lens": 15.638705,
+      "direction": [
+        0,
+        -1,
+        0
+      ]
+    },
+    {
+      "name": "Ortho Camera",
+      "type": "ORTHO",
+      "ortho_scale": 5,
+      "direction": [
+        0,
+        0,
+        -1
+      ]
+    }
+  ]
+}

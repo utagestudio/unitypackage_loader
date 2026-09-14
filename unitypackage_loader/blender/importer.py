@@ -6,12 +6,30 @@
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix, Vector
 
+from ..core.arrange import arrange_offsets
+from ..core.hierarchy import (
+    CLASS_CAMERA,
+    CLASS_LIGHT,
+    Expander,
+    Hierarchy,
+    HierarchyError,
+    effective_active,
+    parse_asset,
+    summarize,
+)
+from ..core.hierarchy import components as scene_components
+from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
+from ..core.unity_yaml import UnityRef
+from ..core.transform import unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
@@ -28,6 +46,15 @@ from ..core.prefab import (
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
+from ..core.units import (
+    UNIT_PREFABS,
+    UNIT_SCENES,
+    PrefabSummary,
+    SceneSummary,
+    choice_count,
+    summarize_prefabs,
+    summarize_scene,
+)
 from . import materials as mat_builder
 from . import outline as outline_builder
 from .textures import load_image
@@ -45,7 +72,13 @@ _SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 @dataclass
 class ImportOptions:
     models: str = "ASK"  # ASK / ALL / FIRST
+    unit: str = "MODELS"  # 読み込む単位: MODELS / PREFABS
     model_guids: list[str] | None = None  # 明示的に選ばれたモデル（ダイアログ経由）
+    prefab_paths: list[str] | None = None  # 明示的に選ばれた prefab の pathname（ダイアログ経由）
+    scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）
+    scene_lights: bool = True  # シーンのライトを読み込む
+    scene_cameras: bool = True  # シーンのカメラを読み込む
+    arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
     backface_culling: bool = True
@@ -68,8 +101,6 @@ class ImportOptions:
     use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
     outline_width_scale: float = 0.01
-    # モデル GUID → マテリアル割り当てに使う prefab の pathname（無い・空ならそのモデルを参照する prefab を先勝ちで統合）
-    prefabs: dict[str, str] = field(default_factory=dict)
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -111,25 +142,31 @@ class PreparedPackage:
     # prefab の pathname → モデル GUID → GameObject 名をキーにした表
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
+    scenes: list[SceneSummary] = field(default_factory=list)  # 読み込む単位 Scenes の候補（pathname 順）
+    scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層
+    pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
 
     @property
     def supported_models(self) -> list[ModelSummary]:
         return [m for m in self.models if m.supported]
 
-    def prefabs_for(self, model_guid: str) -> list[str]:
-        """そのモデルのメッシュを使う Renderer を持つ prefab の pathname（パス順）。"""
-        return sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
+    @property
+    def supported_prefabs(self) -> list[PrefabSummary]:
+        return [p for p in self.prefabs if p.supported]
 
     @property
-    def has_prefab_choice(self) -> bool:
-        """使う prefab を選べるモデル（候補が複数）があるか。"""
-        return any(len(self.prefabs_for(m.guid)) > 1 for m in self.supported_models)
+    def supported_scenes(self) -> list[SceneSummary]:
+        return [s for s in self.scenes if s.supported]
 
-    def table_for(self, model_guid: str, prefab_pathname: str = "") -> dict[str, RendererMaterials]:
-        """モデルに当てはめる表。指定 prefab が候補に無ければ、候補をパス順に先勝ちで統合したもの。"""
-        candidates = self.prefabs_for(model_guid)
-        if prefab_pathname in candidates:
-            return self.prefab_tables[prefab_pathname][model_guid]
+    @property
+    def choice_count(self) -> int:
+        """ダイアログで選べる（読み込める）候補の総数。"""
+        return choice_count(self.prefabs, len(self.supported_models), self.scenes)
+
+    def table_for(self, model_guid: str) -> dict[str, RendererMaterials]:
+        """Models 単位でモデルに当てはめる表。そのモデルを使う prefab をパス順に先勝ちで統合したもの。"""
+        candidates = sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
         return merge_prefab_tables([self.prefab_tables[p][model_guid] for p in candidates])
 
 
@@ -231,7 +268,48 @@ def prepare_package(
         tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
         if tables:
             prefab_tables[entry.pathname] = tables
-    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings)
+    unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
+    prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
+    scenes, hierarchies = _prepare_scenes(pkg, models, warnings.append, unsupported)
+    return PreparedPackage(
+        path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
+        prefabs=prefabs, scenes=scenes, scene_hierarchies=hierarchies,
+        pipeline=detect_pipeline(n.family for n in normalized.values()),
+    )
+
+
+def _prepare_scenes(
+    pkg: UnityPackage, models: list[ModelSummary], warn: Callable[[str], None], unsupported: dict[str, str]
+) -> tuple[list[SceneSummary], dict[str, Hierarchy]]:
+    """シーンを展開して候補にする。prefab の展開結果はシーンの間で共有する。"""
+    entries = pkg.scenes()
+    if not entries:
+        return [], {}
+    prefab_guids = {e.guid for e in pkg.prefabs()}
+    model_names = {m.guid: Path(m.entry.pathname).stem for m in models}
+
+    def read(guid: str):
+        if guid not in prefab_guids:
+            return None
+        try:
+            return parse_asset(pkg.read_asset(guid))
+        except (ValueError, PackageError) as exc:
+            warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
+            return None
+
+    expander = Expander(read, model_names)
+    scenes: list[SceneSummary] = []
+    hierarchies: dict[str, Hierarchy] = {}
+    for entry in entries:
+        contents = None
+        try:
+            hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
+            contents = summarize(hierarchy, model_names)
+            hierarchies[entry.guid] = hierarchy
+        except (HierarchyError, ValueError, PackageError, RecursionError) as exc:
+            warn(f"could not read scene {entry.pathname}: {exc}")
+        scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
+    return scenes, hierarchies
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +481,229 @@ def _select_models(prepared: PreparedPackage, opts: ImportOptions) -> list[Model
     return supported
 
 
+def _select_prefabs(prepared: PreparedPackage, opts: ImportOptions) -> list[PrefabSummary]:
+    supported = prepared.supported_prefabs
+    if opts.prefab_paths is not None:
+        wanted = set(opts.prefab_paths)
+        return [p for p in supported if p.pathname in wanted]
+    if opts.models == "FIRST":
+        return supported[:1]
+    return supported
+
+
+@dataclass
+class _ImportGroup:
+    """1 つのコレクションにまとめて読み込むモデルと、それぞれに当てはめる prefab の表。"""
+
+    prefab: PrefabSummary | None  # Models 単位なら None（パッケージのコレクションに直接入れる）
+    models: list[tuple[ModelSummary, dict[str, RendererMaterials]]]
+
+
+def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_ImportGroup]:
+    if opts.unit != UNIT_PREFABS:
+        return [_ImportGroup(None, [(m, prepared.table_for(m.guid)) for m in _select_models(prepared, opts)])]
+    supported = {m.guid: m for m in prepared.supported_models}
+    groups = []
+    for prefab in _select_prefabs(prepared, opts):
+        tables = prepared.prefab_tables.get(prefab.pathname, {})
+        models = [(supported[g], tables[g]) for g in prefab.model_guids if g in supported and g in tables]
+        if models:
+            groups.append(_ImportGroup(prefab, models))
+    return groups
+
+
+def _collection_bounds(collection: bpy.types.Collection):
+    """コレクション内のメッシュのワールド座標での外形。メッシュが無ければ None。"""
+    lo, hi = [float("inf")] * 3, [float("-inf")] * 3
+    for obj in collection.all_objects:
+        if obj.type != "MESH":
+            continue
+        for corner in obj.bound_box:
+            point = obj.matrix_world @ Vector(corner)
+            for axis in range(3):
+                lo[axis] = min(lo[axis], point[axis])
+                hi[axis] = max(hi[axis], point[axis])
+    return (tuple(lo), tuple(hi)) if lo[0] <= hi[0] else None
+
+
+def _arrange_collections(context, collections: list[bpy.types.Collection]) -> None:
+    """prefab ごとのコレクションを、外形が重ならないように並べる（親を持たないオブジェクトを動かす）。"""
+    context.view_layer.update()
+    offsets = arrange_offsets([_collection_bounds(c) for c in collections])
+    for coll, (dx, dy) in zip(collections, offsets):
+        if not (dx or dy):
+            continue
+        for obj in coll.all_objects:
+            if obj.parent is None:
+                obj.location.x += dx
+                obj.location.y += dy
+
+
+def _select_scenes(prepared: PreparedPackage, opts: ImportOptions) -> list[SceneSummary]:
+    supported = prepared.supported_scenes
+    if opts.scene_paths is not None:
+        wanted = set(opts.scene_paths)
+        return [s for s in supported if s.pathname in wanted]
+    if opts.models == "FIRST":
+        return supported[:1]
+    return supported
+
+
+@dataclass
+class _SceneTemplate:
+    """シーンで最初に読み込んだモデルのオブジェクトと、原点にあったときの状態（複製と位置の補正に使う）。"""
+
+    objects: list[bpy.types.Object]
+    basis: dict[bpy.types.Object, Matrix]
+    hide_render: dict[bpy.types.Object, bool]
+
+    @classmethod
+    def capture(cls, objects: list[bpy.types.Object]) -> _SceneTemplate:
+        # matrix_world は depsgraph の評価が要るので持たない（数千回の読み込みでシーン全体を評価し直すと重い）
+        return cls(list(objects), {o: o.matrix_basis.copy() for o in objects}, {o: o.hide_render for o in objects})
+
+
+def _scene_empty(hierarchy: Hierarchy, key: int, collection, empties: dict[int, bpy.types.Object], active: dict[int, bool]):
+    """Node と、まだ作っていない祖先の Empty を作り、Node の Empty を返す（Unity の親子関係を再現する）。"""
+    path: list[int] = []
+    seen: set[int] = set()
+    current: int | None = key
+    while current is not None and current in hierarchy.nodes and current not in empties and current not in seen:
+        path.append(current)
+        seen.add(current)
+        current = hierarchy.nodes[current].parent
+    parent = empties.get(current) if current is not None else None
+    for node_key in reversed(path):
+        node = hierarchy.nodes[node_key]
+        empty = bpy.data.objects.new(node.name or "GameObject", None)
+        empty.empty_display_type = "PLAIN_AXES"
+        empty.empty_display_size = 0.1
+        collection.objects.link(empty)
+        empty.parent = parent
+        empty.matrix_basis = Matrix(unity_to_blender(node.local))
+        empty["unity_game_object"] = node.name
+        if not active.get(node_key, True):
+            empty.hide_set(True)
+            empty.hide_render = True
+        empties[node_key] = empty
+        parent = empty
+    return empties.get(key, parent)
+
+
+def _json_text(body: dict) -> str:
+    """コンポーネントの中身をカスタムプロパティ用の JSON にする（参照は fileID / guid の辞書にする）。"""
+
+    def default(value):
+        if isinstance(value, UnityRef):
+            return {"fileID": value.file_id, "guid": value.guid, "type": value.type}
+        return str(value)
+
+    return json.dumps(body, ensure_ascii=False, default=default)
+
+
+def _make_light(name: str, values: BlenderLight) -> bpy.types.Object:
+    data = bpy.data.lights.new(name or "Light", values.type)
+    data.color = values.color
+    data.energy = values.energy
+    data.use_shadow = values.use_shadow
+    data.shadow_soft_size = values.shadow_soft_size
+    if values.use_temperature and hasattr(data, "use_temperature"):  # 色温度は Blender 4.5 以降
+        data.use_temperature = True
+        data.temperature = values.temperature
+    if values.type == "SUN":
+        data.angle = values.angle
+    if values.type in {"POINT", "SPOT"}:
+        data.use_soft_falloff = False  # 近くで弱める補正を切り、Unity と同じく点光源として扱う
+    if values.type == "SPOT":
+        data.spot_size = values.spot_size
+        data.spot_blend = values.spot_blend
+    if values.type == "AREA":
+        data.shape = values.shape
+        data.size = values.size
+        data.size_y = values.size_y
+    if values.use_custom_distance:
+        data.use_custom_distance = True
+        data.cutoff_distance = values.cutoff_distance
+    return bpy.data.objects.new(name or "Light", data)
+
+
+def _make_camera(name: str, values: BlenderCamera) -> bpy.types.Object:
+    data = bpy.data.cameras.new(name or "Camera")
+    data.type = values.type
+    data.sensor_fit = values.sensor_fit
+    data.sensor_width = values.sensor_width
+    data.sensor_height = values.sensor_height
+    data.lens = max(values.lens, 1.0)
+    data.ortho_scale = values.ortho_scale
+    data.clip_start = values.clip_start
+    data.clip_end = values.clip_end
+    data.shift_x = values.shift_x
+    data.shift_y = values.shift_y
+    return bpy.data.objects.new(name or "Camera", data)
+
+
+def _attach_to_empty(objects: list[bpy.types.Object], root, scale: float) -> None:
+    """モデルの最上位のオブジェクトを配置の Empty の子にする。.meta の globalScale はモデルのルートで掛ける。"""
+    if root is None:
+        return
+    members = set(objects)
+    inverse = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 and scale != 1 else Matrix.Identity(4)
+    for obj in objects:
+        if obj.parent is None or obj.parent not in members:
+            obj.parent = root
+            obj.matrix_parent_inverse = inverse
+
+
+def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.Object]:
+    """テンプレートのオブジェクトを、データ（メッシュ・アーマチュア）を共有したまま複製する。"""
+    mapping = {}
+    for obj in template.objects:
+        copy = obj.copy()
+        collection.objects.link(copy)
+        mapping[obj] = copy
+    for original, copy in mapping.items():
+        copy.parent = mapping.get(original.parent)
+        copy.matrix_basis = template.basis[original]
+        copy.hide_render = template.hide_render[original]
+        for modifier in copy.modifiers:
+            if getattr(modifier, "object", None) in mapping:
+                modifier.object = mapping[modifier.object]
+        for constraint in copy.constraints:
+            if getattr(constraint, "target", None) in mapping:
+                constraint.target = mapping[constraint.target]
+    return list(mapping.values())
+
+
+def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> int:
+    """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
+
+    ``root_world`` は配置のルートの Unity での行列。置いた直後のオブジェクトの行列は「ルートの行列 · globalScale ·
+    原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
+    """
+    def depth(obj) -> int:
+        count = 0
+        while obj.parent is not None and count < 1000:
+            obj, count = obj.parent, count + 1
+        return count
+
+    targets = [o for o in objects if strip_numeric_suffix(o.name) in offsets]
+    if not targets:
+        return 0
+    view_layer.update()
+    scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
+    to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
+    origins = {o: to_origin @ o.matrix_world for o in targets}  # 動かす前にまとめて求める
+    skipped = 0
+    for obj in sorted(targets, key=depth):
+        deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
+        if deformed or obj.type == "ARMATURE":
+            skipped += 1
+            continue
+        view_layer.update()
+        obj.matrix_world = Matrix(unity_to_blender(offsets[strip_numeric_suffix(obj.name)])) @ scale_matrix @ origins[obj]
+    return skipped
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -435,10 +736,26 @@ def run_import(
         if not m.supported:
             report.warn(f"skipped {m.entry.pathname}: {m.skip_reason}")
 
-    models = _select_models(prepared, opts)
+    groups = [] if opts.unit == UNIT_SCENES else _plan_groups(prepared, opts)
+    scenes = _select_scenes(prepared, opts) if opts.unit == UNIT_SCENES else []
+    supported_models = {m.guid: m for m in prepared.supported_models}
+    selected: dict[str, ModelSummary] = {summary.guid: summary for group in groups for summary, _ in group.models}
+    for scene_summary in scenes:
+        for placement in scene_summary.placements:
+            if placement.model_guid in supported_models:
+                selected.setdefault(placement.model_guid, supported_models[placement.model_guid])
+    models = list(selected.values())
     if not models:
-        reasons = sorted({m.skip_reason for m in prepared.models if not m.supported})
-        raise PackageError("no importable models selected" + (f" ({'; '.join(reasons)})" if reasons else ""))
+        reasons = {m.skip_reason for m in prepared.models if not m.supported}
+        what = "models"
+        if opts.unit == UNIT_PREFABS:
+            reasons |= {p.skip_reason for p in prepared.prefabs if not p.supported}
+            what = "prefabs"
+        elif opts.unit == UNIT_SCENES:
+            reasons |= {s.skip_reason for s in prepared.scenes if not s.supported}
+            what = "scenes"
+        reasons_text = "; ".join(sorted(reasons))
+        raise PackageError(f"no importable {what} selected" + (f" ({reasons_text})" if reasons_text else ""))
 
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
@@ -488,9 +805,6 @@ def run_import(
     scene.collection.children.link(collection)
     view_layer = context.view_layer
     prev_active = view_layer.active_layer_collection
-    layer_coll = _find_layer_collection(view_layer.layer_collection, collection)
-    if layer_coll is not None:
-        view_layer.active_layer_collection = layer_coll
 
     build_opts = mat_builder.MaterialBuildOptions(
         mode=opts.material_mode,
@@ -502,106 +816,274 @@ def run_import(
     )
 
     built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
+    imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
 
-    try:
-        for index, summary in enumerate(models):
-            model = summary.entry
-            step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
-            model_info = _model_info(model, report.warn)
-            prefab_table = prepared.table_for(model.guid, opts.prefabs.get(model.guid, ""))
-            before = _snapshot()
-            existing_materials = {m.name: m for m in bpy.data.materials}
-            delegated = _import_model(context, paths[model.guid], model, opts, collection, report)
-            new = _new_since(before)
-            _adopt_into_collection(new, scene, collection)
-            if delegated:
-                # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
-                report.images.extend(i.name for i in new["images"])
-            if delegated and not new["objects"]:
-                # VRM 0.x の制限付きライセンスでは add-on が確認ダイアログを出し、その場では読み込まない
-                report.warn(
-                    f"VRM add-on did not create any objects for {model.name} "
-                    "(a license confirmation dialog may be waiting; the model is imported after confirming, "
-                    "outside of this importer)"
-                )
-            report.models.append(model.pathname)
-            report.objects.extend(o.name for o in new["objects"])
-
-            new_materials: list[bpy.types.Material] = new["materials"]
-            fbx_names = [m.name for m in new_materials]
-            mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
-            object_slots = {
-                o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
-                for o in mesh_objects
-            }
-            # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
-            submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
-            resolution = resolve_materials(
-                fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
+    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+        """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
+        model = summary.entry
+        model_info = _model_info(model, report.warn)
+        reimport = model.guid in imported_models
+        imported_models.add(model.guid)
+        before = _snapshot()
+        # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
+        existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
+        delegated = _import_model(context, paths[model.guid], model, opts, target, report)
+        new = _new_since(before)
+        _adopt_into_collection(new, scene, target)
+        if delegated:
+            # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
+            report.images.extend(i.name for i in new["images"])
+        if delegated and not new["objects"]:
+            # VRM 0.x の制限付きライセンスでは add-on が確認ダイアログを出し、その場では読み込まない
+            report.warn(
+                f"VRM add-on did not create any objects for {model.name} "
+                "(a license confirmation dialog may be waiting; the model is imported after confirming, "
+                "outside of this importer)"
             )
-            assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
+        report.models.append(model.pathname)
+        report.objects.extend(o.name for o in new["objects"])
 
-            # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
-            keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
-            for bmat in new_materials:
-                res = resolution[bmat.name]
-                mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
-                report.materials.append(mrep)
-                if keep_materials:
-                    mrep.method = "delegated" if delegated else "kept"
-                    if res.guid:
-                        norm = normalized[res.guid]
-                        mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
-                        if opts.store_props:
-                            mat_builder._store_props(bmat, norm)
+        new_materials: list[bpy.types.Material] = new["materials"]
+        fbx_names = [m.name for m in new_materials]
+        mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
+        object_slots = {
+            o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
+            for o in mesh_objects
+        }
+        # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
+        submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
+        resolution = resolve_materials(
+            fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
+        )
+        assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
+
+        # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
+        keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
+        remaining: list[bpy.types.Material] = []  # 削除せずに残した、インポーターが作ったマテリアル
+        for bmat in new_materials:
+            res = resolution[bmat.name]
+            mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
+            report.materials.append(mrep)
+            if keep_materials:
+                remaining.append(bmat)
+                mrep.method = "delegated" if delegated else "kept"
+                if res.guid:
+                    norm = normalized[res.guid]
+                    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                    if opts.store_props:
+                        mat_builder._store_props(bmat, norm)
+                continue
+            if res.warning:
+                mrep.warnings.append(res.warning)
+                report.warn(f"material {bmat.name!r}: {res.warning}")
+
+            if opts.reuse_existing:
+                base = strip_numeric_suffix(bmat.name)
+                existing = existing_materials.get(base)
+                if existing is not None and existing is not bmat:
+                    _replace_material(new["objects"], bmat, existing)
+                    bpy.data.materials.remove(bmat)
+                    mrep.method = "reused"
+                    mrep.blender_name = existing.name
                     continue
-                if res.warning:
-                    mrep.warnings.append(res.warning)
-                    report.warn(f"material {bmat.name!r}: {res.warning}")
 
-                if opts.reuse_existing:
-                    base = strip_numeric_suffix(bmat.name)
-                    existing = existing_materials.get(base)
-                    if existing is not None and existing is not bmat:
-                        _replace_material(new["objects"], bmat, existing)
+            remaining.append(bmat)
+            if res.guid is None:
+                mrep.warnings.append("no matching .mat in package; material left as imported")
+                report.warn(f"material {bmat.name!r}: no matching .mat in package")
+                continue
+
+            shared = built_by_guid.get(res.guid) if reimport else None
+            if shared is not None and shared is not bmat:
+                # 同じモデルを別の prefab 用に読み直したときは、組み立て済みの同じ .mat のマテリアルを使う
+                remaining.pop()
+                _replace_material(new["objects"], bmat, shared)
+                bpy.data.materials.remove(bmat)
+                norm = normalized[res.guid]
+                mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                mrep.method = "shared"
+                mrep.blender_name = shared.name
+                continue
+
+            _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
+            built_by_guid.setdefault(res.guid, bmat)
+
+        if not keep_materials:
+            # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
+            for image in new["images"]:
+                if image.users == 0:
+                    bpy.data.images.remove(image)
+
+        # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
+        if assignments and not keep_materials:
+            split = _split_slots_by_prefab(
+                new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
+                images, tex_infos, build_opts, pkg, report,
+            )
+            if split:
+                report.split_slots += split
+                # 差し替えで使われなくなった FBX マテリアルは片付ける
+                for bmat in remaining:
+                    if bmat.users == 0:
+                        for mrep in report.materials:
+                            if mrep.blender_name == bmat.name and mrep.method != "replaced":
+                                mrep.method = "replaced"
+                        # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
+                        for guid in [g for g, m in built_by_guid.items() if m == bmat]:
+                            del built_by_guid[guid]
                         bpy.data.materials.remove(bmat)
-                        mrep.method = "reused"
-                        mrep.blender_name = existing.name
-                        continue
+        if opts.outlines:
+            added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
+            if added:
+                report.outlines += added
+        return new["objects"]
 
-                if res.guid is None:
-                    mrep.warnings.append("no matching .mat in package; material left as imported")
-                    report.warn(f"material {bmat.name!r}: no matching .mat in package")
-                    continue
+    model_by_guid = {m.guid: m for m in prepared.models}
 
-                _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
-                built_by_guid.setdefault(res.guid, bmat)
+    def import_scene(scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
+        """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
+        pathname = scene_summary.pathname
+        target = bpy.data.collections.new(scene_summary.name)
+        collection.children.link(target)
+        target["unity_scene"] = pathname
+        target["unity_scene_guid"] = scene_summary.guid
+        report.scenes.append(pathname)
+        layer_coll = _find_layer_collection(view_layer.layer_collection, target)
+        if layer_coll is not None:
+            view_layer.active_layer_collection = layer_coll
 
-            if not keep_materials:
-                # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
-                for image in new["images"]:
-                    if image.users == 0:
-                        bpy.data.images.remove(image)
+        hierarchy = prepared.scene_hierarchies[scene_summary.guid]
+        active = effective_active(hierarchy)
+        empties: dict[int, bpy.types.Object] = {}
+        templates: dict[tuple, _SceneTemplate] = {}
+        skipped_offsets = 0
+        scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
+        count = len(scene_summary.placements)
+        for index, placement in enumerate(scene_summary.placements):
+            if index % 25 == 0:
+                step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {scene_summary.name}")
+            summary = supported_models.get(placement.model_guid)
+            if summary is None:
+                skipped = model_by_guid.get(placement.model_guid)
+                if skipped is not None:
+                    report.warn(f"scene {pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+                continue
+            root = _scene_empty(hierarchy, placement.root, target, empties, active)
+            table = {
+                name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
+                for name, r in placement.renderers.items()
+            }
+            key = placement.signature()
+            template = templates.get(key)
+            if template is None:
+                objects = import_model(summary, table, target)
+                template = templates[key] = _SceneTemplate.capture(objects)
+            else:
+                objects = _duplicate_objects(template, target)
+                report.objects.extend(o.name for o in objects)
+            if summary.guid not in scales:
+                scales[summary.guid] = _model_info(summary.entry, report.warn).global_scale
+            scale = scales[summary.guid]
+            _attach_to_empty(objects, root, scale)
+            if placement.offsets:
+                skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale, view_layer)
+            hidden = {name for name, r in placement.renderers.items() if not r.visible}
+            for obj in objects:
+                if not placement.active or strip_numeric_suffix(obj.name) in hidden:
+                    obj.hide_set(True)
+                    obj.hide_render = True
 
-            # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
-            if assignments and not keep_materials:
-                split = _split_slots_by_prefab(
-                    new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
-                    images, tex_infos, build_opts, pkg, report,
-                )
-                if split:
-                    report.split_slots += split
-                    # 差し替えで使われなくなった FBX マテリアルは片付ける
-                    for bmat in new_materials:
-                        if bmat.users == 0:
-                            for mrep in report.materials:
-                                if mrep.blender_name == bmat.name and mrep.method != "replaced":
-                                    mrep.method = "replaced"
-                            bpy.data.materials.remove(bmat)
-            if opts.outlines:
-                added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
-                if added:
-                    report.outlines += added
+        # --- ライト・カメラ ---
+        baked_lights = 0
+        light_notes: set[str] = set()
+        wanted = ([CLASS_LIGHT] if opts.scene_lights else []) + ([CLASS_CAMERA] if opts.scene_cameras else [])
+        for component in scene_components(hierarchy, wanted) if wanted else []:
+            node = hierarchy.nodes[component.node]
+            if component.node in empties:
+                # 同じ GameObject にモデルの配置の Empty があれば、その子にする
+                parent, local = empties[component.node], Matrix.Identity(4)
+            else:
+                parent = _scene_empty(hierarchy, node.parent, target, empties, active) if node.parent is not None else None
+                local = Matrix(unity_to_blender(node.local))
+            if component.class_id == CLASS_LIGHT:
+                values = convert_light(component.body, prepared.pipeline)
+                obj = _make_light(component.name, values)
+                obj["unity_light"] = _json_text(component.body)
+                obj["unity_render_pipeline"] = prepared.pipeline
+                baked_lights += values.baked_only
+                light_notes.update(values.notes)
+                report.lights += 1
+            else:
+                obj = _make_camera(component.name, convert_camera(component.body))
+                obj["unity_camera"] = _json_text(component.body)
+                report.cameras += 1
+                if scene.camera is None and component.active:
+                    scene.camera = obj
+            target.objects.link(obj)
+            obj.parent = parent
+            location, rotation, _ = (local @ Matrix(LIGHT_CAMERA_BASIS)).decompose()
+            obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
+            if not component.active:
+                obj.hide_set(True)
+                obj.hide_render = True
+        if baked_lights:
+            report.warn(
+                f"scene {pathname}: {baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
+                "they were imported as real-time lights"
+            )
+        for note in sorted(light_notes):
+            report.warn(f"scene {pathname}: {note}")
+
+        contents = scene_summary.contents
+        if contents is None:
+            return
+        if contents.unresolved_overrides:
+            report.warn(
+                f"scene {pathname}: {contents.unresolved_overrides} override(s) on objects inside a model "
+                "(position, material or visibility) are not read yet"
+            )
+        if contents.missing_sources:
+            report.warn(f"scene {pathname}: {contents.missing_sources} prefab instance(s) refer to assets that are not in the package")
+        if contents.other_renderers:
+            report.warn(
+                f"scene {pathname}: {contents.other_renderers} renderer(s) use meshes outside the package "
+                "(such as Unity's built-in primitives) and were skipped"
+            )
+        if skipped_offsets:
+            report.warn(
+                f"scene {pathname}: {skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
+            )
+
+    prefab_collections: list[bpy.types.Collection] = []
+    total = sum(len(group.models) for group in groups) + len(scenes)
+    done = 0
+    try:
+        for group in groups:
+            target = collection
+            if group.prefab is not None:
+                prefab = group.prefab
+                target = bpy.data.collections.new(prefab.name)
+                collection.children.link(target)
+                target["unity_prefab"] = prefab.pathname
+                target["unity_prefab_guid"] = prefab.guid
+                prefab_collections.append(target)
+                report.prefabs.append(prefab.pathname)
+                for guid in prefab.model_guids:
+                    skipped = model_by_guid.get(guid)
+                    if skipped is not None and not skipped.supported:
+                        report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+            layer_coll = _find_layer_collection(view_layer.layer_collection, target)
+            if layer_coll is not None:
+                view_layer.active_layer_collection = layer_coll
+            for summary, prefab_table in group.models:
+                step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
+                import_model(summary, prefab_table, target)
+                done += 1
+        for scene_summary in scenes:
+            import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+            done += 1
+        if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
+            _arrange_collections(context, prefab_collections)
     finally:
         if prev_active is not None:
             view_layer.active_layer_collection = prev_active
@@ -652,9 +1134,9 @@ def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normali
         slot = obj.material_slots[index]
         current = slot.material
         current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
-        if current_guid == guid:
-            continue
         mat = built_by_guid.get(guid)
+        if current_guid == guid or (current is not None and current is mat):
+            continue
         if mat is None:
             umat = unity_mats[guid]
             mat = bpy.data.materials.new(umat.name or guid[:8])

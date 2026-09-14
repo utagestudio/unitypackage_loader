@@ -60,6 +60,12 @@ class UNITYPKG_PT_report(bpy.types.Panel):
         col.label(text=f"Objects: {len(report.objects)}")
         col.label(text=f"Materials: {len(report.active_materials)}  (mapped {report.mapped_count})")
         col.label(text=f"Textures: {len(report.images)}")
+        if report.scenes:
+            col.label(text=f"Scenes: {len(report.scenes)}")
+        if report.lights or report.cameras:
+            col.label(text=f"Lights: {report.lights}  Cameras: {report.cameras}")
+        if report.prefabs:
+            col.label(text=f"Prefabs: {len(report.prefabs)}")
         if report.models:
             col.label(text=f"Models: {len(report.models)}")
 

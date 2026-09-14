@@ -26,6 +26,7 @@ __all__ = [
     "TEXTURE_EXTS",
     "MATERIAL_EXTS",
     "PREFAB_EXTS",
+    "SCENE_EXTS",
 ]
 
 MODEL_EXTS = frozenset({".fbx", ".obj", ".dae", ".blend", ".gltf", ".glb", ".vrm"})  # .vrm は glTF バイナリ
@@ -34,9 +35,10 @@ TEXTURE_EXTS = frozenset(
 )
 MATERIAL_EXTS = frozenset({".mat"})
 PREFAB_EXTS = frozenset({".prefab"})
+SCENE_EXTS = frozenset({".unity"})
 
 # scan 時に実体をメモリへ載せておく拡張子と上限サイズ
-_CACHE_EXTS = frozenset({".mat", ".prefab"})
+_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
 # 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
@@ -69,7 +71,7 @@ class AssetEntry:
 
     @property
     def kind(self) -> str:
-        """``model`` / ``material`` / ``texture`` / ``prefab`` / ``folder`` / ``other``"""
+        """``model`` / ``material`` / ``texture`` / ``prefab`` / ``scene`` / ``folder`` / ``other``"""
         if not self.has_asset:
             return "folder"
         ext = self.ext
@@ -81,6 +83,8 @@ class AssetEntry:
             return "texture"
         if ext in PREFAB_EXTS:
             return "prefab"
+        if ext in SCENE_EXTS:
+            return "scene"
         return "other"
 
 
@@ -248,6 +252,9 @@ class UnityPackage:
 
     def prefabs(self) -> list[AssetEntry]:
         return self.by_kind("prefab")
+
+    def scenes(self) -> list[AssetEntry]:
+        return self.by_kind("scene")
 
     def get(self, guid: str) -> AssetEntry | None:
         self._require_scan()

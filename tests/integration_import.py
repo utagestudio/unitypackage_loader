@@ -18,6 +18,7 @@ import traceback
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_DIR = REPO_ROOT / "_local"
@@ -70,6 +71,38 @@ class Check:
             self.passed += 1
         else:
             self.failures.append(f"{label}: {detail or 'condition failed'}")
+
+
+def _strip_suffix(name: str) -> str:
+    base, dot, suffix = name.rpartition(".")
+    return base if dot and suffix.isdigit() and len(suffix) == 3 else name
+
+
+def _find_placed(top: str, name: str) -> list:
+    found = []
+    for obj in bpy.data.objects:
+        if _strip_suffix(obj.name) != name:
+            continue
+        root = obj
+        while root.parent is not None:
+            root = root.parent
+        if _strip_suffix(root.name) == top:
+            found.append(obj)
+    return found
+
+
+def _tip_world(obj) -> Vector:
+    """評価後（アーマチュア変形後）のメッシュで、重心から最も遠い頂点のワールド座標。"""
+    bpy.context.view_layer.update()
+    evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    mesh = evaluated.to_mesh()
+    try:
+        points = [v.co.copy() for v in mesh.vertices]
+        centroid = sum(points, Vector()) / len(points)
+        tip = max(points, key=lambda p: (p - centroid).length_squared)
+        return evaluated.matrix_world @ tip
+    finally:
+        evaluated.to_mesh_clear()
 
 
 def _image_of(mat: bpy.types.Material, label: str):
@@ -187,6 +220,118 @@ def main() -> int:
                 set(spec["node_types"]) <= {n.bl_idname for n in mat.node_tree.nodes},
                 f"missing {set(spec['node_types']) - {n.bl_idname for n in mat.node_tree.nodes}}",
             )
+
+    if "count" in exp.get("prefabs", {}):
+        c.eq("prefab count", len(report.prefabs), exp["prefabs"]["count"])
+
+    # 読み込む単位 Prefabs で prefab ごとに作られるコレクション。マテリアルは Blender 上の名前ではなく、
+    # 元の .mat のファイル名（unity_material_path の末尾）で比べる（同じモデルを読み直すと名前に連番が付くため）
+    for coll_name, spec in exp.get("collections", {}).items():
+        coll = bpy.data.collections.get(coll_name)
+        c.true(f"collection {coll_name} exists", coll is not None)
+        if coll is None:
+            continue
+        objects = list(coll.all_objects)
+        if "objects" in spec:
+            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
+        if "prefab" in spec:
+            c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
+        if "mat_files" in spec:
+            files = {
+                slot.material.get("unity_material_path", "").rsplit("/", 1)[-1]
+                for obj in objects
+                if obj.type == "MESH"
+                for slot in obj.material_slots
+                if slot.material is not None
+            }
+            c.eq(f"{coll_name}.mat_files", sorted(files), sorted(spec["mat_files"]))
+
+    if "prefab_collections_overlap" in exp:
+        bpy.context.view_layer.update()
+        boxes = []
+        for coll in bpy.data.collections:
+            if coll.get("unity_prefab") is None:
+                continue
+            xs, ys = [], []
+            for obj in coll.all_objects:
+                if obj.type != "MESH":
+                    continue
+                for corner in obj.bound_box:
+                    p = obj.matrix_world @ Vector(corner)
+                    xs.append(p.x)
+                    ys.append(p.y)
+            if xs:
+                boxes.append((coll.name, min(xs), max(xs), min(ys), max(ys)))
+        overlaps = [
+            (a[0], b[0])
+            for i, a in enumerate(boxes)
+            for b in boxes[i + 1 :]
+            if a[1] < b[2] and b[1] < a[2] and a[3] < b[4] and b[3] < a[4]
+        ]
+        c.eq("prefab collections overlap", bool(overlaps), exp["prefab_collections_overlap"])
+
+    if "count" in exp.get("scenes", {}):
+        c.eq("scene count", len(report.scenes), exp["scenes"]["count"])
+
+    # 読み込む単位 Scenes で配置したオブジェクト。複製すると名前に連番が付くので、最上位の Empty（Unity の最上位の
+    # GameObject）の名前とオブジェクト名（連番を除く）で探す。tip は重心から最も遠い頂点のワールド座標
+    for spec in exp.get("placed_objects", []):
+        label = f"{spec['top']}/{spec['object']}"
+        found = _find_placed(spec["top"], spec["object"])
+        c.eq(f"{label} found", len(found), 1)
+        if len(found) != 1:
+            continue
+        obj = found[0]
+        if "tip" in spec:
+            tip = _tip_world(obj)
+            c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
+        if "hidden" in spec:
+            c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "mat_files" in spec:
+            files = sorted({s.material.get("unity_material_path", "").rsplit("/", 1)[-1] for s in obj.material_slots if s.material})
+            c.eq(f"{label}.mat_files", files, sorted(spec["mat_files"]))
+
+    # シーンのライト・カメラ（#49）。direction はオブジェクトの -Z（ライト・カメラの向き）のワールドでの向き
+    bpy.context.view_layer.update()
+    for key, kind in (("lights", "LIGHT"), ("cameras", "CAMERA")):
+        for spec in exp.get(key, []):
+            obj = bpy.data.objects.get(spec["name"])
+            label = f"{kind.lower()} {spec['name']}"
+            c.true(f"{label} exists", obj is not None and obj.type == kind)
+            if obj is None or obj.type != kind:
+                continue
+            for attr in ("type", "sensor_fit", "shape", "use_shadow", "use_custom_distance", "use_temperature"):
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", getattr(obj.data, attr), spec[attr])
+            for attr in ("energy", "lens", "ortho_scale", "clip_end", "cutoff_distance", "temperature", "spot_size", "spot_blend", "size", "size_y"):
+                if attr in spec:
+                    actual = getattr(obj.data, attr)
+                    c.true(f"{label}.{attr}", abs(actual - spec[attr]) <= 1e-3 * max(1.0, abs(spec[attr])), f"expected {spec[attr]}, got {actual}")
+            if "direction" in spec:
+                direction = (obj.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
+                c.true(f"{label}.direction", (direction - Vector(spec["direction"])).length <= 1e-3,
+                       f"expected {spec['direction']}, got {[round(v, 4) for v in direction]}")
+            if "location" in spec:
+                c.true(f"{label}.location", (obj.matrix_world.translation - Vector(spec["location"])).length <= 1e-3,
+                       f"expected {spec['location']}, got {[round(v, 4) for v in obj.matrix_world.translation]}")
+            if "hidden" in spec:
+                c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+    if "scene_camera" in exp:
+        camera = bpy.context.scene.camera
+        c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])
+    if "light_count" in exp:
+        c.eq("report lights", report.lights, exp["light_count"])
+    if "camera_count" in exp:
+        c.eq("report cameras", report.cameras, exp["camera_count"])
+
+    for spec in exp.get("shared_meshes", []):
+        found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
+        labels = "+".join(f"{o['top']}/{o['object']}" for o in spec["objects"])
+        if all(len(f) == 1 for f in found):
+            shared = len({f[0].data.name for f in found}) == 1
+            c.eq(f"{labels} share mesh data", shared, spec["shared"])
+        else:
+            c.true(f"{labels} found", False, "objects not found")
 
     for obj_name, count in exp.get("shape_keys", {}).items():
         obj = bpy.data.objects.get(obj_name)

@@ -6,7 +6,8 @@
 
 内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
-.mat を割り当てる prefab。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
+.mat を割り当てる prefab。Pair のサブメッシュの割り当てを入れ替えた色違いの prefab（PairSwap）と、Renderer を持たない
+prefab（Empty）。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
 Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
 バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
 HDRP/Lit の .mat 2 つ（白い _EmissionColor を持つが光らないものと、_EmissiveColor で光るもの）を割り当てた Hdrp。
@@ -393,6 +394,21 @@ def main() -> None:
     ])
     add(prefab_path, prefab.encode(), prefab_meta(prefab_path))
 
+    # 同じ Pair モデルを使い、サブメッシュの割り当てを入れ替えた色違い（#47）。読み込む単位 Prefabs では、
+    # Cone.prefab 用とは別に読み直し、組み立て済みの PairA / PairB を共有したうえでスロットを入れ替える。
+    # パス順で Cone.prefab が先なので、Models 単位で統合した表は変わらない
+    swap_path = "Assets/Synthetic/Prefabs/PairSwap.prefab"
+    add(swap_path, prefab_yaml([
+        ("SyntheticPair", guid_of(pair_path), [mat_guids["PairA"], mat_guids["PairB"]]),
+    ]).encode(), prefab_meta(swap_path))
+
+    # Renderer を持たない prefab（エフェクトや空の入れ物など）。Prefabs の候補には読み込めない理由付きで残る
+    empty_path = "Assets/Synthetic/Prefabs/Empty.prefab"
+    add(empty_path, (
+        "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
+        "--- !u!1 &100\nGameObject:\n  m_Name: SyntheticEmpty\n"
+    ).encode(), prefab_meta(empty_path))
+
     # 同じ名前のオブジェクトを持つ別々のモデルと、それぞれを使う prefab（Issue #25）。
     # prefab の表を名前だけで全モデルに当てはめると、パス順で先の TwinA の割り当てが TwinB にも使われてしまう
     for twin, kind, mode in (("TwinA", "cube", 0), ("TwinB", "sphere", 3)):
@@ -450,6 +466,12 @@ def main() -> None:
     hdrp_model_path = "Assets/Synthetic/Models/Hdrp.fbx"
     add(hdrp_model_path, path.read_bytes(), model_meta(guid_of(hdrp_model_path), hdrp_mats))
 
+    write_package(out, entries)
+
+
+def write_package(out: Path, entries: dict[str, tuple[str, bytes | None, str | None]]) -> None:
+    """GUID → (pathname, asset, .meta) を .unitypackage（tar.gz）に書き出す。"""
+    out.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():
             def put(name: str, data: bytes) -> None:

@@ -1,0 +1,20 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true, "unit": "PREFABS", "arrange": "SIDE_BY_SIDE" },
+  "objects": { "count": 8, "mesh_count": 8, "armature_count": 0 },
+  "materials": { "count": 10, "mapped": 8, "families": ["standard"], "methods": ["external", "prefab", "shared"] },
+  "images": { "count": 2 },
+  "warnings_max": 0,
+  "split_slots": 2,
+  "prefabs": { "count": 7 },
+  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticPair.001": ["PairA", "PairB"] },
+  "collections": {
+    "Binary": { "objects": 1, "prefab": "Assets/Synthetic/Prefabs/Binary.prefab", "mat_files": ["BinaryMat.mat"] },
+    "Cone": { "objects": 2, "prefab": "Assets/Synthetic/Prefabs/Cone.prefab", "mat_files": ["CylinderMat.mat", "PairA.mat", "PairB.mat"] },
+    "PairSwap": { "objects": 1, "prefab": "Assets/Synthetic/Prefabs/PairSwap.prefab", "mat_files": ["PairA.mat", "PairB.mat"] },
+    "TwinA": { "objects": 1, "mat_files": ["TwinAMat.mat"] },
+    "TwinB": { "objects": 1, "mat_files": ["TwinBMat.mat"] },
+    "VariantAlt": { "objects": 1, "mat_files": ["VariantAltMat.mat"] },
+    "VariantBase": { "objects": 1, "mat_files": ["VariantBaseMat.mat"] }
+  },
+  "prefab_collections_overlap": false
+}

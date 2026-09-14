@@ -20,16 +20,33 @@ EXTRACT_MODE_ITEMS = (
     ("CUSTOM", "Custom Path", "The directory given below"),
 )
 MODELS_ITEMS = (
-    ("ASK", "Ask", "Show a selection dialog when the package contains more than one model"),
-    ("ALL", "All", "Import every model in the package"),
-    ("FIRST", "First Only", "Import only the first model found"),
+    ("ASK", "Ask", "Show the selection dialog when the package has more than one prefab or model to choose from"),
+    ("ALL", "All Models", "Import every model file in the package without asking"),
+    ("FIRST", "First Model Only", "Import only the first model file found, without asking"),
+)
+UNIT_ITEMS = (
+    ("SCENES", "Scenes", "Import scenes with prefabs and models placed as in Unity; each scene gets its own collection"),
+    ("PREFABS", "Prefabs", "Import prefabs with their own material assignments; each prefab gets its own collection"),
+    ("MODELS", "Models", "Import model files (FBX etc.) as they are"),
+)
+ARRANGE_ITEMS = (
+    ("SIDE_BY_SIDE", "Side by Side", "Place prefabs next to each other so they do not overlap"),
+    ("STACK", "Stack at Origin", "Place every prefab at the origin"),
 )
 
 
 class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = _ROOT_PACKAGE
 
-    default_models: EnumProperty(name="Models", items=MODELS_ITEMS, default="ASK")
+    default_models: EnumProperty(name="Selection Dialog", items=MODELS_ITEMS, default="ASK")
+    default_arrange: EnumProperty(
+        name="Arrange Prefabs",
+        items=ARRANGE_ITEMS,
+        default="SIDE_BY_SIDE",
+        description="How to place prefabs when importing more than one. The choice made in the selection dialog is saved here",
+    )
+    # 選択ダイアログで最後に選んだ単位（PREFABS / MODELS）。次に開いたときの既定にする
+    last_import_unit: StringProperty(default="", options={"HIDDEN"})
     default_material_mode: EnumProperty(name="Material Mode", items=MATERIAL_MODE_ITEMS, default="AUTO")
     default_extract_mode: EnumProperty(name="Extract To", items=EXTRACT_MODE_ITEMS, default="BESIDE_BLEND")
     default_extract_path: StringProperty(name="Custom Path", subtype="DIR_PATH", default="")
@@ -63,6 +80,7 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
 
         col = layout.column(heading="Import Defaults")
         col.prop(self, "default_models")
+        col.prop(self, "default_arrange")
         col.prop(self, "default_material_mode")
         col.prop(self, "default_extract_mode")
         if self.default_extract_mode == "CUSTOM":

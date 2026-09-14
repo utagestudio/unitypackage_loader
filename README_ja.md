@@ -7,7 +7,7 @@ Unity 側のマテリアル設定とテクスチャを反映した状態で配�
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
 - 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
-- 読み込まないもの: シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等
+- 読み込まないもの: シェーダー本体、C#、アニメーション、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
 ## インストール
@@ -48,14 +48,16 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 - **ドラッグ＆ドロップ**: `.unitypackage` を 3D ビューポートにドラッグ＆ドロップすると、インポートオプションのポップアップが開きます。複数ファイルをまとめてドロップすることもできます。
 - **メニュー**: File > Import > Unitypackage (.unitypackage) からファイルブラウザで選び、右側のオプションを必要に応じて変更して Import
 
+オプションで常に表示されるのは Material Mode と Scale だけで、残りは Model / Materials / Textures の折りたたみに入っています。
+
 | セクション | 項目 | 説明 |
 |---|---|---|
-| Model | Models | `Ask`（複数モデルがあれば選択ダイアログ）/ `All` / `First Only` |
-| | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
+| （常に表示） | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
+| | Scale | モデルのインポーターに渡すスケール |
+| Model | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
-| Materials | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
-| | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
+| Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
 | | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
 | | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
@@ -69,7 +71,30 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 システムコンソールに詳細（各マテリアルの対応先 .mat、使用テクスチャ、警告）が出ます。
 パッケージ名の Collection が作られ、その中にオブジェクトが入ります。
 
-既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。
+### 読み込むものを選ぶ
+
+パッケージに選べるシーン・prefab・モデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
+上部で読み込む単位を選び、一覧で読み込むものにチェックを入れます。
+
+- **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
+  モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
+  同じモデル・同じマテリアルの配置は、メッシュのデータを共有した複製になります。ライトとカメラも読み込みます（「Also Import」で切り替え）。
+  ライトの強さは Unity（Built-in / URP）と Blender の EEVEE で測った値をもとに換算し、元の値はカスタムプロパティに残します。
+  Unity でライトマップにだけ効くライト（ベイク、面光源）はリアルタイムのライトになるので、警告に出します。
+  UI、Terrain、パッケージに無いメッシュ（Unity 組み込みの Cube など）は読み込まず、警告に出します。モデルファイル（FBX）を直接置いたものは、ルートの位置だけを読み、
+  中のオブジェクトへの変更は件数を警告に出します。
+- **Prefabs**: prefab ごとに、その prefab のマテリアルの割り当てのまま読み込みます。パッケージの Collection の中に prefab ごとの Collection ができます。
+  同じモデルを使う色違いも一緒に読み込めます。2 つ以上選んだときは **Arrange** で、`Side by Side`（重ならないように並べる。数が多ければ格子状に折り返す）と
+  `Stack at Origin`（原点に重ねる）を選べます。
+- **Models**: モデルファイル（FBX など）をそのまま読み込みます。マテリアルは [メッシュとマテリアルの対応付け](#メッシュとマテリアルの対応付け) のとおりに決まります。
+
+1 回のインポートで使う単位は 1 つなので、同じモデルを誤って二重に読み込むことはありません。読み込めないものも一覧から外さず、
+灰色にして理由（`no mesh in package`、`.blend import disabled` など）を表示します。最後に選んだ単位と並べ方は次回の既定になります。
+読み込む単位 Prefabs では、prefab の中の配置（子オブジェクトの位置など）は再現せず、prefab のモデルをその Collection の原点に置きます。
+配置ごと読み込むには、その prefab を置いたシーンを読み込みます。
+
+既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。選択ダイアログを出すか
+（`Selection Dialog`: `Ask` / `All Models` / `First Model Only`）と、prefab の並べ方（`Arrange Prefabs`）もここで設定します。
 独自シェーダーの GUID 表（`shader_guids.json` と同じ書式の JSON）を追加登録することもできます。
 "Max Extract Size"（既定 8 GiB、0 で無制限）を超える量を 1 つのパッケージから展開しようとした場合や、展開先の空き容量に
 収まらない場合は、何も書かずにインポートを中止します。
@@ -104,14 +129,15 @@ Unity で実際に表示されるのは prefab の Renderer に設定された�
 FBX 内では少数のマテリアルを共有し、Unity 側で prefab がパーツごとに別の .mat を割り当てているパッケージでは、
 prefab の割り当てに従ってスロット単位で Blender マテリアルを分割します。
 prefab の Renderer は、そのメッシュを持つモデルにだけ当てはめます（別モデルの同名オブジェクトには使いません）。
-同じモデルを使う prefab が複数ある場合（色違いなど）は、選択ダイアログのそのモデルの行で prefab を選べます。
-既定は「すべてを統合し、パス順で先のものを優先」です。
+読み込む単位が Models のとき、同じモデルを使う prefab が複数ある場合（色違いなど）は、すべてを統合し、パス順で先のものを優先します。
+特定の prefab の割り当てを使うには、読み込む単位 Prefabs でその prefab を読み込みます。
 Prefab Variant やネストされた prefab のマテリアルの上書きは、元がパッケージ内の prefab なら読みます。
 モデル（FBX）を直接置いたものへの上書きはまだ読まず、警告に出します。
 prefab のマテリアルの並びは Unity のサブメッシュ順（メッシュのポリゴンで最初に使われた順）で、Blender のスロット順と
 異なることがあるため、その順でスロットに対応付けます。
 
-ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます）。
+ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます。
+選択ダイアログは出さず、読み込む単位 Models ですべてのモデルを読み込みます）。
 
 ### マテリアルの対応方針
 
@@ -142,7 +168,7 @@ blender -b --factory-startup --python tests/integration_import.py
 ```
 
 検証用データ（unitypackage、展開物、期待値）は `_local/` に置きます。このディレクトリは gitignore 対象で、
-コミットするファイルに検証用アセット固有の名称や数値を書かないことをルールにしています。
+検証に使ったアセットのデータはリポジトリに含めません（コミットするテスト用データは合成データだけです）。
 書式は `tests/expectations.schema.md` を参照してください。
 
 設計の詳細は [DESIGN.md](DESIGN.md) を参照してください。

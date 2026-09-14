@@ -7,7 +7,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 ## 0. サンプル調査で分かった前提
 
-手元にある VRChat 向けアバターの unitypackage 1 種を調査した。配布物のためリポジトリには含めず、`_local/`（gitignore 済み）に置いて開発・検証に使う。本書ではアセット名を伏せ、マテリアル名などは一般化して記載する。
+手元にある VRChat 向けアバターの unitypackage 1 種を調査した。配布物のためリポジトリには含めず、`_local/`（gitignore 済み）に置いて開発・検証に使う。2026-09-14 まではアセット名を伏せる方針だったため、それ以前に書いた箇所はアセット名を伏せ、マテリアル名などを一般化して記載している。
 
 設計の根拠となる事実。実装時はこの構造を前提にしつつ、他パッケージでの揺れに耐えるようにする。
 
@@ -46,7 +46,36 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 1〜3 は「FBX マテリアル 1 つに .mat を 1 つ」決める順序。Unity で実際に表示されるのは Renderer の `m_Materials` で、externalObjects は FBX を置いたときの既定値にすぎないので、prefab に割り当てがあれば下記のスロット単位の分割で 1・2 の結果より優先する。
 
-**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。インポート時は、モデルごとに「そのモデルを使う prefab」だけを候補にし、既定は候補をパス順に先勝ちで統合する。候補が複数あるモデル（色違いなど）はモデル選択ダイアログの行で prefab を選べる（`ImportOptions.prefabs` = {モデル GUID: prefab の pathname}）。
+**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。
+
+**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（レポートの method は `shared`。`replaced` と同じく件数からは除く）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。
+
+**読み込む単位 Scenes**（§3.3、Issue #48）: `core/hierarchy.py` で .unity を展開し、モデルの配置を求めて読み込む。
+
+- 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの key は prefab と同じく「PrefabInstance の fileID XOR 元の key」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
+- 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab）は、Transform を直接持つアセットでの最上位の祖先をモデルのルートとみなし、同じ祖先・同じモデルの Renderer をまとめる。
+- 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
+- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は Prefabs と同じく共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
+- 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+
+**シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
+
+ライトの強さは推測で決めず、Unity 6（Built-in と URP 17.6、Linear）と Blender 5.2 EEVEE で、環境光を切って白い拡散面をライトの真下から見た画素値（線形 HDR）を測って合わせた（Unity は batchmode でも `-nographics` を付けなければ GPU で描画でき、RenderTexture から読める。Blender は `light_threshold = 0`、`use_soft_falloff = False` にして測る）。
+
+| | 平行光源の画素 | 点光源・スポットの画素（d: 距離、R: Range） |
+|---|---|---|
+| Unity Built-in | I^2.2（強さはガンマ空間） | I^2.2 / (1 + 25·d²/R²) |
+| Unity URP | I（線形） | I / d² × (1 − (d/R)⁴)² |
+| Blender EEVEE | strength / π | P / (4π²·d²) |
+
+- 平行光源: Sun strength = π·I（Built-in は π·I^2.2）。色は sRGB → 線形、色温度を使っていれば `use_temperature` / `temperature`
+- URP の点光源・スポット: P = 4π²·I で距離によらず一致し、Range は EEVEE の `cutoff_distance` に入れる
+- Built-in の点光源・スポット: 逆二乗ではないので全距離では合わない。d/R ∈ [0.2, 1] で比の対数の最大を最小にする d = 0.3R で合わせ、P = 4π²·I^2.2·(0.3R)² / 3.25（その範囲で 1.4 倍以内）
+- スポット: `spot_size` = 外側の角度、`spot_blend` = 1 − 内側 / 外側（Built-in は内側の角度を使わないが同じ式で近似）
+- 面光源: Unity ではベイク専用で測れない。Blender の面光源は近くで 画素 ≈ P / (面積·π) なので、P = I·面積·π（近似。警告に出す）
+- HDRP: 物理単位（lux / lumen）を 683 lm/W で換算する近似（未計測。警告に出す）
+- パイプラインはマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）で決める
+- カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
 **Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
 
@@ -109,7 +138,7 @@ Material:
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
 
 ### 読み込まない
-- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層、アイコン画像、`preview.png`。
+- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
 
 ### マテリアルの対応方針
 Unity と 1:1 は不可能なので、**「Unity マテリアル → シェーダー非依存の中間表現（NormalizedMaterial）→ Blender ノード」** の 2 段変換にし、シェーダーごとの差は「プロファイル」に閉じ込める（§4.5）。
@@ -126,10 +155,10 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
  ファイルブラウザ（右側にオプション）      ← §3.1   オプションのポップアップ（invoke_props_dialog）
         │  [Import]                                    │  [Import]
         ▼                                              ▼
- パッケージ走査（索引作成、モデル候補列挙）
+ パッケージ走査（索引作成、シーン・prefab・モデルの候補列挙）
         │
-        ├─ モデルが 1 つ & 「毎回確認」OFF → そのまま続行
-        └─ それ以外 → モデル選択ダイアログ    ← §3.3
+        ├─ 読み込める候補が 1 つ以下、または Selection dialog が All / First → そのまま続行（Models 単位）
+        └─ それ以外 → 選択ダイアログ（読み込む単位と候補を選ぶ）    ← §3.3
         │
         ▼
  FBX インポート → マテリアル解決 → テクスチャ展開 → ノード生成
@@ -146,10 +175,14 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 
 ### 3.1 インポートオプション（ファイルブラウザ右パネル）
 
+常に表示するのは Material mode と Scale だけで、残りは Model / Materials / Textures の折りたたみ（`layout.panel`、既定で閉じる）に入れる。
+何を読み込むかは §3.3 のダイアログで、パッケージの中身を見てから選ぶ。同梱 .blend を ON にしているときの警告は、パネルの開閉によらず表示する。
+
 **Model**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Models to import | Enum: `All` / `Ask` / `First only` = `Ask` | `Ask` は複数ある時だけ §3.3 のダイアログを出す |
+| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All |
+| Arrange prefabs（Preferences のみ） | Enum: `Side by Side` / `Stack at Origin` = `Side by Side` | §3.3 の並べ方の既定。ダイアログで選んだ値がここに保存される |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | Use FBX file scale / axis | FBX インポーターのパススルー | 既定は Blender FBX インポーターと同じ |
@@ -213,30 +246,44 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 - `material.diffuse_color` にベースカラー（ソリッド表示用）
 - ノードはフレームでグループ化し、位置を整えて読みやすくする
 
-### 3.3 モデル選択ダイアログ（`invoke_props_dialog`）
+### 3.3 選択ダイアログ（`invoke_props_dialog`、Issue #47）
 
-「Ask」指定で、パッケージ内に複数モデルがある時、または同じモデルを使う prefab が複数あるモデルがある時に表示。そのようなモデルの行には、マテリアル割り当てに使う prefab のドロップダウン（既定は「All (first wins)」）を出す。
+「Ask」指定で、読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時に表示する。上部で**読み込む単位**を切り替え、一覧にはその単位の候補だけを出す。単位は排他で、1 回のインポートでは 1 つの単位だけを読む（同じモデルの二重読み込みや、マテリアルの割り当て元の食い違いを構造上起こさない）。
 
 ```
-┌ Import from Avatar_v1.0.unitypackage ──────────────────────────────┐
-│ Models                                                              │
-│  [x] Assets/Avatar/FBX/Avatar_v1.0.fbx   12.3 MB  5 mat [All (first…▾]│
-│  [ ] Assets/Avatar/Prefabs/Avatar_LOD.fbx ...                       │
-│                                                                     │
-│ Materials: 7 found (7 resolved, 0 unresolved)                       │
-│ Textures : 20 referenced, 3 missing from package                    │
-│ Prefab: choose per model which prefab's material assignments to use │
-│                                                    [Cancel] [Import]│
-└─────────────────────────────────────────────────────────────────────┘
+┌ Import from Unitypackage ──────────────────────────────────────────┐
+│ ▣ Example.unitypackage                                             │
+│  [ Scenes (1)     |  Prefabs (3)          |  Models (1)         ]  │
+│  [x] Assets/…/Body_Blue.prefab                    1 model · 2 mat  │
+│  [x] Assets/…/Body_Red.prefab                     1 model · 2 mat  │
+│  [ ] Assets/…/Effect.prefab                    no mesh in package  │ ← 灰色
+│  [ All ]  [ None ]                                                 │
+│  Arrange  [ Side by Side | Stack at Origin ]                       │ ← Prefabs のみ
+│  Materials: 13 found in package                                    │
+│  Textures: 20 referenced, 3 missing from package                   │
+│                                                  [Cancel] [Import] │
+└────────────────────────────────────────────────────────────────────┘
 ```
-`UIList` + `CollectionProperty`。行に「マッピング解決数」を出して、読み込む前に問題が見える状態にする。prefab のドロップダウンの識別子は候補の番号にし、パッケージ由来の pathname は表示用に `sanitize_display` を通す。
+
+| 単位 | 候補 | 読み込み方 |
+|---|---|---|
+| Scenes | パッケージ内のすべてのシーン（pathname 順） | シーンごとにパッケージのコレクションの子コレクションを作り（`unity_scene` / `unity_scene_guid`）、シーンに置かれたモデルだけを配置どおりに読み込む（§0.3 の「読み込む単位 Scenes」） |
+| Prefabs | パッケージ内のすべての prefab（pathname 順） | prefab ごとにパッケージのコレクションの子コレクションを作り（`unity_prefab` / `unity_prefab_guid`）、Renderer が使うモデルをその prefab の表だけで読み込む（§0.3 の「読み込む単位 Prefabs」） |
+| Models | パッケージ内のすべてのモデル | 従来どおり。prefab の表は、そのモデルを使う prefab をパス順に先勝ちで統合したもの |
+
+- 候補は推測で外さない。読み込めない候補（Renderer がパッケージ内のモデルを使っていない prefab、使うモデルがすべて読み込めない prefab、非対応形式や同梱 .blend OFF のモデル、パッケージ内のモデルを置いていないシーン、読めないシーン）は灰色にして理由を出す（`core/units.py`）。候補が 1 つも無い単位はタブに出さない。
+- 既定の単位は、前回選んだ単位（Preferences の `last_import_unit`）に読み込める候補があればそれ、無ければ Prefabs → Models → Scenes の順。
+- **並べ方**（Prefabs で 2 つ以上選んだとき有効）: `Side by Side` は prefab ごとのコレクションのワールド座標の外形を求め、1 つ目を動かさずに +X へ並べる。5 つ以上は ceil(√n) 列の格子に折り返し、次の行を +Y に置く。行の中では手前側（Y の最小）を揃える。間隔は最大の幅・奥行きの 25%（最小 0.1 m）（`core/arrange.py`）。動かすのは親を持たないオブジェクト。`Stack at Origin` は動かさない。行を出し入れするとダイアログの高さと Import ボタンの位置が変わるので、Prefabs では常に表示し、選択が 1 つ以下なら淡色にする。
+- 読み込む単位 Prefabs では prefab 内の配置（子オブジェクトの位置など）は再現せず、prefab のモデルはすべてそのコレクションの原点に置く。配置を再現するのは Scenes だけ。
+- 一覧は `UIList` + `CollectionProperty`（WindowManager 側。All / None ボタンから書き換えるため）。表示中の単位への絞り込みは `filter_items` で行う（名前での絞り込みも併用）。単位の enum は候補数入りのラベルを動的 items で出すので、文字列をモジュールで保持する。パッケージ由来の pathname は表示用に `sanitize_display` を通し、選択結果は GUID で持つ。
+- スクリプトからは、オペレーターの非表示プロパティ `unit`（`SCENES` / `PREFABS` / `MODELS`）と `arrange` で指定できる。ダイアログを出さない場合は、その単位の読み込める候補をすべて読む。
 
 ### 3.4 完了レポート
 
 - **Info バー**: `Imported 20 objects, 7 materials (7 mapped), 12 textures. 2 warning(s) — see the system console`
-- **3D View > N パネル > "UPI" タブ**: 直近のインポートのレポート（読み取り専用）
+- **3D View > N パネル > "UPI" タブ**: 直近のインポートのレポート（読み取り専用）。読み込む単位 Prefabs なら読み込んだ prefab 数も出す
 - オブジェクト名・マテリアル名・パス・例外文はパッケージ由来の文字列なので、コンソール（`as_text`）・N パネル・
-  モデル選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
+  選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
   `\x1b` のような可視表現に置き換える（ANSI エスケープで表示を乱せないようにする）。
   - Objects / Materials / Textures の一覧
   - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、PSD などの非対応画像形式
@@ -272,7 +319,7 @@ unitypackage_loader/
 ├─ __init__.py                   # register / unregister、メニュー登録
 ├─ operators/
 │   ├─ import_package.py         # IMPORT_SCENE_OT_unitypackage（ImportHelper）
-│   └─ select_models.py          # UNITYPKG_OT_select_models（invoke_props_dialog）
+│   └─ select_models.py          # IMPORT_SCENE_OT_unitypackage_select（読み込む単位と候補を選ぶ invoke_props_dialog）
 ├─ ui/
 │   ├─ panel_report.py           # N パネル
 │   └─ preferences.py
@@ -283,6 +330,11 @@ unitypackage_loader/
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
+│   ├─ prefab.py                 # prefab の Renderer → モデルごとのマテリアル表（Variant / ネスト込み）
+│   ├─ units.py                  # 読み込む単位（Prefabs / Models）の候補と既定値
+│   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
+│   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
+│   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
@@ -553,6 +605,11 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_unity_binary.py`: `tests/unity_binary_writer.py`（手書きの SerializedFile 生成器）で作ったバイナリの .mat / prefab を読み、同じ内容の YAML と結果が一致すること、エンディアン・version 22 の違い、切り詰めやバイト破壊で `ValueError` 以外の例外が出ないことを確認。合成パッケージにもバイナリの .mat と prefab を入れて統合テストで割り当てを確認する。
 - `tests/test_unity_yaml.py`: リポジトリ同梱の **合成フィクスチャ**（手書きの最小 .mat / .meta）でパーサーを検証。`_BaseMap` の GUID、`_Cutoff`、`_Color` を assert。加えて `_local/` にサンプルがあれば、その全 .mat / .meta をパースして例外ゼロを確認（無ければ skip）。
 - `tests/test_mapping.py`: externalObjects の `.001` 解決、名前一致フォールバック。
+- `tests/test_units.py` / `tests/test_arrange.py`: 読み込む単位の候補（読み込めない prefab を理由付きで残す、既定の単位）と、並べ方の計算（1 列 / 格子、間隔、外形の無い単位）。
+- `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
+- `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
+- 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。
+- 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - 見た目の確認は、`_local/` に置いた参考 .blend と並べて比較する手動項目とする。
 
@@ -570,7 +627,7 @@ def run(ctx, filepath, opts) -> Report:
 
 ## 6. 既知の制約・判断事項
 
-- **検証用データはリポジトリに含めない。** unitypackage・展開物・参考 .blend・期待値 JSON は全て `_local/` 配下に置き、コミットするファイル（ドキュメント、テスト、コメント）にアセット固有の名称や数値を書かない。
+- **検証用データはリポジトリに含めない。** unitypackage・展開物・参考 .blend・実パッケージ用の期待値 JSON は全て `_local/` 配下に置く。コミットするテスト用データは合成データだけ。アセット名などをドキュメントやコミットに書くのはかまわない（2026-09-14 に方針を変更）。
 
 - **VRM は再実装しない**。VRM add-on が MToon・Humanoid・スプリングボーンを再現するので、入っていればそちらに委譲する。add-on 無しの環境向けの glTF フォールバックは、既存の glTF 経路と `.mat` 再構築の組み合わせに留める。
 - **Unity のライティング再現はしない**。lilToon の影色・MatCap・リムは Phase 3 まではカスタムプロパティに保存するだけ。

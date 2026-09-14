@@ -7,7 +7,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 
 - Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
 - What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
-- What is not imported: shader source code, C# scripts, animations, prefab hierarchies, Expression menus, etc.
+- What is not imported: shader source code, C# scripts, animations, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
 ## Installation
@@ -49,14 +49,16 @@ Load the generated zip via Preferences > Get Extensions > "Install from Disk".
 - **Drag and drop**: drop a `.unitypackage` onto the 3D Viewport to open a popup with import options. Multiple files can be dropped at once.
 - **Menu**: choose File > Import > Unitypackage (.unitypackage), pick the file in the file browser, adjust the options on the right as needed, and click Import.
 
+The options show Material Mode and Scale; everything else is folded into the Model / Materials / Textures sections.
+
 | Section | Option | Description |
 |---|---|---|
-| Model | Models | `Ask` (shows a selection dialog when there are multiple models) / `All` / `First Only` |
-| | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
+| (always shown) | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
+| | Scale | Scale passed to the model importer |
+| Model | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
-| Materials | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
-| | Force Opaque | Ignore Unity's Cutout / Transparent settings |
+| Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |
 | | Backface Culling / Normal Maps / Emission | Whether to apply each element |
 | | Outlines (Solidify) | Add a Solidify outline from Unity's outline color and width (converted with Width Scale) |
 | | Reuse Existing Materials | Reuse a material with the same name if one already exists instead of rebuilding it |
@@ -70,7 +72,35 @@ A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) 
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
 material, textures used, and warnings). A Collection named after the package is created and the objects are placed in it.
 
-Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer).
+### Choosing what to import
+
+When the package has more than one scene, prefab or model to choose from, a selection dialog opens after the options.
+Choose the unit at the top, then tick what to import in the list:
+
+- **Scenes**: imports what a scene (`.unity`) places, at the positions, rotations and scales set in Unity. Each scene
+  gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.
+  Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
+  Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
+  measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
+  Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
+  warnings. UI, terrain and meshes that are not in the package (such as Unity's built-in primitives) are not imported
+  and are reported as warnings. For a model file (FBX) placed directly, only the position of its root is read;
+  changes to objects inside it are counted in the warnings.
+- **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
+  Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
+  them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
+  `Stack at Origin`.
+- **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
+  [Matching meshes to materials](#matching-meshes-to-materials).
+
+One import uses one unit, so the same model is not imported twice by accident. Items that cannot be imported stay in
+the list, greyed out with the reason (for example `no mesh in package` or `.blend import disabled`). The dialog
+remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions of its
+child objects) is not reproduced: every model of a prefab is placed at the origin of the prefab's Collection. Import a
+scene that places the prefab to get the layout.
+
+Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer), including whether the
+selection dialog opens (`Selection Dialog`: `Ask` / `All Models` / `First Model Only`) and `Arrange Prefabs`.
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
 "Max Extract Size" (default 8 GiB, 0 = no limit) refuses an import before writing anything when the files to extract
 from one package would exceed it or the free space of the destination.
@@ -109,14 +139,15 @@ What Unity actually renders is the material set on a prefab's Renderer, so when 
 precedence over steps 1 and 2. For packages where the FBX shares a small number of materials and the prefab assigns
 a different .mat per part on the Unity side, Blender materials are split per slot following the prefab's assignments.
 A prefab's Renderers are applied only to the model whose mesh they reference, so objects with the same name in
-another model are not affected. When several prefabs use the same model (for example, color variants), the
-selection dialog shows a prefab dropdown on that model's row; the default merges them, with the first one by path
-taking precedence. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
+another model are not affected. With the Models unit, when several prefabs use the same model (for example, color
+variants), their assignments are merged, with the first one by path taking precedence; to use a specific prefab's
+assignments, import that prefab with the Prefabs unit. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
 the package; overrides applied directly to a model (FBX) instance are not read yet and are reported as a warning.
 A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
 which can differ from Blender's slot order, so the entries are matched to slots in that order.
 
-Selecting multiple `.unitypackage` files in the file browser imports them in one batch (one Collection per package).
+Selecting multiple `.unitypackage` files in the file browser imports them in one batch (one Collection per package,
+every model with the Models unit, without the selection dialog).
 
 ### Material conversion policy
 
@@ -147,7 +178,7 @@ blender -b --factory-startup --python tests/integration_import.py
 ```
 
 Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
-and the rule is that committed files must not contain names or numbers specific to the test assets.
+and the data of the assets used for testing is never committed (the committed test data is synthetic only).
 See `tests/expectations.schema.md` for the file format.
 
 See [DESIGN.md](DESIGN.md) for design details.
