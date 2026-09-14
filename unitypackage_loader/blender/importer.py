@@ -538,17 +538,12 @@ class _SceneTemplate:
 
     objects: list[bpy.types.Object]
     basis: dict[bpy.types.Object, Matrix]
-    worlds: dict[bpy.types.Object, Matrix]
     hide_render: dict[bpy.types.Object, bool]
 
     @classmethod
     def capture(cls, objects: list[bpy.types.Object]) -> _SceneTemplate:
-        return cls(
-            list(objects),
-            {o: o.matrix_basis.copy() for o in objects},
-            {o: o.matrix_world.copy() for o in objects},
-            {o: o.hide_render for o in objects},
-        )
+        # matrix_world は depsgraph の評価が要るので持たない（数千回の読み込みでシーン全体を評価し直すと重い）
+        return cls(list(objects), {o: o.matrix_basis.copy() for o in objects}, {o: o.hide_render for o in objects})
 
 
 def _scene_empty(hierarchy: Hierarchy, key: int, collection, empties: dict[int, bpy.types.Object], active: dict[int, bool]):
@@ -610,30 +605,33 @@ def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.O
     return list(mapping.values())
 
 
-def _apply_offsets(template: _SceneTemplate, objects, offsets, scale: float, view_layer) -> int:
-    """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。"""
-    if not offsets:
-        return 0
-    pairs = list(zip(template.objects, objects))
+def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> int:
+    """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
 
+    ``root_world`` は配置のルートの Unity での行列。置いた直後のオブジェクトの行列は「ルートの行列 · globalScale ·
+    原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
+    """
     def depth(obj) -> int:
         count = 0
         while obj.parent is not None and count < 1000:
             obj, count = obj.parent, count + 1
         return count
 
+    targets = [o for o in objects if strip_numeric_suffix(o.name) in offsets]
+    if not targets:
+        return 0
+    view_layer.update()
     scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
+    to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
+    origins = {o: to_origin @ o.matrix_world for o in targets}  # 動かす前にまとめて求める
     skipped = 0
-    for original, obj in sorted(pairs, key=lambda pair: depth(pair[1])):
-        offset = offsets.get(strip_numeric_suffix(obj.name))
-        if offset is None:
-            continue
+    for obj in sorted(targets, key=depth):
         deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
         if deformed or obj.type == "ARMATURE":
             skipped += 1
             continue
         view_layer.update()
-        obj.matrix_world = Matrix(unity_to_blender(offset)) @ scale_matrix @ template.worlds[original]
+        obj.matrix_world = Matrix(unity_to_blender(offsets[strip_numeric_suffix(obj.name)])) @ scale_matrix @ origins[obj]
     return skipped
 
 
@@ -758,7 +756,8 @@ def run_import(
         reimport = model.guid in imported_models
         imported_models.add(model.guid)
         before = _snapshot()
-        existing_materials = {m.name: m for m in bpy.data.materials}
+        # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
+        existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
         delegated = _import_model(context, paths[model.guid], model, opts, target, report)
         new = _new_since(before)
         _adopt_into_collection(new, scene, target)
@@ -869,7 +868,7 @@ def run_import(
 
     model_by_guid = {m.guid: m for m in prepared.models}
 
-    def import_scene(scene_summary: SceneSummary) -> None:
+    def import_scene(scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
         target = bpy.data.collections.new(scene_summary.name)
@@ -886,7 +885,11 @@ def run_import(
         empties: dict[int, bpy.types.Object] = {}
         templates: dict[tuple, _SceneTemplate] = {}
         skipped_offsets = 0
-        for placement in scene_summary.placements:
+        scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
+        count = len(scene_summary.placements)
+        for index, placement in enumerate(scene_summary.placements):
+            if index % 25 == 0:
+                step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {scene_summary.name}")
             summary = supported_models.get(placement.model_guid)
             if summary is None:
                 skipped = model_by_guid.get(placement.model_guid)
@@ -898,18 +901,20 @@ def run_import(
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
                 for name, r in placement.renderers.items()
             }
-            key = (placement.model_guid, tuple(sorted((name, tuple(r.materials)) for name, r in placement.renderers.items())))
+            key = placement.signature()
             template = templates.get(key)
             if template is None:
                 objects = import_model(summary, table, target)
-                view_layer.update()
                 template = templates[key] = _SceneTemplate.capture(objects)
             else:
                 objects = _duplicate_objects(template, target)
                 report.objects.extend(o.name for o in objects)
-            scale = _model_info(summary.entry, report.warn).global_scale
+            if summary.guid not in scales:
+                scales[summary.guid] = _model_info(summary.entry, report.warn).global_scale
+            scale = scales[summary.guid]
             _attach_to_empty(objects, root, scale)
-            skipped_offsets += _apply_offsets(template, objects, placement.offsets, scale, view_layer)
+            if placement.offsets:
+                skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale, view_layer)
             hidden = {name for name, r in placement.renderers.items() if not r.visible}
             for obj in objects:
                 if not placement.active or strip_numeric_suffix(obj.name) in hidden:
@@ -964,8 +969,7 @@ def run_import(
                 import_model(summary, prefab_table, target)
                 done += 1
         for scene_summary in scenes:
-            step(0.55 + 0.4 * done / max(total, 1), f"Importing scene {scene_summary.name}")
-            import_scene(scene_summary)
+            import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
             done += 1
         if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
             _arrange_collections(context, prefab_collections)

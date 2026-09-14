@@ -63,6 +63,12 @@ _TRS_PATH = re.compile(r"m_Local(Position|Rotation|Scale)\.([xyzw])")
 _TRS_FIELDS = {"Position": "position", "Rotation": "rotation", "Scale": "scale"}
 _AXES = {"x": 0, "y": 1, "z": 2, "w": 3}
 _CLOSE = 1e-4  # 行列が同じとみなす差（ルートの行列と、中のノードから逆算した行列の比較）
+_DUPLICATE_SUFFIX = re.compile(r" \(\d+\)$")  # Unity のエディタで複製したときに付く「 (12)」
+
+
+def unity_base_name(name: str) -> str:
+    """``Rock (12)`` → ``Rock``。Unity が複製で付ける番号を外す（モデルのオブジェクト名と照合するため）。"""
+    return _DUPLICATE_SUFFIX.sub("", name)
 
 
 class HierarchyError(ValueError):
@@ -549,8 +555,13 @@ class ModelPlacement:
     root: int  # モデルのルートとみなした Node の key
     world: Mat4  # Unity でのモデルのルートのワールド行列
     active: bool
-    renderers: dict[str, PlacedRenderer] = field(default_factory=dict)  # GameObject 名 → Renderer（展開した Renderer のみ）
+    # GameObject 名（Unity の複製番号「 (N)」を外したもの）→ Renderer（展開した Renderer のみ）
+    renderers: dict[str, PlacedRenderer] = field(default_factory=dict)
     offsets: dict[str, Mat4] = field(default_factory=dict)  # 中のノードが動いた Renderer の名前 → そこから逆算したルートの行列
+
+    def signature(self) -> tuple:
+        """読み込み結果を使い回せるかの判定に使う値（モデルと、名前ごとのマテリアル）。"""
+        return (self.model_guid, tuple(sorted((name, tuple(r.materials)) for name, r in self.renderers.items())))
 
 
 def _close(a: Mat4, b: Mat4) -> bool:
@@ -577,16 +588,17 @@ def placements(h: Hierarchy, model_guids: Iterable[str]) -> list[ModelPlacement]
             placement = ModelPlacement(renderer.mesh_guid, scope, worlds[scope], active[scope])
             by_scope[(scope, renderer.mesh_guid)] = placement
             result.append(placement)
-        if node.name in placement.renderers:
+        name = unity_base_name(node.name)
+        if name in placement.renderers:
             continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
-        placement.renderers[node.name] = PlacedRenderer(
-            node.name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled
+        placement.renderers[name] = PlacedRenderer(
+            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled
         )
         inverse = inverse_affine(node.scope_matrix)
         if inverse is not None and key != scope:
             implied = multiply(worlds[key], inverse)
             if not _close(implied, placement.world):
-                placement.offsets[node.name] = implied
+                placement.offsets[name] = implied
     return result
 
 

@@ -239,6 +239,34 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(contents.missing_sources, 1)
 
 
+class DuplicateNameTest(unittest.TestCase):
+    """Unity のエディタで複製したオブジェクト（「Rock (12)」）は、名前の番号を外して扱う。"""
+
+    SCENE = HEADER + "".join([
+        game_object(10, "Rock"),
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, MODEL, MAT_A),
+        game_object(20, "Rock (1)"),
+        transform(21, 20, pos=(2, 0, 0)),
+        mesh_renderer(22, 23, 20, MODEL, MAT_A),
+        game_object(30, "Rock (12)"),
+        transform(31, 30, pos=(4, 0, 0)),
+        mesh_renderer(32, 33, 30, MODEL, MAT_B),
+        game_object(40, "Rock (Old)"),
+        transform(41, 40, pos=(6, 0, 0)),
+        mesh_renderer(42, 43, 40, MODEL, MAT_A),
+    ])
+
+    def test_numbers_are_removed_from_renderer_names(self):
+        found = placements(expander().expand_raw(parse_asset(self.SCENE)), [MODEL])
+        self.assertEqual([list(p.renderers) for p in found], [["Rock"], ["Rock"], ["Rock"], ["Rock (Old)"]])
+
+    def test_same_materials_share_signature(self):
+        found = placements(expander().expand_raw(parse_asset(self.SCENE)), [MODEL])
+        self.assertEqual(found[0].signature(), found[1].signature())
+        self.assertNotEqual(found[0].signature(), found[2].signature())  # マテリアルが違う
+
+
 class RobustnessTest(unittest.TestCase):
     def test_self_referencing_prefab_stops(self):
         h = expander().expand_asset(LOOP)
