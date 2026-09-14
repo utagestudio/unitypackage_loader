@@ -25,6 +25,7 @@ MODELS_ITEMS = (
     ("FIRST", "First Model Only", "Import only the first model file found, without asking"),
 )
 UNIT_ITEMS = (
+    ("SCENES", "Scenes", "Import scenes with prefabs and models placed as in Unity; each scene gets its own collection"),
     ("PREFABS", "Prefabs", "Import prefabs with their own material assignments; each prefab gets its own collection"),
     ("MODELS", "Models", "Import model files (FBX etc.) as they are"),
 )

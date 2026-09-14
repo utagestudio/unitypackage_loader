@@ -34,6 +34,7 @@ class MaterialReport:
 @dataclass
 class ImportReport:
     package: str
+    scenes: list[str] = field(default_factory=list)  # 読み込む単位 Scenes で読み込んだシーンの pathname
     prefabs: list[str] = field(default_factory=list)  # 読み込む単位 Prefabs で読み込んだ prefab の pathname
     models: list[str] = field(default_factory=list)
     objects: list[str] = field(default_factory=list)
@@ -78,6 +79,9 @@ class ImportReport:
 
     def as_text(self) -> str:
         lines = [f"[Unitypackage Importer] {self.package}", f"  extract root: {self.extract_root}"]
+        if self.scenes:
+            lines.append(f"  scenes ({len(self.scenes)}):")
+            lines += [f"    - {s}" for s in self.scenes]
         if self.prefabs:
             lines.append(f"  prefabs ({len(self.prefabs)}):")
             lines += [f"    - {p}" for p in self.prefabs]
