@@ -859,6 +859,9 @@ def run_import(
                         for mrep in report.materials:
                             if mrep.blender_name == bmat.name and mrep.method != "replaced":
                                 mrep.method = "replaced"
+                        # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
+                        for guid in [g for g, m in built_by_guid.items() if m == bmat]:
+                            del built_by_guid[guid]
                         bpy.data.materials.remove(bmat)
         if opts.outlines:
             added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)

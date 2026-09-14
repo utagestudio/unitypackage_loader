@@ -12,7 +12,9 @@
     { "top": "C", "object": "Spike", "tip": [-1.4588, 1.0608, 1.8000], "mat_files": ["ProbeMat.mat"] },
     { "top": "C", "object": "Child", "tip": [0.5821, -44.9414, 36.7786], "mat_files": ["ProbeRed.mat"] },
     { "top": "C", "object": "Skinned", "tip": [-0.7000, 5.6000, 2.6000] },
-    { "top": "Hidden", "object": "Spike", "hidden": true }
+    { "top": "Hidden", "object": "Spike", "hidden": true },
+    { "top": "AllRed", "object": "Spike", "hidden": false, "mat_files": ["ProbeRed.mat"] },
+    { "top": "AllRed", "object": "Child", "mat_files": ["ProbeRed.mat"] }
   ],
   "shared_meshes": [
     { "objects": [{ "top": "A", "object": "Spike" }, { "top": "Holder", "object": "Spike" }, { "top": "Hidden", "object": "Spike" }], "shared": true },

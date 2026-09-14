@@ -161,26 +161,33 @@ def main() -> None:
     model = add(model_path, fbx.read_bytes(), model_meta(guid_of(model_path), {"ProbeMat": mats["ProbeMat"]}))
 
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
+    def unpacked_prefab(name, mat_guid):
+        return (HEADER + "".join([
+            game_object(100, name),
+            transform(101, 100),
+            game_object(200, "Group"),
+            transform(201, 200, father=101, pos=(0, 0, -1), rot=(-0.5735765, 0, 0, 0.819152), scale=(100, 99.99999, 99.99999)),
+            game_object(300, "Child"),
+            transform(301, 300, father=201, pos=(0, 0, 0.0050000004), rot=(0, -0.13052621, 0, 0.9914449), scale=(0.5, 0.50000006, 0.50000006)),
+            mesh_renderer(302, 303, 300, model, mat_guid),
+            game_object(400, "Spike"),
+            transform(401, 400, father=101, pos=(-0.5, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100)),
+            mesh_renderer(402, 403, 400, model, mat_guid),
+            game_object(500, "Armature"),
+            transform(501, 500, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
+            game_object(600, "Hips"),
+            transform(601, 600, father=501, rot=(0.7071068, 0, 0, 0.7071068)),
+            game_object(700, "Skinned"),
+            transform(701, 700, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
+            skinned_renderer(702, 700, model, mat_guid),
+        ])).encode()
+
     unpacked_path = "Assets/Synthetic/Prefabs/Unpacked.prefab"
-    unpacked = add(unpacked_path, (HEADER + "".join([
-        game_object(100, "Unpacked"),
-        transform(101, 100),
-        game_object(200, "Group"),
-        transform(201, 200, father=101, pos=(0, 0, -1), rot=(-0.5735765, 0, 0, 0.819152), scale=(100, 99.99999, 99.99999)),
-        game_object(300, "Child"),
-        transform(301, 300, father=201, pos=(0, 0, 0.0050000004), rot=(0, -0.13052621, 0, 0.9914449), scale=(0.5, 0.50000006, 0.50000006)),
-        mesh_renderer(302, 303, 300, model, mats["ProbeMat"]),
-        game_object(400, "Spike"),
-        transform(401, 400, father=101, pos=(-0.5, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100)),
-        mesh_renderer(402, 403, 400, model, mats["ProbeMat"]),
-        game_object(500, "Armature"),
-        transform(501, 500, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
-        game_object(600, "Hips"),
-        transform(601, 600, father=501, rot=(0.7071068, 0, 0, 0.7071068)),
-        game_object(700, "Skinned"),
-        transform(701, 700, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
-        skinned_renderer(702, 700, model, mats["ProbeMat"]),
-    ])).encode(), prefab_meta(unpacked_path))
+    unpacked = add(unpacked_path, unpacked_prefab("Unpacked", mats["ProbeMat"]), prefab_meta(unpacked_path))
+    # すべての Renderer が ProbeRed の色違い。シーンで最初に読み込ませ、FBX のマテリアル（ProbeMat）が差し替えで
+    # 使われなくなって削除された後に、同じモデルを読み直す配置（A 以降）で ProbeMat を組み直せることを確かめる
+    all_red_path = "Assets/Synthetic/Prefabs/AllRed.prefab"
+    all_red = add(all_red_path, unpacked_prefab("AllRed", mats["ProbeRed"]), prefab_meta(all_red_path))
 
     # FBX を中に置いた prefab
     nested_path = "Assets/Synthetic/Prefabs/Nested.prefab"
@@ -200,6 +207,7 @@ def main() -> None:
 
     scene_path = "Assets/Synthetic/Scenes/Probe.unity"
     add(scene_path, (HEADER + "".join([
+        instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
         instance(3000, nested, 0, [
             mod(11, nested, "m_LocalPosition.x", 1),
             mod(11, nested, "m_LocalPosition.y", 2),
