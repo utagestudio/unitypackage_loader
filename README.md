@@ -7,7 +7,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 
 - Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
 - What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
-- What is not imported: shader source code, C# scripts, animations, prefab hierarchies, Expression menus, etc.
+- What is not imported: shader source code, C# scripts, animations, lights and cameras, Expression menus, etc. Prefab hierarchies are reproduced only when a scene is imported (model placement and the GameObjects above it).
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
 ## Installation
@@ -74,9 +74,15 @@ material, textures used, and warnings). A Collection named after the package is 
 
 ### Choosing what to import
 
-When the package has more than one prefab or model to choose from, a selection dialog opens after the options.
+When the package has more than one scene, prefab or model to choose from, a selection dialog opens after the options.
 Choose the unit at the top, then tick what to import in the list:
 
+- **Scenes**: imports what a scene (`.unity`) places, at the positions, rotations and scales set in Unity. Each scene
+  gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.
+  Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
+  Lights, cameras, UI, terrain and meshes that are not in the package (such as Unity's built-in primitives) are not
+  imported and are reported as warnings. For a model file (FBX) placed directly, only the position of its root is read;
+  changes to objects inside it are counted in the warnings.
 - **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
   Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
   them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
@@ -86,8 +92,9 @@ Choose the unit at the top, then tick what to import in the list:
 
 One import uses one unit, so the same model is not imported twice by accident. Items that cannot be imported stay in
 the list, greyed out with the reason (for example `no mesh in package` or `.blend import disabled`). The dialog
-remembers the unit and the arrangement chosen last. The layout inside a prefab (positions of its child objects) is not
-reproduced yet: every model of a prefab is placed at the origin of the prefab's Collection.
+remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions of its
+child objects) is not reproduced: every model of a prefab is placed at the origin of the prefab's Collection. Import a
+scene that places the prefab to get the layout.
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer), including whether the
 selection dialog opens (`Selection Dialog`: `Ask` / `All Models` / `First Model Only`) and `Arrange Prefabs`.
@@ -168,7 +175,7 @@ blender -b --factory-startup --python tests/integration_import.py
 ```
 
 Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
-and the rule is that committed files must not contain names or numbers specific to the test assets.
+and the data of the assets used for testing is never committed (the committed test data is synthetic only).
 See `tests/expectations.schema.md` for the file format.
 
 See [DESIGN.md](DESIGN.md) for design details.
