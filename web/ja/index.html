@@ -73,6 +73,7 @@
     <a class="brand" href="#top"><img src="../assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
     <nav class="nav" aria-label="セクション">
       <a href="#uses">使い道</a>
+      <a href="#scenes">シーン</a>
       <a href="#support">対応</a>
       <a href="#install">導入</a>
       <a href="#faq">よくある質問</a>
@@ -148,19 +149,20 @@
         </ul>
         <div class="turn">
           <span class="arrow" aria-hidden="true"></span>
-          <p>その手間、<em>ドロップ 1 回</em>で終わります</p>
+          <p>ドロップしたら、<em>サクッと</em>インポート</p>
         </div>
         <div class="vs-after">
           <h3>このアドオンなら</h3>
           <ol class="vs-steps">
             <li><span><code>.unitypackage</code> を Blender に<wbr>ドラッグ＆ドロップ</span></li>
+            <li><span>読み込むものを選んで<wbr> Import</span></li>
           </ol>
           <p>ボーン、表情、テクスチャ、マテリアルがまとめて入ります。素体と衣装のように、複数のパッケージを一度にドロップすることもできます。</p>
         </div>
       </div>
       <figure class="shot demo">
-        <div class="frame"><video class="demo-video" src="../assets/demo.mp4" poster="../assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="操作の流れ。.unitypackage を Blender にドラッグし、ポップアップで Import を押すと、色の付いたアバターが表示される"></video></div>
-        <figcaption>実際の操作はこれだけ。パッケージをドロップして、ポップアップの Import を押します。</figcaption>
+        <div class="frame"><video class="demo-video" src="../assets/demo.mp4" poster="../assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="操作の流れ。.unitypackage を Blender にドラッグし、ポップアップで Import を押し、読み込むものを選ぶダイアログでも Import を押すと、色の付いたアバターが表示される"></video></div>
+        <figcaption>実際の操作はこれだけ。パッケージをドロップして、ポップアップと、読み込むものを選ぶダイアログで Import を押します。</figcaption>
       </figure>
     </div>
   </section>
@@ -190,11 +192,31 @@
           <img src="../assets/use-props.webp" width="1200" height="800" alt="Unity 向けの室内アセットを Blender でレンダリングした画像。木のテーブルに観葉植物、マグカップ、テレビのリモコンが置かれ、横でランプが灯っている" loading="lazy">
           <div class="body">
             <h3>小物やワールド素材にも</h3>
-            <p>Standard や URP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物も、Blender のシーン作りに使えます。</p>
+            <p>Standard や URP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物、ワールド素材も、<a href="#scenes">シーンの配置ごと</a>読み込めます。</p>
           </div>
         </article>
       </div>
       <p class="alt uses-note">改変や画像の公開ができるかどうかは、アセットごとの利用規約に従ってください。</p>
+    </div>
+  </section>
+
+  <section class="section" id="scenes">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">シーンの読み込み</span>
+        <h2>Unity のシーンを、<wbr>並べたそのままで</h2>
+        <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。</p>
+      </div>
+      <figure class="shot">
+        <div class="frame"><img src="../assets/scene-street.webp" width="1502" height="845" alt="Blender に読み込んだ日本の街並みのシーン。ビルや電柱が並ぶ画面の左下に、読み込むものを選ぶダイアログが開き、Scenes のタブで 1879 の配置を持つシーンにチェックが入っている" loading="lazy"></div>
+        <figcaption>街並みのアセットのシーンを読み込んだ画面に、読み込むものを選ぶダイアログ（パッケージをドロップしたあとに開きます）を重ねて表示しています。</figcaption>
+      </figure>
+      <div class="modes units">
+        <div class="mode default"><span class="name">Scenes</span><span>シーンに置かれたものを、配置ごと読み込みます。ライトとカメラも一緒に</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
+        <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
+      </div>
+      <p class="modes-note">ライトの明るさは EEVEE で近い見た目になるように換算しますが、Unity とまったく同じにはなりません。</p>
     </div>
   </section>
 
@@ -299,17 +321,11 @@
         </div>
         <div class="install-step">
           <h3><span class="num">2</span>パッケージをドロップ</h3>
-          <p><code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unitypackage を選びます。ポップアップで Import を押せば読み込みが始まります。複数のファイルを一度にドロップしても大丈夫です。</p>
-          <div class="shots">
-            <figure class="shot">
-              <div class="frame"><img src="../assets/shot-menu.webp" width="520" height="487" alt="Blender のファイル > インポートメニューに Unitypackage (.unitypackage) の項目が並んでいるところ" loading="lazy"></div>
-              <figcaption>ファイル &gt; インポート に項目が追加されます。ビューポートへのドラッグ＆ドロップでも同じオプションが開きます。</figcaption>
-            </figure>
-            <figure class="shot">
-              <div class="frame"><img src="../assets/shot-dialog.webp" width="620" height="1284" alt="モデル・マテリアル・テクスチャの節に分かれたインポートオプションのポップアップ" loading="lazy"></div>
-              <figcaption>オプションはモデル・マテリアル・テクスチャの 3 節。既定値はアドオンのプリファレンスで変えられます。</figcaption>
-            </figure>
-          </div>
+          <p><code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unitypackage を選びます。ポップアップで Import を押し、続くダイアログで読み込むもの（シーン・prefab・モデル）を選べば読み込みが始まります。複数のファイルを一度にドロップしても大丈夫です。</p>
+          <figure class="shot">
+            <div class="frame"><video class="demo-video" src="../assets/demo.mp4" poster="../assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="操作の流れ。.unitypackage を Blender にドラッグし、ポップアップで Import を押し、読み込むものを選ぶダイアログでも Import を押すと、色の付いたアバターが表示される"></video></div>
+            <figcaption>ポップアップの設定の既定値は、アドオンのプリファレンスで変えられます。</figcaption>
+          </figure>
         </div>
       </div>
     </div>
@@ -357,14 +373,14 @@
         <details>
           <summary>読み込まれないものはありますか？</summary>
           <div class="answer">
-            <p>目的は「Blender で正しく見えるモデル」なので、次のものは読み込みません。</p>
+            <p>目的は「Blender で正しく見えるモデルとシーン」なので、次のものは読み込みません。</p>
             <ul>
               <li>シェーダー本体（マテリアルの設定は変換します）</li>
               <li>C# スクリプトとコンポーネント</li>
               <li>アニメーションと Animator Controller</li>
-              <li>prefab の階層（マテリアルの割り当てを調べるためだけに使います）</li>
               <li>VRChat の Expression メニューとパラメーター</li>
               <li>PhysBone などの揺れもの、物理、コライダー（VRM の揺れものは、VRM アドオンが入っていれば再現されます）</li>
+              <li>シーンの地形（Terrain）や UI、ライトマップなどのベイクした結果</li>
             </ul>
           </div>
         </details>

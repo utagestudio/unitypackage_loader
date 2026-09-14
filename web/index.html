@@ -73,6 +73,7 @@
     <a class="brand" href="#top"><img src="assets/logo.svg" alt="" width="32" height="32">Unitypackage Importer</a>
     <nav class="nav" aria-label="Sections">
       <a href="#uses">Uses</a>
+      <a href="#scenes">Scenes</a>
       <a href="#support">Supported</a>
       <a href="#install">Install</a>
       <a href="#faq">FAQ</a>
@@ -148,19 +149,20 @@
         </ul>
         <div class="turn">
           <span class="arrow" aria-hidden="true"></span>
-          <p>All of that comes down to <em>one drop</em></p>
+          <p>Just drop it in and <em>it imports in a snap</em></p>
         </div>
         <div class="vs-after">
           <h3>With this add-on</h3>
           <ol class="vs-steps">
             <li><span>Drag the <code>.unitypackage</code> onto Blender</span></li>
+            <li><span>Pick what to import and press Import</span></li>
           </ol>
           <p>Bones, facial shape keys, textures and materials all come in together. Drop several packages at once, such as a base avatar and an outfit.</p>
         </div>
       </div>
       <figure class="shot demo">
-        <div class="frame"><video class="demo-video" src="assets/demo.mp4" poster="assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="The steps: dragging a .unitypackage onto Blender, pressing Import in the popup, and the avatar appearing with its colors"></video></div>
-        <figcaption>That is the whole operation: drop the package and press Import in the popup.</figcaption>
+        <div class="frame"><video class="demo-video" src="assets/demo.mp4" poster="assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="The steps: dragging a .unitypackage onto Blender, pressing Import in the popup, pressing Import again in the dialog for choosing what to import, and the avatar appearing with its colors"></video></div>
+        <figcaption>That is the whole operation: drop the package, then press Import in the popup and in the dialog for choosing what to import.</figcaption>
       </figure>
     </div>
   </section>
@@ -190,11 +192,31 @@
           <img src="assets/use-props.webp" width="1200" height="800" alt="An interior asset made for Unity, rendered in Blender: a potted plant, a mug and a TV remote on a wooden table next to a lit lamp" loading="lazy">
           <div class="body">
             <h3>Props and world assets, too</h3>
-            <p>Standard and URP materials are converted to Blender's standard shader, so furniture and props sold for Unity can go into your Blender scenes.</p>
+            <p>Standard and URP materials are converted to Blender's standard shader, so furniture, props and world assets sold for Unity can come in <a href="#scenes">with their scene layout intact</a>.</p>
           </div>
         </article>
       </div>
       <p class="alt uses-note">Whether you may edit an asset or publish renders of it depends on that asset's license. Check its terms first.</p>
+    </div>
+  </section>
+
+  <section class="section" id="scenes">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Scene import</span>
+        <h2>Unity scenes,<wbr> <span class="nb">laid out as they were</span></h2>
+        <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing.</p>
+      </div>
+      <figure class="shot">
+        <div class="frame"><img src="assets/scene-street.webp" width="1502" height="845" alt="A Japanese street scene imported into Blender, with buildings and utility poles, and the dialog for choosing what to import open at the bottom left, with a scene of 1879 placements ticked on the Scenes tab" loading="lazy"></div>
+        <figcaption>A street asset's scene imported into Blender, with the dialog for choosing what to import (it opens after you drop a package) shown on top.</figcaption>
+      </figure>
+      <div class="modes units">
+        <div class="mode default"><span class="name">Scenes</span><span>Everything placed in the scene, layout included, plus lights and cameras</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
+        <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
+      </div>
+      <p class="modes-note">Light brightness is converted to look close in EEVEE, but it will not match Unity exactly.</p>
     </div>
   </section>
 
@@ -299,17 +321,11 @@
         </div>
         <div class="install-step">
           <h3><span class="num">2</span>Drop a package</h3>
-          <p>Drag a <code>.unitypackage</code> onto the 3D Viewport, or use File &gt; Import &gt; Unitypackage. Press Import in the popup and the package loads. Several files at once are fine.</p>
-          <div class="shots">
-            <figure class="shot">
-              <div class="frame"><img src="assets/shot-menu.webp" width="520" height="487" alt="Blender's File Import menu with an entry reading Unitypackage (.unitypackage)" loading="lazy"></div>
-              <figcaption>The add-on registers itself under File &gt; Import. Dropping a file on the viewport opens the same options.</figcaption>
-            </figure>
-            <figure class="shot">
-              <div class="frame"><img src="assets/shot-dialog.webp" width="620" height="1284" alt="The import options popup with Model, Materials and Textures sections" loading="lazy"></div>
-              <figcaption>The options, grouped into model, materials and textures. Every default can be changed in the add-on preferences.</figcaption>
-            </figure>
-          </div>
+          <p>Drag a <code>.unitypackage</code> onto the 3D Viewport, or use File &gt; Import &gt; Unitypackage. Press Import in the popup, pick what to import (scenes, prefabs or models) in the next dialog, and the package loads. Several files at once are fine.</p>
+          <figure class="shot">
+            <div class="frame"><video class="demo-video" src="assets/demo.mp4" poster="assets/demo-poster.webp" width="1280" height="720" autoplay muted loop playsinline preload="metadata" aria-label="The steps: dragging a .unitypackage onto Blender, pressing Import in the popup, pressing Import again in the dialog for choosing what to import, and the avatar appearing with its colors"></video></div>
+            <figcaption>Every default in the popup can be changed in the add-on preferences.</figcaption>
+          </figure>
         </div>
       </div>
     </div>
@@ -357,14 +373,14 @@
         <details>
           <summary>Is anything left out?</summary>
           <div class="answer">
-            <p>The goal is a model that looks right in Blender, so these are not imported:</p>
+            <p>The goal is models and scenes that look right in Blender, so these are not imported:</p>
             <ul>
               <li>Shader source code (material settings are converted)</li>
               <li>C# scripts and components</li>
               <li>Animations and animator controllers</li>
-              <li>Prefab hierarchies (prefabs are only read to assign materials)</li>
               <li>VRChat Expression menus and parameters</li>
               <li>PhysBones and other dynamics, physics and colliders (VRM spring bones are reproduced if the VRM add-on is installed)</li>
+              <li>Terrain, UI, and baked results such as lightmaps in scenes</li>
             </ul>
           </div>
         </details>

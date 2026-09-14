@@ -7,8 +7,9 @@
     blender --factory-startup --python tools/shoot_screenshots.py -- <package> <outdir> [shot]
 
 ``shot`` は ``main``（hero / nodes / modes）、``dialog``（インポートのポップアップ）、
-``menu``（File > Import メニュー）のいずれか。省略時は ``main``。ポップアップとメニューは
-モーダルで閉じられないため、撮ったらそのまま Blender を終了する。別々に起動すること。
+``select``（読み込むものを選ぶダイアログの Scenes タブ）、``menu``（File > Import メニュー）の
+いずれか。省略時は ``main``。ポップアップ・ダイアログ・メニューはモーダルで閉じられないため、
+撮ったらそのまま Blender を終了する。別々に起動すること。
 
 アセット固有の名前は持たない。ポーズ対象のボーンは VRM の humanoid 命名から探す。
 """
@@ -246,7 +247,23 @@ def setup_modes_shot() -> None:
 
 
 def open_import_dialog(package: Path) -> None:
-    bpy.ops.import_scene.unitypackage("INVOKE_DEFAULT", filepath=str(package))
+    # タイマーからは領域の無いコンテキストで呼ばれ、invoke_popup が落ちるので 3D ビューを明示する
+    area, region = view3d()
+    with bpy.context.temp_override(window=bpy.context.window, area=area, region=region):
+        bpy.ops.import_scene.unitypackage("INVOKE_DEFAULT", filepath=str(package))
+
+
+def open_select_dialog(package: Path, extract_path: str) -> None:
+    """読み込むものを選ぶダイアログを、Scenes のタブを開いた状態で出す。
+
+    リポジトリ直接登録では Preferences が取れず前回の単位を覚えていないため、既定の単位を差し替える。
+    """
+    from unitypackage_loader.operators import select_models
+
+    select_models.default_unit = lambda *args, **kwargs: "SCENES"
+    bpy.ops.import_scene.unitypackage(
+        "EXEC_DEFAULT", filepath=str(package), models="ASK", extract_mode="CUSTOM", extract_path=extract_path
+    )
 
 
 def open_import_menu() -> None:
@@ -273,18 +290,21 @@ def main() -> None:
 
     # UI が小さいまま縮小するとページ上で字が潰れる。撮影時だけ拡大する
     # （--factory-startup なのでユーザーの設定には残らない）。
-    bpy.context.preferences.view.ui_scale = 1.6 if shot in {"dialog", "menu"} else 1.25
+    bpy.context.preferences.view.ui_scale = 1.6 if shot in {"dialog", "select", "menu"} else 1.25
 
     register_addon()
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
     bpy.context.scene.view_settings.view_transform = "Standard"
 
-    # リポジトリ直接登録では Extension のキャッシュディレクトリが使えないので展開先を明示する
+    # リポジトリ直接登録では Extension のキャッシュディレクトリが使えないので展開先を明示する。
+    # GUI では候補が 2 つ以上あると選択ダイアログが開いてしまうので、背景用の読み込みでは出さない
+    extract_path = tempfile.mkdtemp(prefix="unitypackage_loader_shots_")
     bpy.ops.import_scene.unitypackage(
         filepath=str(package),
+        models="ALL",
         extract_mode="CUSTOM",
-        extract_path=tempfile.mkdtemp(prefix="unitypackage_loader_shots_"),
+        extract_path=extract_path,
     )
     hide_clutter()
     pose_arms()
@@ -306,6 +326,8 @@ def main() -> None:
         ]
     elif shot == "dialog":
         steps = [lambda: open_import_dialog(package), lambda: shoot(out_dir, "dialog")]
+    elif shot == "select":
+        steps = [lambda: open_select_dialog(package, extract_path), lambda: shoot(out_dir, "select")]
     elif shot == "menu":
         steps = [open_import_menu, lambda: shoot(out_dir, "menu")]
     else:
