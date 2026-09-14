@@ -314,6 +314,31 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(h.missing_sources, 0)
         self.assertEqual(h.unresolved_overrides, 1)  # モデルの中の Renderer（2300000）へのマテリアルの上書き
 
+    def test_recycle_table_resolves_overrides_inside_model(self):
+        # 1 メッシュの FBX: Renderer（2300000）は //RootNode に載り、Blender ではメッシュ名 Pot のオブジェクトになる
+        table = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 4300000: "Pot"}
+        exp = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table})
+        h = exp.expand_raw(parse_asset(self.scene()))
+        pot = placements(h, [MODEL])[0]
+        self.assertEqual(pot.renderers["Pot"].materials, [MAT_B])
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    def test_recycle_table_resolves_inner_transforms(self):
+        table = {100000: "//RootNode", 400000: "//RootNode", 400002: "Lid", 2300002: "Lid", 4300002: "Lid"}
+        scene = HEADER + self.legacy_instance(2000, MODEL, 0, [
+            mod(400002, MODEL, "m_LocalRotation.x", -0.5),
+            mod(400002, MODEL, "m_LocalRotation.w", 0.866),
+            mod(400002, MODEL, "m_LocalPosition.y", 0.8),
+            mod(2300002, MODEL, "m_Materials.Array.data[1]", "", f"{{fileID: 2100000, guid: {MAT_A}, type: 2}}"),
+            mod(123, MODEL, "m_LocalPosition.x", 1),  # 表に無い
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.node_transforms["Lid"], {"rotation": [-0.5, None, None, 0.866], "position": [None, 0.8, None]})
+        self.assertEqual(placement.renderers["Lid"].materials, [None, MAT_A])
+        self.assertEqual(h.unresolved_overrides, 1)
+
     def test_child_of_legacy_model_instance_uses_stripped_alias(self):
         exp = Expander(lambda g: None, {MODEL: "Probe"})
         h = exp.expand_raw(parse_asset(self.scene()))

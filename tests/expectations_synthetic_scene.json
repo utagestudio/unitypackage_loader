@@ -5,7 +5,7 @@
     "unit": "SCENES"
   },
   "scenes": {
-    "count": 1
+    "count": 2
   },
   "warnings_max": 2,
   "placed_objects": [
@@ -117,6 +117,30 @@
     {
       "top": "AllRed",
       "object": "Child",
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "LegacyProbe",
+      "object": "Spike",
+      "tip": [
+        -8.5412,
+        1.9392,
+        2.9
+      ],
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "LegacyProbe",
+      "object": "Child",
+      "tip": [
+        -10.5821,
+        0.9568,
+        1.2883
+      ],
       "mat_files": [
         "ProbeRed.mat"
       ]

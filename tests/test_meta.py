@@ -90,6 +90,36 @@ class ModelImporterTests(unittest.TestCase):
         self.assertIsNone(info.material_import_mode)
 
 
+class LegacyRecycleNameTests(unittest.TestCase):
+    """Unity 2018.2 以前の形式の fileIDToRecycleName（モデルの中のオブジェクトの fileID → 名前）。"""
+
+    META = """\
+fileFormatVersion: 2
+guid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+ModelImporter:
+  serializedVersion: 22
+  fileIDToRecycleName:
+    100000: //RootNode
+    100002: door01
+    100004: door01_frame
+    400000: //RootNode
+    400002: door01
+    2300000: door01
+    4300000: door01
+  externalObjects: {}
+"""
+
+    def test_table_is_read(self):
+        info = ModelImporterInfo.from_meta(self.META)
+        self.assertEqual(info.recycle_names[400000], "//RootNode")
+        self.assertEqual(info.recycle_names[400002], "door01")
+        self.assertEqual(info.recycle_names[100004], "door01_frame")
+        self.assertEqual(len(info.recycle_names), 7)
+
+    def test_new_format_has_empty_table(self):
+        self.assertEqual(ModelImporterInfo.from_meta(MODEL_META).recycle_names, {})
+
+
 class TextureImporterTests(unittest.TestCase):
     def test_normal_map_linear_clamp(self):
         info = TextureImporterInfo.from_meta(TEXTURE_META)

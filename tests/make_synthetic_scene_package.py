@@ -179,7 +179,16 @@ def main() -> None:
     fbx = tmp / "probe.fbx"
     export_probe_fbx(fbx)
     model_path = "Assets/Synthetic/Models/Probe.fbx"
-    model = add(model_path, fbx.read_bytes(), model_meta(guid_of(model_path), {"ProbeMat": mats["ProbeMat"]}))
+    # 古い形式（Unity 2018.2 以前）の表。新しい形式のシーンは中への上書きを持たないので、表があっても結果は変わらない
+    recycle = "\n".join(f"    {k}: {v}" for k, v in (
+        (100000, "//RootNode"), (100002, "Spike"), (100004, "Group"), (100006, "Child"),
+        (400000, "//RootNode"), (400002, "Spike"), (400004, "Group"), (400006, "Child"),
+        (2300000, "Spike"), (2300002, "Child"), (4300000, "Spike"), (4300002, "Child"),
+    ))
+    meta = model_meta(guid_of(model_path), {"ProbeMat": mats["ProbeMat"]}).replace(
+        "ModelImporter:\n", f"ModelImporter:\n  fileIDToRecycleName:\n{recycle}\n", 1
+    )
+    model = add(model_path, fbx.read_bytes(), meta)
 
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
     def unpacked_prefab(name, mat_guid):
@@ -296,6 +305,23 @@ def main() -> None:
         transform(9201, 9200, pos=(0, 10, 0), rot=(0.7071068, 0, 0, 0.7071068)),
         camera_doc(9202, 9200, orthographic=1, size=2.5),
     ])).encode(), f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
+
+    # 古い形式のシーン（#53）。FBX を X に 10 置き、中の Spike の位置 y を 2 に、Child のマテリアルを ProbeRed に上書きする。
+    # Spike の元のノードの位置は (-0.5, 0, 0)（Unity 6 で読んだ値）なので、Spike は Unity の +Y（Blender の +Z）に 2 動く
+    legacy_path = "Assets/Synthetic/Scenes/Legacy.unity"
+    add(legacy_path, (HEADER + (
+        "--- !u!1001 &100\nPrefab:\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {fileID: 0}\n"
+        "    m_Modifications:\n"
+        + mod(400000, model, "m_LocalPosition.x", 10)
+        + mod(100000, model, "m_Name", "LegacyProbe")
+        + mod(400002, model, "m_LocalPosition.x", -0.5)
+        + mod(400002, model, "m_LocalPosition.y", 2)
+        + mod(2300002, model, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}")
+        + "    m_RemovedComponents: []\n"
+        f"  m_ParentPrefab: {{fileID: 100100000, guid: {model}, type: 3}}\n  m_IsPrefabParent: 0\n"
+        f"--- !u!4 &101 stripped\nTransform:\n  m_PrefabParentObject: {{fileID: 400000, guid: {model}, type: 3}}\n"
+        "  m_PrefabInternal: {fileID: 100}\n"
+    )).encode(), f"fileFormatVersion: 2\nguid: {guid_of(legacy_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
 
     menu_path = "Assets/Synthetic/Scenes/Menu.unity"
     add(menu_path, (HEADER + game_object(10, "Canvas") + transform(11, 10, class_id=224, kind="RectTransform")

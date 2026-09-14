@@ -261,6 +261,9 @@ class Node:
     scope: int = 0  # Transform を直接持つアセットでの最上位の祖先（自分自身のこともある）
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
     components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
+    # モデルの PrefabInstance で、古い形式の .meta（fileIDToRecycleName）から名前を引けた中への上書き
+    model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
+    model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
 
     @property
     def local(self) -> Mat4:
@@ -274,6 +277,8 @@ class Node:
             scale=list(self.scale),
             renderer=replace(self.renderer, materials=list(self.renderer.materials)) if self.renderer else None,
             components={k: (c, copy.deepcopy(body)) for k, (c, body) in self.components.items()},
+            model_materials={k: list(v) for k, v in self.model_materials.items()},
+            model_transforms=copy.deepcopy(self.model_transforms),
             **changes,
         )
 
@@ -303,9 +308,12 @@ class Expander:
         self,
         read_asset: Callable[[str], RawAsset | None],
         model_names: dict[str, str],
+        model_recycle_names: dict[str, dict[int, str]] | None = None,
     ):
         self._read = read_asset
         self._models = {g.lower(): name for g, name in model_names.items()}  # モデルの GUID → ルートの名前
+        # モデルの GUID → 古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける）
+        self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
         self._cache: dict[str, Hierarchy | None] = {}
 
     def expand_asset(self, guid: str) -> Hierarchy | None:
@@ -442,12 +450,64 @@ class Expander:
                 h.unresolved_overrides += 1
 
         added_keys = set(added.values())
+        root_key = remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
+        table = self._recycle.get(source, {}) if is_model else {}
         for file_id, guid, path, value, reference in instance.modifications:
             key = target_key(file_id, guid)
             if key is None:
                 continue
-            if not _apply_modification(h, added_keys, key, path, value, reference) and is_model and _is_tracked(path):
-                h.unresolved_overrides += 1
+            if _apply_modification(h, added_keys, key, path, value, reference) or not is_model or not _is_tracked(path):
+                continue
+            if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
+                continue
+            h.unresolved_overrides += 1
+
+
+_CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
+_ROOT_NODE_NAME = "//RootNode"
+
+
+def _model_object_name(table: dict[int, str], file_id: int) -> str | None:
+    """古い形式の fileID をモデルのオブジェクト名にする。//RootNode の Renderer は、そのメッシュの名前にする。"""
+    name = table.get(file_id)
+    if name is None:
+        return None
+    if name != _ROOT_NODE_NAME:
+        return name
+    # 1 メッシュの FBX では Renderer がルートに載り、Blender ではメッシュ名のオブジェクトになる
+    meshes = [n for k, n in sorted(table.items()) if k // 100000 == 43 and n != _ROOT_NODE_NAME]
+    return meshes[0] if len(meshes) == 1 else None
+
+
+def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int, path: str, value: object, reference: object) -> bool:
+    """モデルの中への上書きを、表で引いた名前付きで配置のルートに記録する。名前を引けなければ False。"""
+    if not table:
+        return False
+    class_id = file_id // 100000
+    name = _model_object_name(table, file_id)
+    if name is None:
+        return False
+    match = _TRS_PATH.fullmatch(path)
+    if match and class_id == _CLASS_PREFIX_TRANSFORM:
+        field_name = _TRS_FIELDS[match.group(1)]
+        size = 4 if field_name == "rotation" else 3
+        values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
+        index = _AXES[match.group(2)]
+        if index < size:
+            number = _number(value, float("nan"))
+            values[index] = None if math.isnan(number) else number
+        return True
+    material = _MATERIAL_PATH.fullmatch(path)
+    if material and class_id in (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER):
+        index = int(material.group(1))
+        if index >= MAX_SLOTS:
+            return False
+        slots = root.model_materials.setdefault(name, [])
+        if index >= len(slots):
+            slots.extend([None] * (index + 1 - len(slots)))
+        slots[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+        return True
+    return False
 
 
 def _is_tracked(path: str) -> bool:
@@ -652,6 +712,8 @@ class ModelPlacement:
     # GameObject 名（Unity の複製番号「 (N)」を外したもの）→ Renderer（展開した Renderer のみ）
     renderers: dict[str, PlacedRenderer] = field(default_factory=dict)
     offsets: dict[str, Mat4] = field(default_factory=dict)  # 中のノードが動いた Renderer の名前 → そこから逆算したルートの行列
+    # モデルの PrefabInstance の中のノードへの上書き（古い形式の .meta で名前を引けたもの）。名前 → position/rotation/scale
+    node_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)
 
     def signature(self) -> tuple:
         """読み込み結果を使い回せるかの判定に使う値（モデルと、名前ごとのマテリアル）。"""
@@ -671,7 +733,11 @@ def placements(h: Hierarchy, model_guids: Iterable[str]) -> list[ModelPlacement]
     by_scope: dict[tuple[int, str], ModelPlacement] = {}
     for key, node in h.nodes.items():
         if node.model_guid is not None:
-            result.append(ModelPlacement(node.model_guid, key, worlds[key], active[key]))
+            placement = ModelPlacement(node.model_guid, key, worlds[key], active[key])
+            for name, slots in node.model_materials.items():
+                placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
+            placement.node_transforms = copy.deepcopy(node.model_transforms)
+            result.append(placement)
             continue
         renderer = node.renderer
         if renderer is None or renderer.mesh_guid not in models:
