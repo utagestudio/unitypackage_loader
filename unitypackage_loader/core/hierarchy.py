@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 from collections import Counter
@@ -52,6 +53,7 @@ CLASS_PREFAB_INSTANCE = 1001
 
 _TRANSFORM_CLASSES = (CLASS_TRANSFORM, CLASS_RECT_TRANSFORM)
 _RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
+_COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)  # 中身をそのまま持ち、上書きを当ててから読むコンポーネント
 
 # モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）
 MODEL_ROOT_GAME_OBJECT = 919132149155446097
@@ -131,6 +133,8 @@ class RawAsset:
     renderers: dict[int, tuple[int, RendererInfo]] = field(default_factory=dict)  # Renderer の fileID → (GameObject, 情報)
     instances: list[_RawInstance] = field(default_factory=list)
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
+    # ライト・カメラの fileID → (GameObject, クラス ID, ドキュメントの中身)
+    components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
@@ -195,6 +199,8 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 meshes[_file_id(body.get("m_GameObject"))] = mesh
         elif doc.class_id in _RENDERER_CLASSES:
             renderer_docs.append(doc)
+        elif doc.class_id in _COMPONENT_CLASSES:
+            raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_PREFAB_INSTANCE:
             # 2018.2 以前は m_ParentPrefab。prefab アセット自身の記録（m_IsPrefabParent: 1）は元の GUID を持たないので飛ばす
             source = _guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
@@ -254,6 +260,7 @@ class Node:
     model_guid: str | None = None  # モデルの PrefabInstance のルートならそのモデルの GUID
     scope: int = 0  # Transform を直接持つアセットでの最上位の祖先（自分自身のこともある）
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
+    components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
 
     @property
     def local(self) -> Mat4:
@@ -266,6 +273,7 @@ class Node:
             rotation=list(self.rotation),
             scale=list(self.scale),
             renderer=replace(self.renderer, materials=list(self.renderer.materials)) if self.renderer else None,
+            components={k: (c, copy.deepcopy(body)) for k, (c, body) in self.components.items()},
             **changes,
         )
 
@@ -275,6 +283,7 @@ class Hierarchy:
     nodes: dict[int, Node] = field(default_factory=dict)  # 親より先に子が来ることもある
     game_objects: dict[int, int] = field(default_factory=dict)  # GameObject の key → Node の key
     renderers: dict[int, int] = field(default_factory=dict)  # Renderer の key → Node の key
+    components: dict[int, int] = field(default_factory=dict)  # ライト・カメラの key → Node の key
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
     missing_sources: int = 0  # 元がパッケージに無い PrefabInstance
@@ -362,6 +371,11 @@ class Expander:
                 h.nodes[key].renderer = info
                 h.nodes[key].renderer_key = renderer_id
                 h.renderers[renderer_id] = key
+        for component_id, (go, class_id, body) in raw.components.items():
+            key = h.game_objects.get(go)
+            if key is not None:
+                h.nodes[key].components[component_id] = (class_id, copy.deepcopy(body))
+                h.components[component_id] = key
         _assign_scopes(h, set(h.nodes))
 
         for instance in raw.instances:
@@ -383,17 +397,21 @@ class Expander:
         for key, node in sub.nodes.items():
             new_key = remap(iid, key)
             added[key] = new_key
-            h.nodes[new_key] = node.copy(
+            copied = node.copy(
                 key=new_key,
                 parent=remap(iid, node.parent) if node.parent is not None else parent,
                 game_object=remap(iid, node.game_object),
                 renderer_key=remap(iid, node.renderer_key) if node.renderer else 0,
                 scope=remap(iid, node.scope),
             )
+            copied.components = {remap(iid, k): value for k, value in copied.components.items()}
+            h.nodes[new_key] = copied
         for go, key in sub.game_objects.items():
             h.game_objects[remap(iid, go)] = remap(iid, key)
         for renderer, key in sub.renderers.items():
             h.renderers[remap(iid, renderer)] = remap(iid, key)
+        for component, key in sub.components.items():
+            h.components[remap(iid, component)] = remap(iid, key)
         h.counts.update(sub.counts)
         h.unresolved_overrides += sub.unresolved_overrides
         h.missing_sources += sub.missing_sources
@@ -415,8 +433,11 @@ class Expander:
         for file_id, guid in instance.removed_components:
             key = target_key(file_id, guid)
             node_key = h.renderers.pop(key, None) if key is not None else None
+            component_node = h.components.pop(key, None) if key is not None else None
             if node_key is not None and node_key in h.nodes:
                 h.nodes[node_key].renderer = None
+            elif component_node is not None and component_node in h.nodes:
+                h.nodes[component_node].components.pop(key, None)
             elif is_model:
                 h.unresolved_overrides += 1
 
@@ -458,6 +479,12 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         else:
             h.nodes[node_key].name = "" if value is None else str(value)
         return True
+    component_node = h.components.get(key)
+    if component_node is not None:
+        if component_node not in added:
+            return False
+        _set_property(h.nodes[component_node].components[key][1], path, value, reference)
+        return True
     node_key = h.renderers.get(key)
     node = h.nodes.get(node_key) if node_key is not None and node_key in added else None
     renderer = node.renderer if node is not None else None
@@ -484,6 +511,55 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
             renderer.materials[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
         return True
     return False
+
+
+_MAX_PROPERTY_DEPTH = 8
+
+
+def _set_property(body: dict, path: str, value: object, reference: object) -> None:
+    """``m_Color.r`` のようなパスで、コンポーネントの中身の値を上書きする（配列の要素は対象外）。"""
+    parts = path.split(".")
+    if not parts or len(parts) > _MAX_PROPERTY_DEPTH or any(p in ("Array", "") or p.startswith("data[") for p in parts):
+        return
+    target = body
+    for part in parts[:-1]:
+        child = target.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            target[part] = child
+        target = child
+    if isinstance(reference, UnityRef) and not reference.is_null:
+        target[parts[-1]] = reference
+    else:
+        target[parts[-1]] = value
+
+
+@dataclass
+class PlacedComponent:
+    """シーンに置かれたライト・カメラ（上書き済みの中身と、GameObject のワールド行列）。"""
+
+    key: int
+    node: int
+    name: str
+    class_id: int
+    body: dict
+    world: Mat4
+    active: bool  # GameObject がアクティブで、コンポーネントが有効
+
+
+def components(h: Hierarchy, class_ids: Iterable[int] = _COMPONENT_CLASSES) -> list[PlacedComponent]:
+    """階層に現れた順のライト・カメラ。"""
+    wanted = set(class_ids)
+    worlds = world_matrices(h)
+    active = effective_active(h)
+    result = []
+    for node_key, node in h.nodes.items():
+        for key, (class_id, body) in node.components.items():
+            if class_id not in wanted:
+                continue
+            enabled = _number(body.get("m_Enabled"), 1.0) != 0
+            result.append(PlacedComponent(key, node_key, node.name, class_id, body, worlds[node_key], active[node_key] and enabled))
+    return result
 
 
 def _assign_scopes(h: Hierarchy, own: set[int]) -> None:
