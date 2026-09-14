@@ -48,6 +48,9 @@ class UnityMaterial:
     colors: dict[str, Color] = field(default_factory=dict)
     render_queue: int = -1
     keywords: list[str] = field(default_factory=list)
+    # .mat にキーワードの記述（m_ValidKeywords / m_ShaderKeywords）があったか。空でも記述があれば True。
+    # True なら「_EMISSION が無い = 発光しない」と判断できる
+    keywords_known: bool = False
     # 現在のシェーダーには存在しないが .mat に残っているキーワード（m_InvalidKeywords）。
     # 別シェーダーから切り替えた名残なので、プロパティの残骸を無視する手掛かりになる
     invalid_keywords: list[str] = field(default_factory=list)
@@ -142,9 +145,11 @@ def parse_material(text: str | bytes, guid: str = "", pathname: str = "") -> Uni
     keywords = body.get("m_ValidKeywords")
     if isinstance(keywords, list):
         mat.keywords = [str(k) for k in keywords]
+        mat.keywords_known = True
     legacy = body.get("m_ShaderKeywords")
-    if isinstance(legacy, str) and legacy.strip():
+    if isinstance(legacy, str):
         mat.keywords.extend(legacy.split())
+        mat.keywords_known = True
     invalid = body.get("m_InvalidKeywords")
     if isinstance(invalid, list):
         mat.invalid_keywords = [str(k) for k in invalid]
