@@ -32,6 +32,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     # 読み込む単位と並べ方。通常はモデル選択ダイアログで選ぶ。スクリプトやダイアログを出さないときに使う
     unit: EnumProperty(name="Import Unit", items=UNIT_ITEMS, default="MODELS", options={"HIDDEN", "SKIP_SAVE"})
     arrange: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE", options={"HIDDEN", "SKIP_SAVE"})
+    scene_lights: BoolProperty(name="Scene Lights", default=True, options={"HIDDEN", "SKIP_SAVE"})
+    scene_cameras: BoolProperty(name="Scene Cameras", default=True, options={"HIDDEN", "SKIP_SAVE"})
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -203,6 +205,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 models="ALL" if (batch and self.models == "ASK") else self.models,
                 unit=self.unit,
                 arrange=self.arrange,
+                scene_lights=self.scene_lights,
+                scene_cameras=self.scene_cameras,
                 material_mode=self.material_mode,
                 force_opaque=self.force_opaque,
                 backface_culling=self.backface_culling,

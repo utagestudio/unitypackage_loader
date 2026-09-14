@@ -11,6 +11,7 @@ import unittest
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import (
     Expander,
+    components,
     Hierarchy,
     Node,
     effective_active,
@@ -319,6 +320,46 @@ class LegacyFormatTest(unittest.TestCase):
         flower = next(n for n in h.nodes.values() if n.name == "Flower")
         self.assertEqual(h.nodes[flower.parent].name, "Pot")
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+
+class ComponentTest(unittest.TestCase):
+    """ライト・カメラは中身を持ち、prefab の上書き（強さ・色・有効）を当ててから配置する。"""
+
+    LAMP = HEADER + game_object(1, "Lamp") + transform(2, 1) + (
+        "--- !u!108 &3\nLight:\n  m_GameObject: {fileID: 1}\n  m_Enabled: 1\n  m_Type: 2\n  m_Intensity: 1\n"
+        "  m_Color: {r: 1, g: 1, b: 1, a: 1}\n  m_Range: 10\n"
+    )
+    SCENE = HEADER + "".join([
+        instance(10, "d" * 32, 0, [
+            mod(2, "d" * 32, "m_LocalPosition.y", 3),
+            mod(3, "d" * 32, "m_Intensity", 2.5),
+            mod(3, "d" * 32, "m_Color.g", 0.5),
+        ]),
+        instance(20, "d" * 32, 0, [mod(3, "d" * 32, "m_Enabled", 0)]),
+        game_object(30, "Main Camera"),
+        transform(31, 30, pos=(0, 1, -10)),
+        "--- !u!20 &32\nCamera:\n  m_GameObject: {fileID: 30}\n  m_Enabled: 1\n  field of view: 40\n",
+    ])
+
+    def setUp(self):
+        exp = Expander(lambda g: parse_asset(self.LAMP) if g == "d" * 32 else None, {})
+        self.found = components(exp.expand_raw(parse_asset(self.SCENE)))
+
+    def test_overrides_are_applied_to_prefab_light(self):
+        lamp = self.found[1]  # シーンが直接持つカメラが先、差し込んだ prefab のライトが後
+        self.assertEqual((lamp.name, lamp.class_id, lamp.active), ("Lamp", 108, True))
+        self.assertEqual(lamp.body["m_Intensity"], 2.5)
+        self.assertEqual(lamp.body["m_Color"], {"r": 1, "g": 0.5, "b": 1, "a": 1})
+        self.assertEqual(transform_point(lamp.world, (0, 0, 0)), (0.0, 3.0, 0.0))
+
+    def test_instances_do_not_share_bodies(self):
+        second = self.found[2]
+        self.assertEqual(second.body["m_Intensity"], 1)  # 1 つ目の上書きが漏れない
+        self.assertFalse(second.active)  # m_Enabled 0
+
+    def test_scene_camera(self):
+        camera = self.found[0]
+        self.assertEqual((camera.name, camera.class_id, camera.body["field of view"]), ("Main Camera", 20, 40))
 
 
 class RobustnessTest(unittest.TestCase):

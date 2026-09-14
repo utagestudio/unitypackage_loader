@@ -112,6 +112,27 @@ def skinned_renderer(renderer_id, go, model_guid, mat_guid):
     )
 
 
+def light_doc(file_id, go, light_type, intensity=1, light_range=10, spot=30, inner=21.80208, color=(1, 1, 1), enabled=1,
+              shadow=2, lightmapping=4, area=(1, 1), use_temperature=0, temperature=6570):
+    return (
+        f"--- !u!108 &{file_id}\nLight:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: {enabled}\n  serializedVersion: 10\n"
+        f"  m_Type: {light_type}\n  m_Color: {{r: {color[0]}, g: {color[1]}, b: {color[2]}, a: 1}}\n"
+        f"  m_Intensity: {intensity}\n  m_Range: {light_range}\n  m_SpotAngle: {spot}\n  m_InnerSpotAngle: {inner}\n"
+        f"  m_Shadows:\n    m_Type: {shadow}\n  m_Lightmapping: {lightmapping}\n  m_AreaSize: {{x: {area[0]}, y: {area[1]}}}\n"
+        f"  m_ColorTemperature: {temperature}\n  m_UseColorTemperature: {use_temperature}\n  m_ShadowRadius: 0\n  m_ShadowAngle: 0\n"
+    )
+
+
+def camera_doc(file_id, go, fov=60, orthographic=0, size=5, near=0.3, far=1000, mode=1, focal=50, sensor=(36, 24), gate=2):
+    return (
+        f"--- !u!20 &{file_id}\nCamera:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  serializedVersion: 2\n"
+        f"  m_projectionMatrixMode: {mode}\n  m_GateFitMode: {gate}\n  m_FocalLength: {focal}\n"
+        f"  m_SensorSize: {{x: {sensor[0]}, y: {sensor[1]}}}\n  m_LensShift: {{x: 0, y: 0}}\n"
+        f"  near clip plane: {near}\n  far clip plane: {far}\n  field of view: {fov}\n"
+        f"  orthographic: {orthographic}\n  orthographic size: {size}\n"
+    )
+
+
 def mod(target, guid, path, value="", reference="{fileID: 0}"):
     return (
         f"    - target: {{fileID: {target}, guid: {guid}, type: 3}}\n"
@@ -205,6 +226,11 @@ def main() -> None:
         stripped_transform(21, ROOT_TRANSFORM, model, 20),
     ])).encode(), prefab_meta(nested_path))
 
+    # 点光源だけの prefab。シーンで強さを上書きして置く
+    lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
+    lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
+                           + light_doc(12, 10, 2, intensity=1, light_range=4)).encode(), prefab_meta(lamp_path))
+
     scene_path = "Assets/Synthetic/Scenes/Probe.unity"
     add(scene_path, (HEADER + "".join([
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
@@ -239,9 +265,36 @@ def main() -> None:
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),
+        # ライト（#49）。Unity の既定の平行光源と同じ向き（euler 50, -30, 0）
         game_object(8000, "Directional Light"),
-        transform(8001, 8000, pos=(0, 3, 0)),
-        "--- !u!108 &8002\nLight:\n  m_GameObject: {fileID: 8000}\n  m_Enabled: 1\n  m_Type: 1\n",
+        transform(8001, 8000, pos=(0, 3, 0), rot=(0.40821788, -0.23456968, 0.10938163, 0.8754261)),
+        light_doc(8002, 8000, 1, intensity=2, color=(1, 0.95686275, 0.8392157), shadow=2),
+        game_object(8100, "Point Light"),
+        transform(8101, 8100, pos=(2, 1, 0)),
+        light_doc(8102, 8100, 2, intensity=2, light_range=5, use_temperature=1, temperature=3863),
+        game_object(8200, "Spot Light"),  # euler (90, 0, 0): 真下を向く
+        transform(8201, 8200, pos=(0, 3, 2), rot=(0.7071068, 0, 0, 0.7071068)),
+        light_doc(8202, 8200, 0, intensity=1, light_range=10, spot=60, inner=40),
+        game_object(8300, "Area Light"),
+        transform(8301, 8300, pos=(0, 2, 0), rot=(0.7071068, 0, 0, 0.7071068)),
+        light_doc(8302, 8300, 3, area=(2, 0.5), lightmapping=2, shadow=0),
+        game_object(8400, "Disabled Light"),
+        transform(8401, 8400, pos=(-3, 1, 0)),
+        light_doc(8402, 8400, 2, enabled=0),
+        instance(8500, lamp, 0, [
+            mod(11, lamp, "m_LocalPosition.x", 4),
+            mod(12, lamp, "m_Intensity", 3),
+        ]),
+        # カメラ。Main Camera はシーンで最初の有効なカメラなので、シーンのカメラになる
+        game_object(9000, "Main Camera"),
+        transform(9001, 9000, pos=(0, 1, -10)),
+        camera_doc(9002, 9000, fov=40, far=200),
+        game_object(9100, "Physical Camera"),
+        transform(9101, 9100, pos=(5, 1, 0)),
+        camera_doc(9102, 9100, mode=2, focal=15.638705, sensor=(36, 24), gate=1),
+        game_object(9200, "Ortho Camera"),
+        transform(9201, 9200, pos=(0, 10, 0), rot=(0.7071068, 0, 0, 0.7071068)),
+        camera_doc(9202, 9200, orthographic=1, size=2.5),
     ])).encode(), f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
 
     menu_path = "Assets/Synthetic/Scenes/Menu.unity"
