@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,7 +16,19 @@ import bpy
 from mathutils import Matrix, Vector
 
 from ..core.arrange import arrange_offsets
-from ..core.hierarchy import Expander, Hierarchy, HierarchyError, effective_active, parse_asset, summarize
+from ..core.hierarchy import (
+    CLASS_CAMERA,
+    CLASS_LIGHT,
+    Expander,
+    Hierarchy,
+    HierarchyError,
+    effective_active,
+    parse_asset,
+    summarize,
+)
+from ..core.hierarchy import components as scene_components
+from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
+from ..core.unity_yaml import UnityRef
 from ..core.transform import unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
@@ -63,6 +76,8 @@ class ImportOptions:
     model_guids: list[str] | None = None  # 明示的に選ばれたモデル（ダイアログ経由）
     prefab_paths: list[str] | None = None  # 明示的に選ばれた prefab の pathname（ダイアログ経由）
     scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）
+    scene_lights: bool = True  # シーンのライトを読み込む
+    scene_cameras: bool = True  # シーンのカメラを読み込む
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
@@ -130,6 +145,7 @@ class PreparedPackage:
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
     scenes: list[SceneSummary] = field(default_factory=list)  # 読み込む単位 Scenes の候補（pathname 順）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層
+    pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
 
     @property
     def supported_models(self) -> list[ModelSummary]:
@@ -258,6 +274,7 @@ def prepare_package(
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
         prefabs=prefabs, scenes=scenes, scene_hierarchies=hierarchies,
+        pipeline=detect_pipeline(n.family for n in normalized.values()),
     )
 
 
@@ -571,6 +588,58 @@ def _scene_empty(hierarchy: Hierarchy, key: int, collection, empties: dict[int, 
         empties[node_key] = empty
         parent = empty
     return empties.get(key, parent)
+
+
+def _json_text(body: dict) -> str:
+    """コンポーネントの中身をカスタムプロパティ用の JSON にする（参照は fileID / guid の辞書にする）。"""
+
+    def default(value):
+        if isinstance(value, UnityRef):
+            return {"fileID": value.file_id, "guid": value.guid, "type": value.type}
+        return str(value)
+
+    return json.dumps(body, ensure_ascii=False, default=default)
+
+
+def _make_light(name: str, values: BlenderLight) -> bpy.types.Object:
+    data = bpy.data.lights.new(name or "Light", values.type)
+    data.color = values.color
+    data.energy = values.energy
+    data.use_shadow = values.use_shadow
+    data.shadow_soft_size = values.shadow_soft_size
+    if values.use_temperature and hasattr(data, "use_temperature"):  # 色温度は Blender 4.5 以降
+        data.use_temperature = True
+        data.temperature = values.temperature
+    if values.type == "SUN":
+        data.angle = values.angle
+    if values.type in {"POINT", "SPOT"}:
+        data.use_soft_falloff = False  # 近くで弱める補正を切り、Unity と同じく点光源として扱う
+    if values.type == "SPOT":
+        data.spot_size = values.spot_size
+        data.spot_blend = values.spot_blend
+    if values.type == "AREA":
+        data.shape = values.shape
+        data.size = values.size
+        data.size_y = values.size_y
+    if values.use_custom_distance:
+        data.use_custom_distance = True
+        data.cutoff_distance = values.cutoff_distance
+    return bpy.data.objects.new(name or "Light", data)
+
+
+def _make_camera(name: str, values: BlenderCamera) -> bpy.types.Object:
+    data = bpy.data.cameras.new(name or "Camera")
+    data.type = values.type
+    data.sensor_fit = values.sensor_fit
+    data.sensor_width = values.sensor_width
+    data.sensor_height = values.sensor_height
+    data.lens = max(values.lens, 1.0)
+    data.ortho_scale = values.ortho_scale
+    data.clip_start = values.clip_start
+    data.clip_end = values.clip_end
+    data.shift_x = values.shift_x
+    data.shift_y = values.shift_y
+    return bpy.data.objects.new(name or "Camera", data)
 
 
 def _attach_to_empty(objects: list[bpy.types.Object], root, scale: float) -> None:
@@ -924,6 +993,47 @@ def run_import(
                     obj.hide_set(True)
                     obj.hide_render = True
 
+        # --- ライト・カメラ ---
+        baked_lights = 0
+        light_notes: set[str] = set()
+        wanted = ([CLASS_LIGHT] if opts.scene_lights else []) + ([CLASS_CAMERA] if opts.scene_cameras else [])
+        for component in scene_components(hierarchy, wanted) if wanted else []:
+            node = hierarchy.nodes[component.node]
+            if component.node in empties:
+                # 同じ GameObject にモデルの配置の Empty があれば、その子にする
+                parent, local = empties[component.node], Matrix.Identity(4)
+            else:
+                parent = _scene_empty(hierarchy, node.parent, target, empties, active) if node.parent is not None else None
+                local = Matrix(unity_to_blender(node.local))
+            if component.class_id == CLASS_LIGHT:
+                values = convert_light(component.body, prepared.pipeline)
+                obj = _make_light(component.name, values)
+                obj["unity_light"] = _json_text(component.body)
+                obj["unity_render_pipeline"] = prepared.pipeline
+                baked_lights += values.baked_only
+                light_notes.update(values.notes)
+                report.lights += 1
+            else:
+                obj = _make_camera(component.name, convert_camera(component.body))
+                obj["unity_camera"] = _json_text(component.body)
+                report.cameras += 1
+                if scene.camera is None and component.active:
+                    scene.camera = obj
+            target.objects.link(obj)
+            obj.parent = parent
+            location, rotation, _ = (local @ Matrix(LIGHT_CAMERA_BASIS)).decompose()
+            obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
+            if not component.active:
+                obj.hide_set(True)
+                obj.hide_render = True
+        if baked_lights:
+            report.warn(
+                f"scene {pathname}: {baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
+                "they were imported as real-time lights"
+            )
+        for note in sorted(light_notes):
+            report.warn(f"scene {pathname}: {note}")
+
         contents = scene_summary.contents
         if contents is None:
             return
@@ -934,8 +1044,6 @@ def run_import(
             )
         if contents.missing_sources:
             report.warn(f"scene {pathname}: {contents.missing_sources} prefab instance(s) refer to assets that are not in the package")
-        if contents.lights or contents.cameras:
-            report.warn(f"scene {pathname}: {contents.lights} light(s) and {contents.cameras} camera(s) are not imported yet")
         if contents.other_renderers:
             report.warn(
                 f"scene {pathname}: {contents.other_renderers} renderer(s) use meshes outside the package "

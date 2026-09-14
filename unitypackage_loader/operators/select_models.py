@@ -133,6 +133,8 @@ _ITEMS_PROP = "unitypkg_select_models"
 _INDEX_PROP = "unitypkg_select_models_index"
 _UNIT_PROP = "unitypkg_select_unit"
 _ARRANGE_PROP = "unitypkg_select_arrange"
+_LIGHTS_PROP = "unitypkg_select_lights"
+_CAMERAS_PROP = "unitypkg_select_cameras"
 
 
 def _items(context):
@@ -232,6 +234,12 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             split.active = sum(1 for it in visible if it.selected and it.supported) > 1
             split.label(text="Arrange")
             split.row().prop(wm, _ARRANGE_PROP, expand=True)
+        elif unit == UNIT_SCENES:
+            split = layout.split(factor=0.2)
+            split.label(text="Also Import")
+            row = split.row(align=True)
+            row.prop(wm, _LIGHTS_PROP, toggle=True, icon="LIGHT")
+            row.prop(wm, _CAMERAS_PROP, toggle=True, icon="CAMERA_DATA")
 
         col = layout.column(align=True)
         col.label(text=self.summary_materials, icon="MATERIAL")
@@ -254,6 +262,8 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts = _pending.opts
         opts.unit = unit
         opts.arrange = arrange
+        opts.scene_lights = getattr(wm, _LIGHTS_PROP)
+        opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
         if unit == UNIT_SCENES:
             opts.scene_paths = [s.pathname for s in prepared.scenes if s.guid in chosen]
@@ -333,10 +343,12 @@ def register() -> None:
     setattr(wm, _INDEX_PROP, IntProperty(default=0))
     setattr(wm, _UNIT_PROP, EnumProperty(name="Import Unit", items=_unit_items))
     setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
+    setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
+    setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))
 
 
 def unregister() -> None:
-    for prop in (_ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
+    for prop in (_CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
         if hasattr(bpy.types.WindowManager, prop):
             delattr(bpy.types.WindowManager, prop)
     for cls in reversed(_classes):

@@ -43,6 +43,8 @@ class ImportReport:
     extract_root: str = ""
     outlines: int = 0
     split_slots: int = 0  # prefab の割り当てに従って差し替えたマテリアルスロット数
+    lights: int = 0  # シーンから作ったライト
+    cameras: int = 0  # シーンから作ったカメラ
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -72,6 +74,8 @@ class ImportReport:
             parts.append(f"{self.split_slots} slots assigned from prefab")
         if self.outlines:
             parts.append(f"{self.outlines} outlines")
+        if self.lights or self.cameras:
+            parts.append(f"{self.lights} lights, {self.cameras} cameras")
         text = ", ".join(parts)
         if self.warnings:
             text += f". {len(self.warnings)} warning(s) — see the system console"
@@ -100,6 +104,8 @@ class ImportReport:
             lines += [f"        ! {w}" for w in m.warnings]
         lines.append(f"  images ({len(self.images)}):")
         lines += [f"    - {i}" for i in self.images]
+        if self.lights or self.cameras:
+            lines.append(f"  lights: {self.lights}, cameras: {self.cameras}")
         if self.warnings:
             lines.append(f"  warnings ({len(self.warnings)}):")
             lines += [f"    ! {w}" for w in self.warnings]
