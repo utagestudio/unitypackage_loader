@@ -14,6 +14,9 @@
 - 元がモデル（FBX 等）の PrefabInstance は、モデルのルートを表す 1 つの Node にする。ルートの Transform の fileID は
   FBX によらず定数なので上書きを当てられるが、中のオブジェクトへの上書きは fileID を名前に結び付けられないため
   読まずに数える（Issue #31）。
+- Unity 2018.2 以前の形式も読む。PrefabInstance はクラス名が ``Prefab`` で元を ``m_ParentPrefab`` に持ち、
+  stripped ドキュメントの参照は ``m_PrefabParentObject`` / ``m_PrefabInternal``、モデルのルートの fileID は
+  GameObject 100000 / Transform 400000。
 
 配置（``ModelPlacement``）は 2 種類:
 
@@ -53,6 +56,10 @@ _RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
 # モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）
 MODEL_ROOT_GAME_OBJECT = 919132149155446097
 MODEL_ROOT_TRANSFORM = -8679921383154817045
+# Unity 2018.2 以前の形式（.meta の fileIDToRecycleName で 100000 / 400000 が //RootNode）でのルート
+LEGACY_MODEL_ROOT_GAME_OBJECT = 100000
+LEGACY_MODEL_ROOT_TRANSFORM = 400000
+_LEGACY_MODEL_IDS = {LEGACY_MODEL_ROOT_GAME_OBJECT: MODEL_ROOT_GAME_OBJECT, LEGACY_MODEL_ROOT_TRANSFORM: MODEL_ROOT_TRANSFORM}
 
 MAX_NESTING = 16  # PrefabInstance をたどる深さの上限
 MAX_NODES = 200_000  # 1 つの階層に展開する Transform の上限（細工された巨大なシーンへの備え）
@@ -161,7 +168,9 @@ def parse_asset(data: str | bytes) -> RawAsset:
     for doc in load_documents(data):
         body = doc.body
         if doc.stripped:
-            source, instance = body.get("m_CorrespondingSourceObject"), body.get("m_PrefabInstance")
+            # 2018.3 以降は m_CorrespondingSourceObject / m_PrefabInstance、それより前は m_PrefabParentObject / m_PrefabInternal
+            source = body.get("m_CorrespondingSourceObject", body.get("m_PrefabParentObject"))
+            instance = body.get("m_PrefabInstance", body.get("m_PrefabInternal"))
             if isinstance(source, UnityRef) and isinstance(instance, UnityRef) and instance.file_id:
                 raw.aliases[doc.file_id] = (instance.file_id, source.file_id)
             continue
@@ -187,7 +196,8 @@ def parse_asset(data: str | bytes) -> RawAsset:
         elif doc.class_id in _RENDERER_CLASSES:
             renderer_docs.append(doc)
         elif doc.class_id == CLASS_PREFAB_INSTANCE:
-            source = _guid(body.get("m_SourcePrefab"))
+            # 2018.2 以前は m_ParentPrefab。prefab アセット自身の記録（m_IsPrefabParent: 1）は元の GUID を持たないので飛ばす
+            source = _guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
             modification = body.get("m_Modification")
             modification = modification if isinstance(modification, dict) else {}
             if not source:
@@ -321,10 +331,16 @@ class Expander:
 
     def _build(self, raw: RawAsset, stack: tuple[str, ...]) -> Hierarchy:
         h = Hierarchy(counts=Counter(raw.counts))
+        model_instances = {i.file_id for i in raw.instances if i.source_guid in self._models}
 
         def resolve(file_id: int) -> int:
             alias = raw.aliases.get(file_id)
-            return remap(*alias) if alias else file_id
+            if not alias:
+                return file_id
+            instance_id, source_id = alias
+            if instance_id in model_instances:
+                source_id = _LEGACY_MODEL_IDS.get(source_id, source_id)
+            return remap(instance_id, source_id)
 
         for t in raw.transforms.values():
             node = Node(
@@ -385,6 +401,8 @@ class Expander:
         def target_key(file_id: int, guid: str | None) -> int | None:
             if guid is not None and guid != source:
                 return None
+            if is_model:
+                file_id = _LEGACY_MODEL_IDS.get(file_id, file_id)
             return remap(iid, file_id)
 
         for file_id, guid in instance.removed_game_objects:

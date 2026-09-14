@@ -267,6 +267,60 @@ class DuplicateNameTest(unittest.TestCase):
         self.assertNotEqual(found[0].signature(), found[2].signature())  # マテリアルが違う
 
 
+class LegacyFormatTest(unittest.TestCase):
+    """Unity 2018.2 以前の形式（Prefab / m_ParentPrefab / m_PrefabParentObject / m_PrefabInternal、ルートは 400000）。"""
+
+    PREFAB = HEADER + (
+        # prefab アセット自身の記録。元の GUID を持たないので配置ではない
+        "--- !u!1001 &100100000\nPrefab:\n  m_Modification:\n    m_TransformParent: {fileID: 0}\n"
+        "    m_Modifications: []\n    m_RemovedComponents: []\n  m_ParentPrefab: {fileID: 0}\n"
+        "  m_RootGameObject: {fileID: 1}\n  m_IsPrefabParent: 1\n"
+    ) + game_object(1, "Crate") + transform(2, 1) + mesh_renderer(3, 4, 1, MODEL, MAT_A)
+
+    @staticmethod
+    def legacy_instance(file_id, source, parent, mods):
+        return (
+            f"--- !u!1001 &{file_id}\nPrefab:\n  serializedVersion: 2\n  m_Modification:\n"
+            f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
+            f"    m_RemovedComponents: []\n  m_ParentPrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
+            "  m_IsPrefabParent: 0\n"
+        )
+
+    def scene(self):
+        return HEADER + "".join([
+            game_object(1000, "Room"),
+            transform(1001, 1000, pos=(0, 0, 5)),
+            self.legacy_instance(2000, MODEL, 1001, [
+                mod(400000, MODEL, "m_LocalPosition.x", 2),
+                mod(100000, MODEL, "m_Name", "Pot"),
+                mod(2300000, MODEL, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {MAT_B}, type: 2}}"),
+            ]),
+            "--- !u!4 &2001 stripped\nTransform:\n"
+            f"  m_PrefabParentObject: {{fileID: 400000, guid: {MODEL}, type: 3}}\n  m_PrefabInternal: {{fileID: 2000}}\n",
+            game_object(3000, "Flower"),  # FBX の配置の子に付けた、シーン側の GameObject
+            transform(3001, 3000, father=2001, pos=(0, 1, 0)),
+            self.legacy_instance(4000, "d" * 32, 0, [mod(2, "d" * 32, "m_LocalPosition.z", -1)]),
+        ])
+
+    def test_legacy_model_and_prefab_instances_are_placed(self):
+        assets = {"d" * 32: self.PREFAB}
+        exp = Expander(lambda g: parse_asset(assets[g]) if g in assets else None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(self.scene()))
+        found = placements(h, [MODEL])
+        self.assertEqual([h.nodes[p.root].name for p in found], ["Pot", "Crate"])
+        self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (2.0, 0.0, 5.0))
+        self.assertEqual(transform_point(found[1].world, (0, 0, 0)), (0.0, 0.0, -1.0))
+        self.assertEqual(h.missing_sources, 0)
+        self.assertEqual(h.unresolved_overrides, 1)  # モデルの中の Renderer（2300000）へのマテリアルの上書き
+
+    def test_child_of_legacy_model_instance_uses_stripped_alias(self):
+        exp = Expander(lambda g: None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(self.scene()))
+        flower = next(n for n in h.nodes.values() if n.name == "Flower")
+        self.assertEqual(h.nodes[flower.parent].name, "Pot")
+        self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+
 class RobustnessTest(unittest.TestCase):
     def test_self_referencing_prefab_stops(self):
         h = expander().expand_asset(LOOP)
