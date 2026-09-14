@@ -17,7 +17,16 @@ from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntPropert
 
 from ..core.package import PackageError
 from ..core.report import sanitize_display
-from ..core.units import NO_MESH_REASON, UNIT_MODELS, UNIT_PREFABS, available_units, default_unit
+from ..core.units import (
+    NO_MESH_REASON,
+    NO_SCENE_MESH_REASON,
+    UNIT_MODELS,
+    UNIT_PREFABS,
+    UNIT_SCENES,
+    UNREADABLE_SCENE_REASON,
+    available_units,
+    default_unit,
+)
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
 
@@ -50,7 +59,7 @@ def _short_reason(reason: str) -> str:
 
     if reason == BLEND_DISABLED_REASON:
         return ".blend import disabled"
-    if reason == NO_MESH_REASON:
+    if reason in (NO_MESH_REASON, NO_SCENE_MESH_REASON, UNREADABLE_SCENE_REASON):
         return reason
     return "unsupported format"
 
@@ -59,8 +68,8 @@ def _plural(count: int, word: str) -> str:
     return f"{count} {word}" if count == 1 else f"{count} {word}s"
 
 
-_UNIT_ICONS = {UNIT_PREFABS: "PACKAGE", UNIT_MODELS: "MESH_DATA"}
-_UNIT_NUMBERS = {UNIT_PREFABS: 0, UNIT_MODELS: 1}
+_UNIT_ICONS = {UNIT_SCENES: "SCENE_DATA", UNIT_PREFABS: "PACKAGE", UNIT_MODELS: "MESH_DATA"}
+_UNIT_NUMBERS = {UNIT_PREFABS: 0, UNIT_MODELS: 1, UNIT_SCENES: 2}
 
 # EnumProperty の動的 items は Python 側で文字列を保持しておかないと表示が壊れるので、モジュールで持つ
 _unit_enum_cache: list[tuple[str, str, str, str, int]] = []
@@ -69,12 +78,12 @@ _unit_enum_cache: list[tuple[str, str, str, str, int]] = []
 def _unit_items(self, context):
     """単位の切り替え。候補が 1 つも無い単位は出さない。ラベルに候補数を付ける。"""
     labels = {identifier: (name, description) for identifier, name, description in UNIT_ITEMS}
-    counts = {UNIT_PREFABS: 0, UNIT_MODELS: 0}
+    counts = {UNIT_SCENES: 0, UNIT_PREFABS: 0, UNIT_MODELS: 0}
     units: list[str] = []
     if _pending is not None:
         prepared = _pending.prepared
-        counts = {UNIT_PREFABS: len(prepared.prefabs), UNIT_MODELS: len(prepared.models)}
-        units = available_units(prepared.prefabs, len(prepared.models))
+        counts = {UNIT_SCENES: len(prepared.scenes), UNIT_PREFABS: len(prepared.prefabs), UNIT_MODELS: len(prepared.models)}
+        units = available_units(prepared.prefabs, len(prepared.models), prepared.scenes)
     _unit_enum_cache[:] = [
         (unit, f"{labels[unit][0]} ({counts[unit]})", labels[unit][1], _UNIT_ICONS[unit], _UNIT_NUMBERS[unit])
         for unit in units or [UNIT_MODELS]
@@ -138,7 +147,7 @@ def _current_unit(context) -> str:
 class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
     bl_idname = "import_scene.unitypackage_select"
     bl_label = "Import from Unitypackage"
-    bl_description = "Choose what to import from the package: prefabs or model files"
+    bl_description = "Choose what to import from the package: scenes, prefabs or model files"
     bl_options = {"REGISTER", "UNDO", "INTERNAL"}
 
     package_name: StringProperty()
@@ -152,6 +161,18 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         prepared = _pending.prepared
         items = _items(context)
         items.clear()
+        for s in prepared.scenes:
+            item = items.add()
+            item.kind = UNIT_SCENES
+            item.guid = s.guid
+            item.pathname = sanitize_display(s.pathname)
+            if s.supported:
+                models = len(s.contents.model_guids) if s.contents is not None else 0
+                item.detail_text = f"{len(s.placements)} placed · {_plural(models, 'model')}"
+            else:
+                item.detail_text = _short_reason(s.skip_reason)
+            item.supported = s.supported
+            item.selected = s.supported
         for p in prepared.prefabs:
             item = items.add()
             item.kind = UNIT_PREFABS
@@ -179,7 +200,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         wm = context.window_manager
         prefs = get_prefs(context)
         last_unit = prefs.last_import_unit if prefs is not None else ""
-        setattr(wm, _UNIT_PROP, default_unit(prepared.prefabs, len(prepared.supported_models), last_unit))
+        setattr(wm, _UNIT_PROP, default_unit(prepared.prefabs, len(prepared.supported_models), last_unit, prepared.scenes))
         setattr(wm, _ARRANGE_PROP, prefs.default_arrange if prefs is not None else _pending.opts.arrange)
 
         self.package_name = sanitize_display(prepared.path.name)
@@ -233,12 +254,13 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts = _pending.opts
         opts.unit = unit
         opts.arrange = arrange
-        if unit == UNIT_PREFABS:
+        opts.scene_paths = opts.prefab_paths = opts.model_guids = None
+        if unit == UNIT_SCENES:
+            opts.scene_paths = [s.pathname for s in prepared.scenes if s.guid in chosen]
+        elif unit == UNIT_PREFABS:
             opts.prefab_paths = [p.pathname for p in prepared.prefabs if p.guid in chosen]
-            opts.model_guids = None
         else:
             opts.model_guids = [m.guid for m in prepared.models if m.guid in chosen]
-            opts.prefab_paths = None
 
         prefs = get_prefs(context)
         if prefs is not None:
