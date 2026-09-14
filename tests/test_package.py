@@ -17,6 +17,7 @@ GUID_TEX = "2" * 32
 GUID_FBX = "3" * 32
 GUID_OTHER = "4" * 32
 GUID_VRM = "5" * 32
+GUID_SCENE = "6" * 32
 
 MAT_TEXT = b"%YAML 1.1\n--- !u!21 &2100000\nMaterial:\n  m_Name: ExampleMat\n"
 
@@ -49,6 +50,9 @@ def build_package(path: Path) -> None:
         _add(tar, f"{GUID_OTHER}/asset", b"class X {}")
         _add(tar, f"{GUID_VRM}/pathname", b"Assets/Example/Avatar.vrm")
         _add(tar, f"{GUID_VRM}/asset", b"glTF" + b"\0" * 16)
+        # シーン
+        _add(tar, f"{GUID_SCENE}/pathname", b"Assets/Example/Scenes/Showcase.unity")
+        _add(tar, f"{GUID_SCENE}/asset", b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n  m_Name: Root\n")
         # 想定外のメンバーは無視される
         _add(tar, "README.txt", b"hello")
 
@@ -65,7 +69,10 @@ class SyntheticPackageTests(unittest.TestCase):
 
     def test_scan_and_classify(self):
         entries = self.pkg.scan()
-        self.assertEqual(set(entries), {GUID_FOLDER, GUID_MAT, GUID_TEX, GUID_FBX, GUID_OTHER, GUID_VRM})
+        self.assertEqual(set(entries), {GUID_FOLDER, GUID_MAT, GUID_TEX, GUID_FBX, GUID_OTHER, GUID_VRM, GUID_SCENE})
+        self.assertEqual(entries[GUID_SCENE].kind, "scene")
+        self.assertEqual([e.guid for e in self.pkg.scenes()], [GUID_SCENE])
+        self.assertIn(b"m_Name: Root", self.pkg.read_asset(GUID_SCENE))  # scan 時にキャッシュされる小さなシーン
         self.assertEqual(entries[GUID_FOLDER].kind, "folder")
         self.assertEqual(entries[GUID_MAT].kind, "material")
         self.assertEqual(entries[GUID_TEX].kind, "texture")  # 拡張子は大文字でも可

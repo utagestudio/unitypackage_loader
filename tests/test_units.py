@@ -1,16 +1,22 @@
 import unittest
 
 from tests import _paths  # noqa: F401
+from unitypackage_loader.core.hierarchy import IDENTITY, ModelPlacement, SceneContents
 from unitypackage_loader.core.prefab import RendererMaterials
 from unitypackage_loader.core.units import (
     NO_MESH_REASON,
+    NO_SCENE_MESH_REASON,
     UNIT_MODELS,
     UNIT_PREFABS,
+    UNIT_SCENES,
+    UNREADABLE_SCENE_REASON,
     PrefabSummary,
+    SceneSummary,
     available_units,
     choice_count,
     default_unit,
     summarize_prefabs,
+    summarize_scene,
 )
 
 MAT_A = "a" * 32
@@ -93,6 +99,41 @@ class UnitChoiceTest(unittest.TestCase):
         self.assertEqual(default_unit([self.ok], 1, UNIT_MODELS), UNIT_MODELS)
         self.assertEqual(default_unit([self.ok], 0, UNIT_MODELS), UNIT_PREFABS)
         self.assertEqual(default_unit([self.ok], 1, "BOGUS"), UNIT_PREFABS)
+
+
+class SceneUnitTest(unittest.TestCase):
+    def contents(self, *models):
+        return SceneContents([ModelPlacement(m, i, IDENTITY, True) for i, m in enumerate(models)], lights=2)
+
+    def test_scene_with_placements_is_readable(self):
+        scene = summarize_scene("s", "Assets/Scenes/Showcase.unity", self.contents(MODEL_1, MODEL_1), {})
+        self.assertTrue(scene.supported)
+        self.assertEqual(scene.name, "Showcase")
+        self.assertEqual(len(scene.placements), 2)
+
+    def test_scene_without_package_meshes_is_kept_with_reason(self):
+        scene = summarize_scene("s", "Assets/Scenes/Menu.unity", SceneContents([], ui_elements=40), {})
+        self.assertFalse(scene.supported)
+        self.assertEqual(scene.skip_reason, NO_SCENE_MESH_REASON)
+
+    def test_unreadable_scene(self):
+        scene = summarize_scene("s", "Assets/Broken.unity", None, {})
+        self.assertEqual((scene.supported, scene.skip_reason, scene.placements), (False, UNREADABLE_SCENE_REASON, []))
+
+    def test_scene_using_only_unsupported_models(self):
+        scene = summarize_scene("s", "Assets/Blend.unity", self.contents(BLEND), {BLEND: ".blend disabled"})
+        self.assertEqual((scene.supported, scene.skip_reason), (False, ".blend disabled"))
+
+    def test_units_order_and_counts(self):
+        ok_scene = SceneSummary("s", "A.unity", self.contents(MODEL_1))
+        ng_scene = SceneSummary("t", "B.unity", supported=False, skip_reason=NO_SCENE_MESH_REASON)
+        prefab = PrefabSummary("p", "P.prefab", [MODEL_1])
+        self.assertEqual(available_units([prefab], 1, [ng_scene]), [UNIT_SCENES, UNIT_PREFABS, UNIT_MODELS])
+        self.assertEqual(choice_count([prefab], 1, [ok_scene, ng_scene]), 3)
+        # 既定は Prefabs を優先し、前回 Scenes を選んでいて読めるシーンがあれば Scenes
+        self.assertEqual(default_unit([prefab], 1, "", [ok_scene]), UNIT_PREFABS)
+        self.assertEqual(default_unit([prefab], 1, UNIT_SCENES, [ok_scene]), UNIT_SCENES)
+        self.assertEqual(default_unit([prefab], 1, UNIT_SCENES, [ng_scene]), UNIT_PREFABS)
 
 
 if __name__ == "__main__":
