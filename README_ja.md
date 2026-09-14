@@ -48,14 +48,16 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 - **ドラッグ＆ドロップ**: `.unitypackage` を 3D ビューポートにドラッグ＆ドロップすると、インポートオプションのポップアップが開きます。複数ファイルをまとめてドロップすることもできます。
 - **メニュー**: File > Import > Unitypackage (.unitypackage) からファイルブラウザで選び、右側のオプションを必要に応じて変更して Import
 
+オプションで常に表示されるのは Material Mode と Scale だけで、残りは Model / Materials / Textures の折りたたみに入っています。
+
 | セクション | 項目 | 説明 |
 |---|---|---|
-| Model | Models | `Ask`（複数モデルがあれば選択ダイアログ）/ `All` / `First Only` |
-| | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
+| （常に表示） | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
+| | Scale | モデルのインポーターに渡すスケール |
+| Model | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
-| Materials | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
-| | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
+| Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
 | | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
 | | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
@@ -69,7 +71,22 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 システムコンソールに詳細（各マテリアルの対応先 .mat、使用テクスチャ、警告）が出ます。
 パッケージ名の Collection が作られ、その中にオブジェクトが入ります。
 
-既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。
+### 読み込むものを選ぶ
+
+パッケージに選べる prefab やモデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
+上部で読み込む単位を選び、一覧で読み込むものにチェックを入れます。
+
+- **Prefabs**: prefab ごとに、その prefab のマテリアルの割り当てのまま読み込みます。パッケージの Collection の中に prefab ごとの Collection ができます。
+  同じモデルを使う色違いも一緒に読み込めます。2 つ以上選んだときは **Arrange** で、`Side by Side`（重ならないように並べる。数が多ければ格子状に折り返す）と
+  `Stack at Origin`（原点に重ねる）を選べます。
+- **Models**: モデルファイル（FBX など）をそのまま読み込みます。マテリアルは [メッシュとマテリアルの対応付け](#メッシュとマテリアルの対応付け) のとおりに決まります。
+
+1 回のインポートで使う単位は 1 つなので、同じモデルを誤って二重に読み込むことはありません。読み込めないものも一覧から外さず、
+灰色にして理由（`no mesh in package`、`.blend import disabled` など）を表示します。最後に選んだ単位と並べ方は次回の既定になります。
+prefab の中の配置（子オブジェクトの位置など）はまだ再現しません。prefab のモデルは、その Collection の原点に置きます。
+
+既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。選択ダイアログを出すか
+（`Selection Dialog`: `Ask` / `All Models` / `First Model Only`）と、prefab の並べ方（`Arrange Prefabs`）もここで設定します。
 独自シェーダーの GUID 表（`shader_guids.json` と同じ書式の JSON）を追加登録することもできます。
 "Max Extract Size"（既定 8 GiB、0 で無制限）を超える量を 1 つのパッケージから展開しようとした場合や、展開先の空き容量に
 収まらない場合は、何も書かずにインポートを中止します。
@@ -104,14 +121,15 @@ Unity で実際に表示されるのは prefab の Renderer に設定された�
 FBX 内では少数のマテリアルを共有し、Unity 側で prefab がパーツごとに別の .mat を割り当てているパッケージでは、
 prefab の割り当てに従ってスロット単位で Blender マテリアルを分割します。
 prefab の Renderer は、そのメッシュを持つモデルにだけ当てはめます（別モデルの同名オブジェクトには使いません）。
-同じモデルを使う prefab が複数ある場合（色違いなど）は、選択ダイアログのそのモデルの行で prefab を選べます。
-既定は「すべてを統合し、パス順で先のものを優先」です。
+読み込む単位が Models のとき、同じモデルを使う prefab が複数ある場合（色違いなど）は、すべてを統合し、パス順で先のものを優先します。
+特定の prefab の割り当てを使うには、読み込む単位 Prefabs でその prefab を読み込みます。
 Prefab Variant やネストされた prefab のマテリアルの上書きは、元がパッケージ内の prefab なら読みます。
 モデル（FBX）を直接置いたものへの上書きはまだ読まず、警告に出します。
 prefab のマテリアルの並びは Unity のサブメッシュ順（メッシュのポリゴンで最初に使われた順）で、Blender のスロット順と
 異なることがあるため、その順でスロットに対応付けます。
 
-ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます）。
+ファイルブラウザで複数の `.unitypackage` を選ぶと一括でインポートします（パッケージごとに Collection ができます。
+選択ダイアログは出さず、読み込む単位 Models ですべてのモデルを読み込みます）。
 
 ### マテリアルの対応方針
 

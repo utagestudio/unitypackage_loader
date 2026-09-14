@@ -11,7 +11,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
 from ..core.report import sanitize_display
-from ..ui.preferences import EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, get_prefs
+from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
 from . import select_models
 
 
@@ -29,6 +29,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
 
     # --- Model ---
     models: EnumProperty(name="Models", items=MODELS_ITEMS, default="ASK")
+    # 読み込む単位と並べ方。通常はモデル選択ダイアログで選ぶ。スクリプトやダイアログを出さないときに使う
+    unit: EnumProperty(name="Import Unit", items=UNIT_ITEMS, default="MODELS", options={"HIDDEN", "SKIP_SAVE"})
+    arrange: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE", options={"HIDDEN", "SKIP_SAVE"})
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -128,46 +131,53 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         layout.use_property_split = True
         layout.use_property_decorate = False
 
-        box = layout.box()
-        box.label(text="Model", icon="MESH_DATA")
-        box.prop(self, "models")
-        box.prop(self, "fbx_importer")
-        box.prop(self, "global_scale")
-        box.prop(self, "use_anim")
-        box.prop(self, "ignore_leaf_bones")
-        box.prop(self, "use_vrm_addon")
-        box.prop(self, "import_blend")
+        # よく変える項目だけを常に出し、残りは折りたたむ。何を読み込むか（prefab / モデル）は次のダイアログで選ぶ。
+        # 「Models」（選択ダイアログを出すか）は Preferences の既定値に任せ、ここには出さない
+        col = layout.column()
+        col.prop(self, "material_mode")
+        col.prop(self, "global_scale")
+
+        header, body = layout.panel("UNITYPKG_import_model", default_closed=True)
+        header.label(text="Model", icon="MESH_DATA")
+        if body:
+            body.prop(self, "fbx_importer")
+            body.prop(self, "use_anim")
+            body.prop(self, "ignore_leaf_bones")
+            body.prop(self, "use_vrm_addon")
+            body.prop(self, "import_blend")
         if self.import_blend:
-            col = box.column(align=True)
-            col.label(text="Bundled .blend files may contain Python scripts.", icon="ERROR")
-            col.label(text="Enable only for packages you trust.")
+            # 閉じたパネルの中で ON になっていても（プリセットなど）見落とさないよう、開閉によらず出す
+            warn = (body or layout).column(align=True)
+            warn.label(text="Bundled .blend files may contain Python scripts.", icon="ERROR")
+            warn.label(text="Enable only for packages you trust.")
 
-        box = layout.box()
-        box.label(text="Materials", icon="MATERIAL")
-        box.prop(self, "material_mode")
-        sub = box.column()
-        sub.active = self.material_mode != "NAMES_ONLY"
-        sub.prop(self, "force_opaque")
-        sub.prop(self, "backface_culling")
-        sub.prop(self, "use_normal_maps")
-        sub.prop(self, "use_emission")
-        sub.prop(self, "outlines")
-        if self.outlines:
-            sub.prop(self, "outline_width_scale")
-        box.prop(self, "reuse_existing")
-        sub = box.column()
-        sub.active = self.import_blend
-        sub.prop(self, "blend_materials")
-        box.prop(self, "store_props")
+        header, body = layout.panel("UNITYPKG_import_materials", default_closed=True)
+        header.label(text="Materials", icon="MATERIAL")
+        if body:
+            sub = body.column()
+            sub.active = self.material_mode != "NAMES_ONLY"
+            sub.prop(self, "force_opaque")
+            sub.prop(self, "backface_culling")
+            sub.prop(self, "use_normal_maps")
+            sub.prop(self, "use_emission")
+            sub.prop(self, "outlines")
+            if self.outlines:
+                sub.prop(self, "outline_width_scale")
+            body.prop(self, "reuse_existing")
+            sub = body.column()
+            sub.active = self.import_blend
+            sub.prop(self, "blend_materials")
+            body.prop(self, "store_props")
 
-        box = layout.box()
-        box.label(text="Textures", icon="TEXTURE")
-        box.prop(self, "extract_mode")
-        if self.extract_mode == "CUSTOM":
-            box.prop(self, "extract_path")
-        box.prop(self, "pack_images")
-        box.prop(self, "import_unreferenced")
-        box.prop(self, "overwrite_extracted")
+        header, body = layout.panel("UNITYPKG_import_textures", default_closed=True)
+        header.label(text="Textures", icon="TEXTURE")
+        if body:
+            body.prop(self, "extract_mode")
+            if self.extract_mode == "CUSTOM":
+                body.prop(self, "extract_path")
+            body.prop(self, "pack_images")
+            body.prop(self, "import_unreferenced")
+            body.prop(self, "overwrite_extracted")
 
     def _selected_paths(self) -> list[str]:
         if self.files and self.directory:
@@ -191,6 +201,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             return ImportOptions(
                 # 一括インポート時はダイアログを出さず全モデルを読む
                 models="ALL" if (batch and self.models == "ASK") else self.models,
+                unit=self.unit,
+                arrange=self.arrange,
                 material_mode=self.material_mode,
                 force_opaque=self.force_opaque,
                 backface_culling=self.backface_culling,
@@ -230,7 +242,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                         path, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
                     )
                     ask = opts.models == "ASK" and not bpy.app.background
-                    if ask and (len(prepared.models) > 1 or prepared.has_prefab_choice):
+                    if ask and prepared.choice_count > 1:
                         select_models.set_pending(path, opts, prepared)
                         return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
                     report = run_import(
