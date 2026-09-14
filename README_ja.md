@@ -7,7 +7,7 @@ Unity 側のマテリアル設定とテクスチャを反映した状態で配�
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
 - 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
-- 読み込まないもの: シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等
+- 読み込まないもの: シェーダー本体、C#、アニメーション、ライト・カメラ、Expression メニュー等。prefab の階層は、シーンを読み込むときだけ再現します（モデルの配置と、その上の GameObject）
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
 ## インストール
@@ -73,9 +73,14 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 ### 読み込むものを選ぶ
 
-パッケージに選べる prefab やモデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
+パッケージに選べるシーン・prefab・モデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
 上部で読み込む単位を選び、一覧で読み込むものにチェックを入れます。
 
+- **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
+  モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
+  同じモデル・同じマテリアルの配置は、メッシュのデータを共有した複製になります。ライト、カメラ、UI、Terrain、パッケージに無いメッシュ
+  （Unity 組み込みの Cube など）は読み込まず、警告に出します。モデルファイル（FBX）を直接置いたものは、ルートの位置だけを読み、
+  中のオブジェクトへの変更は件数を警告に出します。
 - **Prefabs**: prefab ごとに、その prefab のマテリアルの割り当てのまま読み込みます。パッケージの Collection の中に prefab ごとの Collection ができます。
   同じモデルを使う色違いも一緒に読み込めます。2 つ以上選んだときは **Arrange** で、`Side by Side`（重ならないように並べる。数が多ければ格子状に折り返す）と
   `Stack at Origin`（原点に重ねる）を選べます。
@@ -83,7 +88,8 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 1 回のインポートで使う単位は 1 つなので、同じモデルを誤って二重に読み込むことはありません。読み込めないものも一覧から外さず、
 灰色にして理由（`no mesh in package`、`.blend import disabled` など）を表示します。最後に選んだ単位と並べ方は次回の既定になります。
-prefab の中の配置（子オブジェクトの位置など）はまだ再現しません。prefab のモデルは、その Collection の原点に置きます。
+読み込む単位 Prefabs では、prefab の中の配置（子オブジェクトの位置など）は再現せず、prefab のモデルをその Collection の原点に置きます。
+配置ごと読み込むには、その prefab を置いたシーンを読み込みます。
 
 既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。選択ダイアログを出すか
 （`Selection Dialog`: `Ask` / `All Models` / `First Model Only`）と、prefab の並べ方（`Arrange Prefabs`）もここで設定します。
