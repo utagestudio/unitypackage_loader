@@ -54,10 +54,11 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
 
 - **コミットは作業の小さな単位ごと**に行う。メッセージは日本語、先頭に `feat:` `fix:` `docs:` `test:` `refactor:` `chore:` `ci:` を付け、
   本文に変更内容と理由を書く。各コミット時点で Extension が読み込める状態を保つ。
-- **追跡ファイルに検証用アセット固有の情報を書かない。** アセット名、ファイル名、メッシュ・マテリアル・テクスチャ名、
-  頂点数やファイルサイズなどの識別につながる数値は、ドキュメント・コード・コメント・テスト・コミットメッセージのいずれにも入れない。
-  検証用データと期待値（`_local/expectations.json`）は `_local/` に置く。コミット前に `git diff --cached` と履歴を検索して確認する。
-  コミットしてよいフィクスチャは手書きの合成データ（`tests/make_synthetic_package.py` の生成物と `tests/expectations_synthetic.json`）だけ。
+- **検証用アセットのデータはリポジトリに含めない。** unitypackage、展開したファイル、そこから取り出したモデル・テクスチャ、
+  実パッケージ用の期待値（`_local/expectations.json`）は `_local/` に置く（購入アセットは再配布できない）。
+  コミットしてよいフィクスチャは手書き・生成の合成データ（`tests/make_synthetic_*.py` の生成物と `tests/expectations_synthetic*.json`）だけ。
+  アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
+  （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
 - Blender API は 4.2 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
   新 FBX インポーター `wm.fbx_import` を優先し、無ければ `import_scene.fbx`。

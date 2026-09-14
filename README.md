@@ -175,7 +175,7 @@ blender -b --factory-startup --python tests/integration_import.py
 ```
 
 Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
-and the rule is that committed files must not contain names or numbers specific to the test assets.
+and the data of the assets used for testing is never committed (the committed test data is synthetic only).
 See `tests/expectations.schema.md` for the file format.
 
 See [DESIGN.md](DESIGN.md) for design details.

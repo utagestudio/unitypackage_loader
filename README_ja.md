@@ -166,7 +166,7 @@ blender -b --factory-startup --python tests/integration_import.py
 ```
 
 検証用データ（unitypackage、展開物、期待値）は `_local/` に置きます。このディレクトリは gitignore 対象で、
-コミットするファイルに検証用アセット固有の名称や数値を書かないことをルールにしています。
+検証に使ったアセットのデータはリポジトリに含めません（コミットするテスト用データは合成データだけです）。
 書式は `tests/expectations.schema.md` を参照してください。
 
 設計の詳細は [DESIGN.md](DESIGN.md) を参照してください。
