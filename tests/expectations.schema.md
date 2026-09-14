@@ -42,7 +42,14 @@
   "collections": {
     "<コレクション名>": { "objects": 0, "prefab": "<prefab の pathname>", "mat_files": ["<.mat のファイル名>"] }
   },
-  "prefab_collections_overlap": false
+  "prefab_collections_overlap": false,
+  "scenes": { "count": 0 },
+  "placed_objects": [
+    { "top": "<最上位の Empty の名前>", "object": "<オブジェクト名（連番を除く）>", "tip": [0.0, 0.0, 0.0], "hidden": false, "mat_files": ["<.mat のファイル名>"] }
+  ],
+  "shared_meshes": [
+    { "objects": [{ "top": "<Empty>", "object": "<オブジェクト>" }], "shared": true }
+  ]
 }
 ```
 
@@ -62,6 +69,9 @@
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 | `prefabs.count` | 読み込む単位 Prefabs で読み込んだ prefab の数（`options` に `"unit": "PREFABS"` を指定する） |
 | `collections` | prefab ごとのコレクションの中身。`objects` はオブジェクト数（子コレクション込み）、`prefab` はコレクションの `unity_prefab`、`mat_files` はメッシュに付いたマテリアルの元の .mat のファイル名の集合（同じモデルを読み直すとマテリアル名に連番が付くため、名前ではなく元のファイルで比べる） |
+| `scenes.count` | 読み込む単位 Scenes で読み込んだシーンの数（`options` に `"unit": "SCENES"` を指定する） |
+| `placed_objects` | シーンで配置したオブジェクト。最上位の Empty（Unity の最上位の GameObject）の名前とオブジェクト名（`.001` などの連番を除く）で 1 つに絞る。`tip` は評価後のメッシュで重心から最も遠い頂点のワールド座標（誤差 0.001 まで）、`hidden` は `hide_get()`、`mat_files` はスロットのマテリアルの元の .mat のファイル名の集合 |
+| `shared_meshes` | 挙げたオブジェクトがメッシュのデータを共有しているか（同じモデル・同じ割り当ての配置は複製で共有する） |
 | `prefab_collections_overlap` | prefab ごとのコレクションの外形（XY）が重なっているか。並べる（`"arrange": "SIDE_BY_SIDE"`）なら `false`、原点に重ねる（`"STACK"`）なら `true` |
 
 実行:

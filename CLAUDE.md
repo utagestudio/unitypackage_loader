@@ -23,6 +23,9 @@
   prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
   候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。Prefab Variant / ネストは元が prefab なら
   上書きを重ねる（fileID は PrefabInstance の fileID XOR 元の fileID）。元が FBX の上書きは未対応（Issue #31）。
+- **読み込む単位**: 選択ダイアログで Scenes / Prefabs / Models を選ぶ（排他。候補は推測で外さず、読めないものは理由付きで灰色）。
+  Scenes は `core/hierarchy.py` で .unity を展開し、モデルの配置ごとに Empty の下へ読み込む。Unity のモデル空間の (x, y, z) は
+  Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。
 - **マテリアルモード**: Auto（トゥーン系 → Toon ノードグループ、PBR 系 → Principled）/ Principled / Toon / Unlit / Names Only。
   Toon は `blender/toon_group.py` の `UnityToon`（Shader to RGB を使うため EEVEE 向け）。
 - **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）。
@@ -88,6 +91,8 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs.json        # 読み込む単位 Prefabs（並べる）
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
+blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/synthetic_scene.unitypackage）
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py

@@ -1,0 +1,21 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "unit": "SCENES" },
+  "scenes": { "count": 1 },
+  "warnings_max": 1,
+  "placed_objects": [
+    { "top": "A", "object": "Spike", "tip": [3.7824, -3.9004, 1.4346], "hidden": false, "mat_files": ["ProbeMat.mat"] },
+    { "top": "A", "object": "Child", "tip": [1.0050, -1.8401, 4.4622] },
+    { "top": "A", "object": "Skinned", "tip": [-4.0036, -7.4898, 4.8779] },
+    { "top": "Holder", "object": "Spike", "tip": [4.9088, -3.5019, 0.9073], "hidden": false },
+    { "top": "Holder", "object": "Child", "tip": [3.4352, -1.7490, 3.4838] },
+    { "top": "Holder", "object": "Skinned", "tip": [-1.9000, -3.1213, 2.1364] },
+    { "top": "C", "object": "Spike", "tip": [-1.4588, 1.0608, 1.8000], "mat_files": ["ProbeMat.mat"] },
+    { "top": "C", "object": "Child", "tip": [0.5821, -44.9414, 36.7786], "mat_files": ["ProbeRed.mat"] },
+    { "top": "C", "object": "Skinned", "tip": [-0.7000, 5.6000, 2.6000] },
+    { "top": "Hidden", "object": "Spike", "hidden": true }
+  ],
+  "shared_meshes": [
+    { "objects": [{ "top": "A", "object": "Spike" }, { "top": "Holder", "object": "Spike" }, { "top": "Hidden", "object": "Spike" }], "shared": true },
+    { "objects": [{ "top": "A", "object": "Child" }, { "top": "C", "object": "Child" }], "shared": false }
+  ]
+}

@@ -73,6 +73,38 @@ class Check:
             self.failures.append(f"{label}: {detail or 'condition failed'}")
 
 
+def _strip_suffix(name: str) -> str:
+    base, dot, suffix = name.rpartition(".")
+    return base if dot and suffix.isdigit() and len(suffix) == 3 else name
+
+
+def _find_placed(top: str, name: str) -> list:
+    found = []
+    for obj in bpy.data.objects:
+        if _strip_suffix(obj.name) != name:
+            continue
+        root = obj
+        while root.parent is not None:
+            root = root.parent
+        if _strip_suffix(root.name) == top:
+            found.append(obj)
+    return found
+
+
+def _tip_world(obj) -> Vector:
+    """評価後（アーマチュア変形後）のメッシュで、重心から最も遠い頂点のワールド座標。"""
+    bpy.context.view_layer.update()
+    evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    mesh = evaluated.to_mesh()
+    try:
+        points = [v.co.copy() for v in mesh.vertices]
+        centroid = sum(points, Vector()) / len(points)
+        tip = max(points, key=lambda p: (p - centroid).length_squared)
+        return evaluated.matrix_world @ tip
+    finally:
+        evaluated.to_mesh_clear()
+
+
 def _image_of(mat: bpy.types.Material, label: str):
     for node in mat.node_tree.nodes:
         if node.bl_idname == "ShaderNodeTexImage" and node.label == label:
@@ -237,6 +269,36 @@ def main() -> int:
             if a[1] < b[2] and b[1] < a[2] and a[3] < b[4] and b[3] < a[4]
         ]
         c.eq("prefab collections overlap", bool(overlaps), exp["prefab_collections_overlap"])
+
+    if "count" in exp.get("scenes", {}):
+        c.eq("scene count", len(report.scenes), exp["scenes"]["count"])
+
+    # 読み込む単位 Scenes で配置したオブジェクト。複製すると名前に連番が付くので、最上位の Empty（Unity の最上位の
+    # GameObject）の名前とオブジェクト名（連番を除く）で探す。tip は重心から最も遠い頂点のワールド座標
+    for spec in exp.get("placed_objects", []):
+        label = f"{spec['top']}/{spec['object']}"
+        found = _find_placed(spec["top"], spec["object"])
+        c.eq(f"{label} found", len(found), 1)
+        if len(found) != 1:
+            continue
+        obj = found[0]
+        if "tip" in spec:
+            tip = _tip_world(obj)
+            c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
+        if "hidden" in spec:
+            c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "mat_files" in spec:
+            files = sorted({s.material.get("unity_material_path", "").rsplit("/", 1)[-1] for s in obj.material_slots if s.material})
+            c.eq(f"{label}.mat_files", files, sorted(spec["mat_files"]))
+
+    for spec in exp.get("shared_meshes", []):
+        found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
+        labels = "+".join(f"{o['top']}/{o['object']}" for o in spec["objects"])
+        if all(len(f) == 1 for f in found):
+            shared = len({f[0].data.name for f in found}) == 1
+            c.eq(f"{labels} share mesh data", shared, spec["shared"])
+        else:
+            c.true(f"{labels} found", False, "objects not found")
 
     for obj_name, count in exp.get("shape_keys", {}).items():
         obj = bpy.data.objects.get(obj_name)

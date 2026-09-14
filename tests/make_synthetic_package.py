@@ -466,6 +466,12 @@ def main() -> None:
     hdrp_model_path = "Assets/Synthetic/Models/Hdrp.fbx"
     add(hdrp_model_path, path.read_bytes(), model_meta(guid_of(hdrp_model_path), hdrp_mats))
 
+    write_package(out, entries)
+
+
+def write_package(out: Path, entries: dict[str, tuple[str, bytes | None, str | None]]) -> None:
+    """GUID → (pathname, asset, .meta) を .unitypackage（tar.gz）に書き出す。"""
+    out.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(out, "w:gz") as tar:
         for guid, (pathname, asset, meta) in entries.items():
             def put(name: str, data: bytes) -> None:
