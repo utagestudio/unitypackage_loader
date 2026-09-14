@@ -78,10 +78,12 @@ def _strip_suffix(name: str) -> str:
     return base if dot and suffix.isdigit() and len(suffix) == 3 else name
 
 
-def _find_placed(top: str, name: str) -> list:
+def _find_placed(top: str, name: str, parent: str | None = None) -> list:
     found = []
     for obj in bpy.data.objects:
         if _strip_suffix(obj.name) != name:
+            continue
+        if parent is not None and (obj.parent is None or _strip_suffix(obj.parent.name) != parent):
             continue
         root = obj
         while root.parent is not None:
@@ -274,10 +276,11 @@ def main() -> int:
         c.eq("scene count", len(report.scenes), exp["scenes"]["count"])
 
     # 読み込む単位 Scenes で配置したオブジェクト。複製すると名前に連番が付くので、最上位の Empty（Unity の最上位の
-    # GameObject）の名前とオブジェクト名（連番を除く）で探す。tip は重心から最も遠い頂点のワールド座標
+    # GameObject）の名前とオブジェクト名（連番を除く）で探す。parent があれば直接の親の Empty の名前でも絞る。
+    # tip は重心から最も遠い頂点のワールド座標
     for spec in exp.get("placed_objects", []):
-        label = f"{spec['top']}/{spec['object']}"
-        found = _find_placed(spec["top"], spec["object"])
+        label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
+        found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
         c.eq(f"{label} found", len(found), 1)
         if len(found) != 1:
             continue
