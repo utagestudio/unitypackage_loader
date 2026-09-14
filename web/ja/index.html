@@ -202,25 +202,21 @@
 
   <section class="section" id="scenes">
     <div class="wrap">
-      <div class="split">
-        <div>
-          <div class="section-head">
-            <span class="eyebrow">シーンの読み込み</span>
-            <h2>Unity のシーンを、<wbr>並べたそのままで</h2>
-            <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。</p>
-          </div>
-          <div class="modes">
-            <div class="mode default"><span class="name">Scenes</span><span>シーンに置かれたものを、配置ごと読み込みます。ライトとカメラも一緒に</span></div>
-            <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
-            <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
-          </div>
-          <p class="modes-note">ライトの明るさは EEVEE で近い見た目になるように換算しますが、Unity とまったく同じにはなりません。</p>
-        </div>
-        <figure class="shot">
-          <div class="frame"><img src="../assets/shot-select.webp" width="1044" height="468" alt="読み込むものを選ぶダイアログ。上に Scenes・Prefabs・Models のタブがあり、Scenes のタブでパッケージ内のシーンにチェックが入っている" loading="lazy"></div>
-          <figcaption>ドロップしたあとに開くダイアログ。上のタブで Scenes / Prefabs / Models を切り替えて、読み込むものにチェックを入れます。選べるものが 1 つだけなら、ダイアログは出ずにそのまま読み込みます。</figcaption>
-        </figure>
+      <div class="section-head">
+        <span class="eyebrow">シーンの読み込み</span>
+        <h2>Unity のシーンを、<wbr>並べたそのままで</h2>
+        <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。</p>
       </div>
+      <figure class="shot">
+        <div class="frame"><img src="../assets/scene-street.webp" width="1502" height="845" alt="Blender に読み込んだ日本の街並みのシーン。ビルや電柱が並ぶ画面の左下に、読み込むものを選ぶダイアログが開き、Scenes のタブで 1879 の配置を持つシーンにチェックが入っている" loading="lazy"></div>
+        <figcaption>街並みのアセットのシーンを読み込んだ画面に、読み込むものを選ぶダイアログ（パッケージをドロップしたあとに開きます）を重ねて表示しています。</figcaption>
+      </figure>
+      <div class="modes units">
+        <div class="mode default"><span class="name">Scenes</span><span>シーンに置かれたものを、配置ごと読み込みます。ライトとカメラも一緒に</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
+        <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
+      </div>
+      <p class="modes-note">ライトの明るさは EEVEE で近い見た目になるように換算しますが、Unity とまったく同じにはなりません。</p>
     </div>
   </section>
 

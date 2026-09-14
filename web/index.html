@@ -202,25 +202,21 @@
 
   <section class="section" id="scenes">
     <div class="wrap">
-      <div class="split">
-        <div>
-          <div class="section-head">
-            <span class="eyebrow">Scene import</span>
-            <h2>Unity scenes,<wbr> <span class="nb">laid out as they were</span></h2>
-            <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing.</p>
-          </div>
-          <div class="modes">
-            <div class="mode default"><span class="name">Scenes</span><span>Everything placed in the scene, layout included, plus lights and cameras</span></div>
-            <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
-            <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
-          </div>
-          <p class="modes-note">Light brightness is converted to look close in EEVEE, but it will not match Unity exactly.</p>
-        </div>
-        <figure class="shot">
-          <div class="frame"><img src="assets/shot-select.webp" width="1044" height="468" alt="The dialog for choosing what to import, with Scenes, Prefabs and Models tabs at the top and a scene in the package ticked on the Scenes tab" loading="lazy"></div>
-          <figcaption>The dialog that opens after you drop a package. Switch between Scenes, Prefabs and Models at the top and tick what to import. If there is only one choice, it imports straight away.</figcaption>
-        </figure>
+      <div class="section-head">
+        <span class="eyebrow">Scene import</span>
+        <h2>Unity scenes,<wbr> <span class="nb">laid out as they were</span></h2>
+        <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing.</p>
       </div>
+      <figure class="shot">
+        <div class="frame"><img src="assets/scene-street.webp" width="1502" height="845" alt="A Japanese street scene imported into Blender, with buildings and utility poles, and the dialog for choosing what to import open at the bottom left, with a scene of 1879 placements ticked on the Scenes tab" loading="lazy"></div>
+        <figcaption>A street asset's scene imported into Blender, with the dialog for choosing what to import (it opens after you drop a package) shown on top.</figcaption>
+      </figure>
+      <div class="modes units">
+        <div class="mode default"><span class="name">Scenes</span><span>Everything placed in the scene, layout included, plus lights and cameras</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
+        <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
+      </div>
+      <p class="modes-note">Light brightness is converted to look close in EEVEE, but it will not match Unity exactly.</p>
     </div>
   </section>
 

@@ -217,6 +217,9 @@ details.more[open] > summary { margin-bottom: 18px; }
 .mode .name { font-weight: 800; white-space: nowrap; color: var(--text); font-size: 1rem; }
 @media (max-width: 480px) { .mode { grid-template-columns: 1fr; gap: 2px; } }
 .modes-note { color: var(--muted); font-size: .92rem; margin-top: 12px; }
+.units { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.units .mode { grid-template-columns: 1fr; gap: 4px; align-content: start; }
+@media (max-width: 720px) { .units { grid-template-columns: 1fr; } }
 
 /* ---------- install ---------- */
 .install { background: var(--surface); border-radius: calc(var(--radius) + 8px); padding: clamp(24px, 4vw, 48px); display: grid; gap: 28px; }
