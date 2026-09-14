@@ -514,6 +514,10 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 
 `_EmissionColor` が黒でなければ emission を有効にするが、`_EMISSION` が `m_InvalidKeywords` にある場合は
 現在のシェーダーに emission が無い（別シェーダーから切り替えた名残）とみなして無効にし、警告を出す。
+Built-in の Standard と URP Lit は `_EMISSION` キーワードが有効なときだけ光り、発光を切っても `_EmissionColor` は残る。
+そのため、.mat にキーワードの記述（`m_ValidKeywords` / `m_ShaderKeywords`。空でも可）があって `_EMISSION` が無ければ光らせない
+（Issue #52。発光を切った白い `_EmissionColor` が残った電柱が真っ白になっていた）。キーワードの記述が無い .mat は従来どおり色で判断する。
+キーワードで発光を切り替えないシェーダー（Poiyomi の `_EnableEmission` など）には、この条件を当てない。
 
 HDRP（HDRP/Lit と HDRP 向け Shader Graph。`_EmissiveColor` を持つかで判定）は、発光しなくても `_EmissionColor` を白で持っている
 （ベイク向けの互換用）ので、`_EmissionColor` は使わない。発光は `_EmissiveColor`（線形の HDR 色。`_UseEmissiveIntensity` なら

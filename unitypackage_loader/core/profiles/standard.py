@@ -9,6 +9,9 @@ from .base import ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, cull_b
 MODE_OPAQUE, MODE_CUTOUT, MODE_FADE, MODE_TRANSPARENT = 0, 1, 2, 3
 
 _TOON_HINTS = ("_ShadeTexture", "_ShadeColor", "_1st_ShadeMap", "_ShadowColor", "_ShadeMap", "_SssTex")
+# _EMISSION キーワードで発光を切り替えるシェーダーの系統（Built-in の Standard、URP Lit）。
+# Poiyomi（_EnableEmission）や判定できないシェーダーには、キーワードの有無の条件を当てない
+_EMISSION_KEYWORD_FAMILIES = ("standard", "urp")
 
 
 class StandardProfile(ShaderProfile):
@@ -39,6 +42,10 @@ class StandardProfile(ShaderProfile):
             if "_EMISSION" in mat.invalid_keywords:
                 if emission_tex is not None or not is_black(emission_color):
                     n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
+            elif n.family in _EMISSION_KEYWORD_FAMILIES and mat.keywords_known and "_EMISSION" not in mat.keywords:
+                # Standard / URP Lit は _EMISSION キーワードが有効なときだけ光る。発光を切っても _EmissionColor は残るので、
+                # キーワードの記述があるのに _EMISSION が無ければ光らせない（#52: 白い発光色が残った電柱が真っ白になった）
+                pass
             elif emission_tex is not None or not is_black(emission_color):
                 n.emission_tex = emission_tex
                 n.emission_color = emission_color
