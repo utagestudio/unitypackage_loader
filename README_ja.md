@@ -79,6 +79,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 - **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
   モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
   同じモデル・同じマテリアルの配置は、メッシュのデータを共有した複製になります。
+  Unity で共通の親の下に同じ小物を複製して並べたもの（部屋に置いた複数のカップなど）も、1 つずつ置きます。
   prefab やシーンが使っていないモデルファイルの部品（使われていない LOD や余分なノードなど）は、Unity の Renderer が指すメッシュで照合して非表示にします。ライトとカメラも読み込みます（「Also Import」で切り替え）。
   ライトの強さは Unity（Built-in / URP）と Blender の EEVEE で測った値をもとに換算し、元の値はカスタムプロパティに残します。
   Unity でライトマップにだけ効くライト（ベイク、面光源）はリアルタイムのライトになるので、警告に出します。

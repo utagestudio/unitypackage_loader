@@ -80,6 +80,7 @@ Choose the unit at the top, then tick what to import in the list:
 - **Scenes**: imports what a scene (`.unity`) places, at the positions, rotations and scales set in Unity. Each scene
   gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.
   Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
+  Small props copied side by side under a common parent in Unity (for example several cups in a room) are placed one by one.
   Parts of a model file that a prefab or the scene does not use (for example unused LODs or extra nodes) are hidden,
   matched by the mesh each Unity renderer references.
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
