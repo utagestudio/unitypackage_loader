@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 2,
+  "warnings_max": 3,
   "placed_objects": [
     {
       "top": "A",
@@ -144,6 +144,21 @@
       "mat_files": [
         "ProbeRed.mat"
       ]
+    },
+    {
+      "top": "Partial",
+      "object": "Spike",
+      "hidden": false
+    },
+    {
+      "top": "Partial",
+      "object": "Child",
+      "hidden": true
+    },
+    {
+      "top": "Partial",
+      "object": "Skinned",
+      "hidden": true
     }
   ],
   "shared_meshes": [
