@@ -297,7 +297,9 @@ def _prepare_scenes(
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
             return None
 
-    expander = Expander(read, model_names)
+    # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
+    recycle = {m.guid: _model_info(m.entry, warn).recycle_names for m in models}
+    expander = Expander(read, model_names, recycle)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:

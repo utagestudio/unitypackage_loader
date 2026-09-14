@@ -58,6 +58,8 @@ class ModelImporterInfo:
     global_scale: float = 1.0
     use_file_scale: bool = True
     import_blend_shapes: bool = True
+    # Unity 2018.2 以前の形式の fileIDToRecycleName（モデルの中のオブジェクトの fileID → 名前。//RootNode はルート）
+    recycle_names: dict[int, str] = field(default_factory=dict)
 
     @classmethod
     def from_meta(cls, meta: MetaInfo | str) -> "ModelImporterInfo":
@@ -74,6 +76,13 @@ class ModelImporterInfo:
                 continue
             if str(first.get("type", "")).endswith("Material") and second.guid:
                 info.external_materials[str(first.get("name", ""))] = second.guid
+        table = data.get("fileIDToRecycleName")
+        if isinstance(table, dict):
+            for key, name in table.items():
+                try:
+                    info.recycle_names[int(key)] = str(name)
+                except (TypeError, ValueError):
+                    continue
         materials = data.get("materials") or {}
         if isinstance(materials, dict) and isinstance(materials.get("materialImportMode"), int):
             info.material_import_mode = materials["materialImportMode"]
