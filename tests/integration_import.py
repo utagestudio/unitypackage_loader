@@ -18,6 +18,7 @@ import traceback
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_DIR = REPO_ROOT / "_local"
@@ -187,6 +188,55 @@ def main() -> int:
                 set(spec["node_types"]) <= {n.bl_idname for n in mat.node_tree.nodes},
                 f"missing {set(spec['node_types']) - {n.bl_idname for n in mat.node_tree.nodes}}",
             )
+
+    if "count" in exp.get("prefabs", {}):
+        c.eq("prefab count", len(report.prefabs), exp["prefabs"]["count"])
+
+    # 読み込む単位 Prefabs で prefab ごとに作られるコレクション。マテリアルは Blender 上の名前ではなく、
+    # 元の .mat のファイル名（unity_material_path の末尾）で比べる（同じモデルを読み直すと名前に連番が付くため）
+    for coll_name, spec in exp.get("collections", {}).items():
+        coll = bpy.data.collections.get(coll_name)
+        c.true(f"collection {coll_name} exists", coll is not None)
+        if coll is None:
+            continue
+        objects = list(coll.all_objects)
+        if "objects" in spec:
+            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
+        if "prefab" in spec:
+            c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
+        if "mat_files" in spec:
+            files = {
+                slot.material.get("unity_material_path", "").rsplit("/", 1)[-1]
+                for obj in objects
+                if obj.type == "MESH"
+                for slot in obj.material_slots
+                if slot.material is not None
+            }
+            c.eq(f"{coll_name}.mat_files", sorted(files), sorted(spec["mat_files"]))
+
+    if "prefab_collections_overlap" in exp:
+        bpy.context.view_layer.update()
+        boxes = []
+        for coll in bpy.data.collections:
+            if coll.get("unity_prefab") is None:
+                continue
+            xs, ys = [], []
+            for obj in coll.all_objects:
+                if obj.type != "MESH":
+                    continue
+                for corner in obj.bound_box:
+                    p = obj.matrix_world @ Vector(corner)
+                    xs.append(p.x)
+                    ys.append(p.y)
+            if xs:
+                boxes.append((coll.name, min(xs), max(xs), min(ys), max(ys)))
+        overlaps = [
+            (a[0], b[0])
+            for i, a in enumerate(boxes)
+            for b in boxes[i + 1 :]
+            if a[1] < b[2] and b[1] < a[2] and a[3] < b[4] and b[3] < a[4]
+        ]
+        c.eq("prefab collections overlap", bool(overlaps), exp["prefab_collections_overlap"])
 
     for obj_name, count in exp.get("shape_keys", {}).items():
         obj = bpy.data.objects.get(obj_name)

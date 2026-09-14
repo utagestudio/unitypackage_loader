@@ -1,0 +1,11 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true, "unit": "PREFABS", "arrange": "STACK" },
+  "objects": { "count": 8, "mesh_count": 8, "armature_count": 0 },
+  "prefabs": { "count": 7 },
+  "warnings_max": 0,
+  "collections": {
+    "VariantAlt": { "objects": 1, "mat_files": ["VariantAltMat.mat"] },
+    "VariantBase": { "objects": 1, "mat_files": ["VariantBaseMat.mat"] }
+  },
+  "prefab_collections_overlap": true
+}

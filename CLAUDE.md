@@ -86,6 +86,8 @@ python3 -m unittest discover -s tests -t .
 blender -b --factory-startup --python tests/make_synthetic_package.py
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic.json
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs.json        # 読み込む単位 Prefabs（並べる）
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py
