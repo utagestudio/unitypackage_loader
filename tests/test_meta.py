@@ -116,6 +116,28 @@ ModelImporter:
         self.assertEqual(info.recycle_names[100004], "door01_frame")
         self.assertEqual(len(info.recycle_names), 7)
 
+    def test_internal_id_table_is_read(self):
+        # 古い番号のまま新しい Unity で開き直したモデルの .meta
+        meta = """\
+fileFormatVersion: 2
+guid: ffffffffffffffffffffffffffffffff
+ModelImporter:
+  serializedVersion: 22200
+  internalIDToNameTable:
+  - first:
+      1: 100000
+    second: //RootNode
+  - first:
+      43: 4300104
+    second: AE_House_01_LOD0
+  - first:
+      43: bad
+    second: Broken
+  externalObjects: {}
+"""
+        info = ModelImporterInfo.from_meta(meta)
+        self.assertEqual(info.recycle_names, {100000: "//RootNode", 4300104: "AE_House_01_LOD0"})
+
     def test_new_format_has_empty_table(self):
         self.assertEqual(ModelImporterInfo.from_meta(MODEL_META).recycle_names, {})
 

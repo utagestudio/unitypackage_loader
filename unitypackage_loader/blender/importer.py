@@ -30,6 +30,7 @@ from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
 from ..core.unity_yaml import UnityRef
 from ..core.fbx_units import read_unit_scale
+from ..core.unity_ids import mesh_file_id
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
@@ -307,7 +308,7 @@ def _prepare_scenes(
         contents = None
         try:
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
-            contents = summarize(hierarchy, model_names)
+            contents = summarize(hierarchy, model_names, recycle)
             hierarchies[entry.guid] = hierarchy
         except (HierarchyError, ValueError, PackageError, RecursionError) as exc:
             warn(f"could not read scene {entry.pathname}: {exc}")
@@ -1000,6 +1001,7 @@ def run_import(
         scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
         skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
+        hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
         count = len(scene_summary.placements)
         for index, placement in enumerate(scene_summary.placements):
             if index % 25 == 0:
@@ -1034,10 +1036,24 @@ def run_import(
             if placement.offsets:
                 skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale, view_layer)
             hidden = {name for name, r in placement.renderers.items() if not r.visible}
+            # 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけ。
+            # FBX にしかない部品（prefab が使っていない LOD や別のノード）は隠す（#58）。FBX 由来の名前に「.002」が
+            # 付いていることもあるので、表の名前は連番を外した形でも照合する
+            from_renderers = placement.root in hierarchy.nodes and hierarchy.nodes[placement.root].model_guid is None
+            used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
+            # 表で名前を引けないモデル（新しい形式）は、Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
+            mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
             for obj in objects:
-                if not placement.active or strip_numeric_suffix(obj.name) in hidden:
+                name = strip_numeric_suffix(obj.name)
+                unused = (
+                    from_renderers and obj.type == "MESH" and obj.name not in used and name not in used
+                    and mesh_file_id(obj.name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
+                )
+                if not placement.active or name in hidden or unused:
                     obj.hide_set(True)
                     obj.hide_render = True
+                if unused and placement.active:
+                    hidden_unused += 1
 
         # --- ライト・カメラ ---
         baked_lights = 0
@@ -1094,6 +1110,11 @@ def run_import(
             report.warn(
                 f"scene {pathname}: {contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
+            )
+        if hidden_unused:
+            report.warn(
+                f"scene {pathname}: {hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
+                "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
             )
         if skipped_nodes:
             report.warn(
