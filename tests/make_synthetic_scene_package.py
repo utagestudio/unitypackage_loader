@@ -332,6 +332,16 @@ def main() -> None:
         f"  m_ParentPrefab: {{fileID: 100100000, guid: {model}, type: 3}}\n  m_IsPrefabParent: 0\n"
         f"--- !u!4 &101 stripped\nTransform:\n  m_PrefabParentObject: {{fileID: 400000, guid: {model}, type: 3}}\n"
         "  m_PrefabInternal: {fileID: 100}\n"
+        # FBX から切り離した Spike を、部屋（Room）の下に 2 つ複製して置く（#60: 1 つに潰れていた）。回転・スケールは
+        # Unity が読んだ Spike のノードの値のまま、位置だけ変える。Unity の +X に 1.5 / -0.5、+Z に 20 動く
+        + game_object(7000, "Room")
+        + transform(7001, 7000, pos=(0, 0, 20))
+        + game_object(7100, "Spike (1)")
+        + transform(7101, 7100, father=7001, pos=(1, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100))
+        + mesh_renderer(7102, 7103, 7100, model, mats["ProbeMat"], 4300000)
+        + game_object(7200, "Spike (2)")
+        + transform(7201, 7200, father=7001, pos=(-1, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100))
+        + mesh_renderer(7202, 7203, 7200, model, mats["ProbeRed"], 4300000)
     )).encode(), f"fileFormatVersion: 2\nguid: {guid_of(legacy_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
 
     menu_path = "Assets/Synthetic/Scenes/Menu.unity"

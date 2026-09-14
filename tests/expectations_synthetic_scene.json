@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 3,
+  "warnings_max": 4,
   "placed_objects": [
     {
       "top": "A",
@@ -141,6 +141,34 @@
         0.9568,
         1.2883
       ],
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "Room",
+      "parent": "Spike (1)",
+      "object": "Spike",
+      "tip": [
+        -0.0412,
+        -18.0608,
+        0.9
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "Room",
+      "parent": "Spike (2)",
+      "object": "Spike",
+      "tip": [
+        1.9588,
+        -18.0608,
+        0.9
+      ],
+      "hidden": false,
       "mat_files": [
         "ProbeRed.mat"
       ]
