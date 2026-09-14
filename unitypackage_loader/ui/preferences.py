@@ -24,6 +24,14 @@ MODELS_ITEMS = (
     ("ALL", "All", "Import every model in the package"),
     ("FIRST", "First Only", "Import only the first model found"),
 )
+UNIT_ITEMS = (
+    ("PREFABS", "Prefabs", "Import prefabs with their own material assignments; each prefab gets its own collection"),
+    ("MODELS", "Models", "Import model files (FBX etc.) as they are"),
+)
+ARRANGE_ITEMS = (
+    ("SIDE_BY_SIDE", "Side by Side", "Place prefabs next to each other so they do not overlap"),
+    ("STACK", "Stack at Origin", "Place every prefab at the origin"),
+)
 
 
 class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):

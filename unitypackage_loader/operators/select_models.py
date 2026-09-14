@@ -134,7 +134,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             candidates = prepared.prefabs_for(m.guid)
             item.prefab_count = len(candidates)
             # 既定は「そのモデルを使う prefab を統合」。前回の指定があれば引き継ぐ
-            chosen = _pending.opts.prefabs.get(m.guid, "")
+            chosen = getattr(_pending.opts, "prefabs", {}).get(m.guid, "")
             item.prefab = str(candidates.index(chosen)) if chosen in candidates else PREFAB_ALL
         self.package_name = sanitize_display(prepared.path.name)
         total = len(prepared.unity_mats)

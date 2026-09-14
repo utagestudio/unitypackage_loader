@@ -11,7 +11,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
 from ..core.report import sanitize_display
-from ..ui.preferences import EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, get_prefs
+from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
 from . import select_models
 
 
@@ -29,6 +29,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
 
     # --- Model ---
     models: EnumProperty(name="Models", items=MODELS_ITEMS, default="ASK")
+    # 読み込む単位と並べ方。通常はモデル選択ダイアログで選ぶ。スクリプトやダイアログを出さないときに使う
+    unit: EnumProperty(name="Import Unit", items=UNIT_ITEMS, default="MODELS", options={"HIDDEN", "SKIP_SAVE"})
+    arrange: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE", options={"HIDDEN", "SKIP_SAVE"})
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -191,6 +194,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             return ImportOptions(
                 # 一括インポート時はダイアログを出さず全モデルを読む
                 models="ALL" if (batch and self.models == "ASK") else self.models,
+                unit=self.unit,
+                arrange=self.arrange,
                 material_mode=self.material_mode,
                 force_opaque=self.force_opaque,
                 backface_culling=self.backface_culling,

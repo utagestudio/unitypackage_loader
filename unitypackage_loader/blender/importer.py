@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import bpy
+from mathutils import Vector
 
+from ..core.arrange import arrange_offsets
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
@@ -28,6 +30,7 @@ from ..core.prefab import (
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
+from ..core.units import UNIT_PREFABS, PrefabSummary, choice_count, summarize_prefabs
 from . import materials as mat_builder
 from . import outline as outline_builder
 from .textures import load_image
@@ -45,7 +48,10 @@ _SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 @dataclass
 class ImportOptions:
     models: str = "ASK"  # ASK / ALL / FIRST
+    unit: str = "MODELS"  # 読み込む単位: MODELS / PREFABS
     model_guids: list[str] | None = None  # 明示的に選ばれたモデル（ダイアログ経由）
+    prefab_paths: list[str] | None = None  # 明示的に選ばれた prefab の pathname（ダイアログ経由）
+    arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
     backface_culling: bool = True
@@ -68,8 +74,6 @@ class ImportOptions:
     use_vrm_addon: bool = True  # .vrm は VRM add-on（extensions.blender.org の "VRM format"）があればそちらで読む
     outlines: bool = False  # Unity のアウトライン設定を Solidify で再現する
     outline_width_scale: float = 0.01
-    # モデル GUID → マテリアル割り当てに使う prefab の pathname（無い・空ならそのモデルを参照する prefab を先勝ちで統合）
-    prefabs: dict[str, str] = field(default_factory=dict)
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
 
@@ -111,10 +115,20 @@ class PreparedPackage:
     # prefab の pathname → モデル GUID → GameObject 名をキーにした表
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
 
     @property
     def supported_models(self) -> list[ModelSummary]:
         return [m for m in self.models if m.supported]
+
+    @property
+    def supported_prefabs(self) -> list[PrefabSummary]:
+        return [p for p in self.prefabs if p.supported]
+
+    @property
+    def choice_count(self) -> int:
+        """ダイアログで選べる（読み込める）候補の総数。"""
+        return choice_count(self.prefabs, len(self.supported_models))
 
     def prefabs_for(self, model_guid: str) -> list[str]:
         """そのモデルのメッシュを使う Renderer を持つ prefab の pathname（パス順）。"""
@@ -231,7 +245,15 @@ def prepare_package(
         tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
         if tables:
             prefab_tables[entry.pathname] = tables
-    return PreparedPackage(path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings)
+    prefabs = summarize_prefabs(
+        ((e.guid, e.pathname) for e in pkg.prefabs()),
+        prefab_tables,
+        model_guids,
+        {m.guid: m.skip_reason for m in models if not m.supported},
+    )
+    return PreparedPackage(
+        path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings, prefabs=prefabs
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +425,64 @@ def _select_models(prepared: PreparedPackage, opts: ImportOptions) -> list[Model
     return supported
 
 
+def _select_prefabs(prepared: PreparedPackage, opts: ImportOptions) -> list[PrefabSummary]:
+    supported = prepared.supported_prefabs
+    if opts.prefab_paths is not None:
+        wanted = set(opts.prefab_paths)
+        return [p for p in supported if p.pathname in wanted]
+    if opts.models == "FIRST":
+        return supported[:1]
+    return supported
+
+
+@dataclass
+class _ImportGroup:
+    """1 つのコレクションにまとめて読み込むモデルと、それぞれに当てはめる prefab の表。"""
+
+    prefab: PrefabSummary | None  # Models 単位なら None（パッケージのコレクションに直接入れる）
+    models: list[tuple[ModelSummary, dict[str, RendererMaterials]]]
+
+
+def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_ImportGroup]:
+    if opts.unit != UNIT_PREFABS:
+        return [_ImportGroup(None, [(m, prepared.table_for(m.guid)) for m in _select_models(prepared, opts)])]
+    supported = {m.guid: m for m in prepared.supported_models}
+    groups = []
+    for prefab in _select_prefabs(prepared, opts):
+        tables = prepared.prefab_tables.get(prefab.pathname, {})
+        models = [(supported[g], tables[g]) for g in prefab.model_guids if g in supported and g in tables]
+        if models:
+            groups.append(_ImportGroup(prefab, models))
+    return groups
+
+
+def _collection_bounds(collection: bpy.types.Collection):
+    """コレクション内のメッシュのワールド座標での外形。メッシュが無ければ None。"""
+    lo, hi = [float("inf")] * 3, [float("-inf")] * 3
+    for obj in collection.all_objects:
+        if obj.type != "MESH":
+            continue
+        for corner in obj.bound_box:
+            point = obj.matrix_world @ Vector(corner)
+            for axis in range(3):
+                lo[axis] = min(lo[axis], point[axis])
+                hi[axis] = max(hi[axis], point[axis])
+    return (tuple(lo), tuple(hi)) if lo[0] <= hi[0] else None
+
+
+def _arrange_collections(context, collections: list[bpy.types.Collection]) -> None:
+    """prefab ごとのコレクションを、外形が重ならないように並べる（親を持たないオブジェクトを動かす）。"""
+    context.view_layer.update()
+    offsets = arrange_offsets([_collection_bounds(c) for c in collections])
+    for coll, (dx, dy) in zip(collections, offsets):
+        if not (dx or dy):
+            continue
+        for obj in coll.all_objects:
+            if obj.parent is None:
+                obj.location.x += dx
+                obj.location.y += dy
+
+
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
@@ -435,10 +515,16 @@ def run_import(
         if not m.supported:
             report.warn(f"skipped {m.entry.pathname}: {m.skip_reason}")
 
-    models = _select_models(prepared, opts)
+    groups = _plan_groups(prepared, opts)
+    models = list({summary.guid: summary for group in groups for summary, _ in group.models}.values())
     if not models:
-        reasons = sorted({m.skip_reason for m in prepared.models if not m.supported})
-        raise PackageError("no importable models selected" + (f" ({'; '.join(reasons)})" if reasons else ""))
+        reasons = {m.skip_reason for m in prepared.models if not m.supported}
+        what = "models"
+        if opts.unit == UNIT_PREFABS:
+            reasons |= {p.skip_reason for p in prepared.prefabs if not p.supported}
+            what = "prefabs"
+        reasons_text = "; ".join(sorted(reasons))
+        raise PackageError(f"no importable {what} selected" + (f" ({reasons_text})" if reasons_text else ""))
 
     unity_mats, normalized = prepared.unity_mats, prepared.normalized
 
@@ -488,9 +574,6 @@ def run_import(
     scene.collection.children.link(collection)
     view_layer = context.view_layer
     prev_active = view_layer.active_layer_collection
-    layer_coll = _find_layer_collection(view_layer.layer_collection, collection)
-    if layer_coll is not None:
-        view_layer.active_layer_collection = layer_coll
 
     build_opts = mat_builder.MaterialBuildOptions(
         mode=opts.material_mode,
@@ -502,106 +585,150 @@ def run_import(
     )
 
     built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
+    imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
 
-    try:
-        for index, summary in enumerate(models):
-            model = summary.entry
-            step(0.55 + 0.4 * index / len(models), f"Importing {model.name}")
-            model_info = _model_info(model, report.warn)
-            prefab_table = prepared.table_for(model.guid, opts.prefabs.get(model.guid, ""))
-            before = _snapshot()
-            existing_materials = {m.name: m for m in bpy.data.materials}
-            delegated = _import_model(context, paths[model.guid], model, opts, collection, report)
-            new = _new_since(before)
-            _adopt_into_collection(new, scene, collection)
-            if delegated:
-                # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
-                report.images.extend(i.name for i in new["images"])
-            if delegated and not new["objects"]:
-                # VRM 0.x の制限付きライセンスでは add-on が確認ダイアログを出し、その場では読み込まない
-                report.warn(
-                    f"VRM add-on did not create any objects for {model.name} "
-                    "(a license confirmation dialog may be waiting; the model is imported after confirming, "
-                    "outside of this importer)"
-                )
-            report.models.append(model.pathname)
-            report.objects.extend(o.name for o in new["objects"])
-
-            new_materials: list[bpy.types.Material] = new["materials"]
-            fbx_names = [m.name for m in new_materials]
-            mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
-            object_slots = {
-                o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
-                for o in mesh_objects
-            }
-            # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
-            submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
-            resolution = resolve_materials(
-                fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
+    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> None:
+        model = summary.entry
+        model_info = _model_info(model, report.warn)
+        reimport = model.guid in imported_models
+        imported_models.add(model.guid)
+        before = _snapshot()
+        existing_materials = {m.name: m for m in bpy.data.materials}
+        delegated = _import_model(context, paths[model.guid], model, opts, target, report)
+        new = _new_since(before)
+        _adopt_into_collection(new, scene, target)
+        if delegated:
+            # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
+            report.images.extend(i.name for i in new["images"])
+        if delegated and not new["objects"]:
+            # VRM 0.x の制限付きライセンスでは add-on が確認ダイアログを出し、その場では読み込まない
+            report.warn(
+                f"VRM add-on did not create any objects for {model.name} "
+                "(a license confirmation dialog may be waiting; the model is imported after confirming, "
+                "outside of this importer)"
             )
-            assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
+        report.models.append(model.pathname)
+        report.objects.extend(o.name for o in new["objects"])
 
-            # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
-            keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
-            for bmat in new_materials:
-                res = resolution[bmat.name]
-                mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
-                report.materials.append(mrep)
-                if keep_materials:
-                    mrep.method = "delegated" if delegated else "kept"
-                    if res.guid:
-                        norm = normalized[res.guid]
-                        mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
-                        if opts.store_props:
-                            mat_builder._store_props(bmat, norm)
+        new_materials: list[bpy.types.Material] = new["materials"]
+        fbx_names = [m.name for m in new_materials]
+        mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
+        object_slots = {
+            o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
+            for o in mesh_objects
+        }
+        # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
+        submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
+        resolution = resolve_materials(
+            fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
+        )
+        assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
+
+        # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
+        keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
+        remaining: list[bpy.types.Material] = []  # 削除せずに残した、インポーターが作ったマテリアル
+        for bmat in new_materials:
+            res = resolution[bmat.name]
+            mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
+            report.materials.append(mrep)
+            if keep_materials:
+                remaining.append(bmat)
+                mrep.method = "delegated" if delegated else "kept"
+                if res.guid:
+                    norm = normalized[res.guid]
+                    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                    if opts.store_props:
+                        mat_builder._store_props(bmat, norm)
+                continue
+            if res.warning:
+                mrep.warnings.append(res.warning)
+                report.warn(f"material {bmat.name!r}: {res.warning}")
+
+            if opts.reuse_existing:
+                base = strip_numeric_suffix(bmat.name)
+                existing = existing_materials.get(base)
+                if existing is not None and existing is not bmat:
+                    _replace_material(new["objects"], bmat, existing)
+                    bpy.data.materials.remove(bmat)
+                    mrep.method = "reused"
+                    mrep.blender_name = existing.name
                     continue
-                if res.warning:
-                    mrep.warnings.append(res.warning)
-                    report.warn(f"material {bmat.name!r}: {res.warning}")
 
-                if opts.reuse_existing:
-                    base = strip_numeric_suffix(bmat.name)
-                    existing = existing_materials.get(base)
-                    if existing is not None and existing is not bmat:
-                        _replace_material(new["objects"], bmat, existing)
+            remaining.append(bmat)
+            if res.guid is None:
+                mrep.warnings.append("no matching .mat in package; material left as imported")
+                report.warn(f"material {bmat.name!r}: no matching .mat in package")
+                continue
+
+            shared = built_by_guid.get(res.guid) if reimport else None
+            if shared is not None and shared is not bmat:
+                # 同じモデルを別の prefab 用に読み直したときは、組み立て済みの同じ .mat のマテリアルを使う
+                remaining.pop()
+                _replace_material(new["objects"], bmat, shared)
+                bpy.data.materials.remove(bmat)
+                norm = normalized[res.guid]
+                mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                mrep.method = "shared"
+                mrep.blender_name = shared.name
+                continue
+
+            _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
+            built_by_guid.setdefault(res.guid, bmat)
+
+        if not keep_materials:
+            # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
+            for image in new["images"]:
+                if image.users == 0:
+                    bpy.data.images.remove(image)
+
+        # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
+        if assignments and not keep_materials:
+            split = _split_slots_by_prefab(
+                new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
+                images, tex_infos, build_opts, pkg, report,
+            )
+            if split:
+                report.split_slots += split
+                # 差し替えで使われなくなった FBX マテリアルは片付ける
+                for bmat in remaining:
+                    if bmat.users == 0:
+                        for mrep in report.materials:
+                            if mrep.blender_name == bmat.name and mrep.method != "replaced":
+                                mrep.method = "replaced"
                         bpy.data.materials.remove(bmat)
-                        mrep.method = "reused"
-                        mrep.blender_name = existing.name
-                        continue
+        if opts.outlines:
+            added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
+            if added:
+                report.outlines += added
 
-                if res.guid is None:
-                    mrep.warnings.append("no matching .mat in package; material left as imported")
-                    report.warn(f"material {bmat.name!r}: no matching .mat in package")
-                    continue
-
-                _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
-                built_by_guid.setdefault(res.guid, bmat)
-
-            if not keep_materials:
-                # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
-                for image in new["images"]:
-                    if image.users == 0:
-                        bpy.data.images.remove(image)
-
-            # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
-            if assignments and not keep_materials:
-                split = _split_slots_by_prefab(
-                    new["objects"], assignments, resolution, unity_mats, normalized, built_by_guid,
-                    images, tex_infos, build_opts, pkg, report,
-                )
-                if split:
-                    report.split_slots += split
-                    # 差し替えで使われなくなった FBX マテリアルは片付ける
-                    for bmat in new_materials:
-                        if bmat.users == 0:
-                            for mrep in report.materials:
-                                if mrep.blender_name == bmat.name and mrep.method != "replaced":
-                                    mrep.method = "replaced"
-                            bpy.data.materials.remove(bmat)
-            if opts.outlines:
-                added = outline_builder.apply_outlines(new["objects"], opts.outline_width_scale)
-                if added:
-                    report.outlines += added
+    model_by_guid = {m.guid: m for m in prepared.models}
+    prefab_collections: list[bpy.types.Collection] = []
+    total = sum(len(group.models) for group in groups)
+    done = 0
+    try:
+        for group in groups:
+            target = collection
+            if group.prefab is not None:
+                prefab = group.prefab
+                target = bpy.data.collections.new(prefab.name)
+                collection.children.link(target)
+                target["unity_prefab"] = prefab.pathname
+                target["unity_prefab_guid"] = prefab.guid
+                prefab_collections.append(target)
+                report.prefabs.append(prefab.pathname)
+                for guid in prefab.model_guids:
+                    skipped = model_by_guid.get(guid)
+                    if skipped is not None and not skipped.supported:
+                        report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+            layer_coll = _find_layer_collection(view_layer.layer_collection, target)
+            if layer_coll is not None:
+                view_layer.active_layer_collection = layer_coll
+            for summary, prefab_table in group.models:
+                step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
+                import_model(summary, prefab_table, target)
+                done += 1
+        if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
+            _arrange_collections(context, prefab_collections)
     finally:
         if prev_active is not None:
             view_layer.active_layer_collection = prev_active
@@ -652,9 +779,9 @@ def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normali
         slot = obj.material_slots[index]
         current = slot.material
         current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
-        if current_guid == guid:
-            continue
         mat = built_by_guid.get(guid)
+        if current_guid == guid or (current is not None and current is mat):
+            continue
         if mat is None:
             umat = unity_mats[guid]
             mat = bpy.data.materials.new(umat.name or guid[:8])

@@ -22,7 +22,7 @@ class MaterialReport:
     blender_name: str
     fbx_name: str
     guid: str | None
-    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split
+    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split / shared
     family: str = ""
     shader_name: str = ""
     alpha_mode: str = ""
@@ -34,6 +34,7 @@ class MaterialReport:
 @dataclass
 class ImportReport:
     package: str
+    prefabs: list[str] = field(default_factory=list)  # 読み込む単位 Prefabs で読み込んだ prefab の pathname
     models: list[str] = field(default_factory=list)
     objects: list[str] = field(default_factory=list)
     materials: list[MaterialReport] = field(default_factory=list)
@@ -48,13 +49,17 @@ class ImportReport:
         if message not in self.warnings:
             self.warnings.append(message)
 
+    # 別のマテリアルに置き換わり、Blender 上に独立して残っていない行（replaced: prefab の割り当てで使われなくなった、
+    # shared: 同じモデルを別の prefab 用に読み直し、組み立て済みのマテリアルを使った）
+    _INACTIVE_METHODS = frozenset({"replaced", "shared"})
+
     @property
     def mapped_count(self) -> int:
-        return sum(1 for m in self.materials if m.guid and m.method != "replaced")
+        return sum(1 for m in self.materials if m.guid and m.method not in self._INACTIVE_METHODS)
 
     @property
     def active_materials(self) -> list[MaterialReport]:
-        return [m for m in self.materials if m.method != "replaced"]
+        return [m for m in self.materials if m.method not in self._INACTIVE_METHODS]
 
     def summary(self) -> str:
         parts = [
@@ -73,6 +78,9 @@ class ImportReport:
 
     def as_text(self) -> str:
         lines = [f"[Unitypackage Importer] {self.package}", f"  extract root: {self.extract_root}"]
+        if self.prefabs:
+            lines.append(f"  prefabs ({len(self.prefabs)}):")
+            lines += [f"    - {p}" for p in self.prefabs]
         lines.append(f"  models ({len(self.models)}):")
         lines += [f"    - {m}" for m in self.models]
         lines.append(f"  objects ({len(self.objects)}):")
