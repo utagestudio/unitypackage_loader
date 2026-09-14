@@ -100,6 +100,7 @@ class RendererInfo:
     materials: list[str | None]
     renderer_class: int
     enabled: bool = True
+    mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
 
 
 @dataclass
@@ -196,7 +197,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
         elif doc.class_id == CLASS_MESH_FILTER:
             mesh = _guid(body.get("m_Mesh"))
             if mesh:
-                meshes[_file_id(body.get("m_GameObject"))] = mesh
+                meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in _RENDERER_CLASSES:
             renderer_docs.append(doc)
         elif doc.class_id in _COMPONENT_CLASSES:
@@ -231,9 +232,12 @@ def parse_asset(data: str | bytes) -> RawAsset:
         go = _file_id(body.get("m_GameObject"))
         mats = body.get("m_Materials")
         materials = [ref.guid if isinstance(ref, UnityRef) and ref.guid else None for ref in (mats if isinstance(mats, list) else [])]
-        mesh = _guid(body.get("m_Mesh")) if doc.class_id == CLASS_SKINNED_MESH_RENDERER else meshes.get(go)
+        if doc.class_id == CLASS_SKINNED_MESH_RENDERER:
+            mesh, mesh_id = _guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+        else:
+            mesh, mesh_id = meshes.get(go, (None, 0))
         enabled = _number(body.get("m_Enabled"), 1.0) != 0
-        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled))
+        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
     return raw
 
 
@@ -701,6 +705,7 @@ class PlacedRenderer:
     materials: list[str | None]
     renderer_class: int
     visible: bool  # GameObject がアクティブで Renderer が有効
+    mesh_file_id: int = 0  # メッシュ参照の fileID（表で名前を引けなかったとき、読み込み側がハッシュで照合する）
 
 
 @dataclass
@@ -724,9 +729,17 @@ def _close(a: Mat4, b: Mat4) -> bool:
     return all(abs(x - y) <= _CLOSE * max(1.0, abs(x), abs(y)) for ra, rb in zip(a, b) for x, y in zip(ra, rb))
 
 
-def placements(h: Hierarchy, model_guids: Iterable[str]) -> list[ModelPlacement]:
-    """モデルの配置を、階層に現れた順に返す。"""
+def placements(
+    h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None
+) -> list[ModelPlacement]:
+    """モデルの配置を、階層に現れた順に返す。
+
+    ``mesh_names``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
+    メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
+    変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
+    """
     models = {g.lower() for g in model_guids}
+    tables = {g.lower(): table for g, table in (mesh_names or {}).items()}
     worlds = world_matrices(h)
     active = effective_active(h)
     result: list[ModelPlacement] = []
@@ -748,11 +761,12 @@ def placements(h: Hierarchy, model_guids: Iterable[str]) -> list[ModelPlacement]
             placement = ModelPlacement(renderer.mesh_guid, scope, worlds[scope], active[scope])
             by_scope[(scope, renderer.mesh_guid)] = placement
             result.append(placement)
-        name = unity_base_name(node.name)
+        mesh_name = tables.get(renderer.mesh_guid, {}).get(renderer.mesh_file_id)
+        name = mesh_name if mesh_name and mesh_name != _ROOT_NODE_NAME else unity_base_name(node.name)
         if name in placement.renderers:
             continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
         placement.renderers[name] = PlacedRenderer(
-            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled
+            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled, renderer.mesh_file_id
         )
         inverse = inverse_affine(node.scope_matrix)
         if inverse is not None and key != scope:
@@ -782,9 +796,9 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: Iterable[str]) -> SceneContents:
+def summarize(h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None) -> SceneContents:
     models = {g.lower() for g in model_guids}
-    found = placements(h, models)
+    found = placements(h, models, mesh_names)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )

@@ -268,6 +268,30 @@ class DuplicateNameTest(unittest.TestCase):
         self.assertNotEqual(found[0].signature(), found[2].signature())  # マテリアルが違う
 
 
+class MeshNameTest(unittest.TestCase):
+    """展開した prefab で GameObject の名前を変えていても、.meta の表でメッシュ参照から名前を引く（#58）。"""
+
+    SCENE = HEADER + "".join([
+        game_object(10, "House"),  # FBX のノード名は House_LOD0 だが、prefab で名前を変えてある
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, MODEL, MAT_A, mesh_file_id=4300104),
+        game_object(20, "Door"),
+        transform(21, 20, father=11),
+        mesh_renderer(22, 23, 20, MODEL, MAT_B, mesh_file_id=4300999),  # 表に無い
+    ])
+
+    def test_renderer_named_by_mesh(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        placement = placements(h, [MODEL], {MODEL: {4300104: "House_LOD0"}})[0]
+        self.assertEqual(set(placement.renderers), {"House_LOD0", "Door"})
+        self.assertEqual(placement.renderers["House_LOD0"].materials, [MAT_A])
+        self.assertEqual(placement.renderers["Door"].mesh_file_id, 4300999)
+
+    def test_without_table_uses_game_object_names(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        self.assertEqual(set(placements(h, [MODEL])[0].renderers), {"House", "Door"})
+
+
 class LegacyFormatTest(unittest.TestCase):
     """Unity 2018.2 以前の形式（Prefab / m_ParentPrefab / m_PrefabParentObject / m_PrefabInternal、ルートは 400000）。"""
 
