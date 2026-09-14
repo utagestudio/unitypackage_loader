@@ -56,7 +56,26 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab）は、Transform を直接持つアセットでの最上位の祖先をモデルのルートとみなし、同じ祖先・同じモデルの Renderer をまとめる。
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
 - 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は Prefabs と同じく共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
-- 読み込まないもの: ライト・カメラ（Issue #49）、UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+- 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+
+**シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
+
+ライトの強さは推測で決めず、Unity 6（Built-in と URP 17.6、Linear）と Blender 5.2 EEVEE で、環境光を切って白い拡散面をライトの真下から見た画素値（線形 HDR）を測って合わせた（Unity は batchmode でも `-nographics` を付けなければ GPU で描画でき、RenderTexture から読める。Blender は `light_threshold = 0`、`use_soft_falloff = False` にして測る）。
+
+| | 平行光源の画素 | 点光源・スポットの画素（d: 距離、R: Range） |
+|---|---|---|
+| Unity Built-in | I^2.2（強さはガンマ空間） | I^2.2 / (1 + 25·d²/R²) |
+| Unity URP | I（線形） | I / d² × (1 − (d/R)⁴)² |
+| Blender EEVEE | strength / π | P / (4π²·d²) |
+
+- 平行光源: Sun strength = π·I（Built-in は π·I^2.2）。色は sRGB → 線形、色温度を使っていれば `use_temperature` / `temperature`
+- URP の点光源・スポット: P = 4π²·I で距離によらず一致し、Range は EEVEE の `cutoff_distance` に入れる
+- Built-in の点光源・スポット: 逆二乗ではないので全距離では合わない。d/R ∈ [0.2, 1] で比の対数の最大を最小にする d = 0.3R で合わせ、P = 4π²·I^2.2·(0.3R)² / 3.25（その範囲で 1.4 倍以内）
+- スポット: `spot_size` = 外側の角度、`spot_blend` = 1 − 内側 / 外側（Built-in は内側の角度を使わないが同じ式で近似）
+- 面光源: Unity ではベイク専用で測れない。Blender の面光源は近くで 画素 ≈ P / (面積·π) なので、P = I·面積·π（近似。警告に出す）
+- HDRP: 物理単位（lux / lumen）を 683 lm/W で換算する近似（未計測。警告に出す）
+- パイプラインはマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）で決める
+- カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
 **Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
 
@@ -119,7 +138,7 @@ Material:
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
 
 ### 読み込まない
-- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject だけ再現する）、ライト・カメラ（Issue #49）、アイコン画像、`preview.png`。
+- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
 
 ### マテリアルの対応方針
 Unity と 1:1 は不可能なので、**「Unity マテリアル → シェーダー非依存の中間表現（NormalizedMaterial）→ Blender ノード」** の 2 段変換にし、シェーダーごとの差は「プロファイル」に閉じ込める（§4.5）。
@@ -587,6 +606,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_unity_yaml.py`: リポジトリ同梱の **合成フィクスチャ**（手書きの最小 .mat / .meta）でパーサーを検証。`_BaseMap` の GUID、`_Cutoff`、`_Color` を assert。加えて `_local/` にサンプルがあれば、その全 .mat / .meta をパースして例外ゼロを確認（無ければ skip）。
 - `tests/test_mapping.py`: externalObjects の `.001` 解決、名前一致フォールバック。
 - `tests/test_units.py` / `tests/test_arrange.py`: 読み込む単位の候補（読み込めない prefab を理由付きで残す、既定の単位）と、並べ方の計算（1 列 / 格子、間隔、外形の無い単位）。
+- `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。

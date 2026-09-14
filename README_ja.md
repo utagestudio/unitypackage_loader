@@ -7,7 +7,7 @@ Unity 側のマテリアル設定とテクスチャを反映した状態で配�
 
 - 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
 - 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
-- 読み込まないもの: シェーダー本体、C#、アニメーション、ライト・カメラ、Expression メニュー等。prefab の階層は、シーンを読み込むときだけ再現します（モデルの配置と、その上の GameObject）
+- 読み込まないもの: シェーダー本体、C#、アニメーション、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
 ## インストール
@@ -78,8 +78,10 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 - **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
   モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
-  同じモデル・同じマテリアルの配置は、メッシュのデータを共有した複製になります。ライト、カメラ、UI、Terrain、パッケージに無いメッシュ
-  （Unity 組み込みの Cube など）は読み込まず、警告に出します。モデルファイル（FBX）を直接置いたものは、ルートの位置だけを読み、
+  同じモデル・同じマテリアルの配置は、メッシュのデータを共有した複製になります。ライトとカメラも読み込みます（「Also Import」で切り替え）。
+  ライトの強さは Unity（Built-in / URP）と Blender の EEVEE で測った値をもとに換算し、元の値はカスタムプロパティに残します。
+  Unity でライトマップにだけ効くライト（ベイク、面光源）はリアルタイムのライトになるので、警告に出します。
+  UI、Terrain、パッケージに無いメッシュ（Unity 組み込みの Cube など）は読み込まず、警告に出します。モデルファイル（FBX）を直接置いたものは、ルートの位置だけを読み、
   中のオブジェクトへの変更は件数を警告に出します。
 - **Prefabs**: prefab ごとに、その prefab のマテリアルの割り当てのまま読み込みます。パッケージの Collection の中に prefab ごとの Collection ができます。
   同じモデルを使う色違いも一緒に読み込めます。2 つ以上選んだときは **Arrange** で、`Side by Side`（重ならないように並べる。数が多ければ格子状に折り返す）と
