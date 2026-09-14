@@ -53,10 +53,17 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 **読み込む単位 Scenes**（§3.3、Issue #48）: `core/hierarchy.py` で .unity を展開し、モデルの配置を求めて読み込む。
 
 - 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの key は prefab と同じく「PrefabInstance の fileID XOR 元の key」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
-- 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab）は、Transform を直接持つアセットでの最上位の祖先をモデルのルートとみなし、同じ祖先・同じモデルの Renderer をまとめる。
+- 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは、新しい形式では fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。Unity 2018.2 以前の形式の .meta は `fileIDToRecycleName`（fileID → 名前）を持つので、それで名前を引けた上書きは当てる（下記「古い形式のモデルの中への上書き」）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab）は、Transform を直接持つアセットでの最上位の祖先をモデルのルートとみなし、同じ祖先・同じモデルの Renderer をまとめる。
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
 - 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は Prefabs と同じく共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
 - 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+
+**古い形式のモデルの中への上書き**（Issue #53）: Unity 2018.2 以前の形式のモデルの .meta の `fileIDToRecycleName` を `ModelImporterInfo.recycle_names` に読み、モデルの PrefabInstance の中への上書きを名前付きで配置に記録する（`core/hierarchy.py`）。fileID は「クラス ID × 100000 + 通し番号」で、ルートは 100000 / 400000（`//RootNode`）。
+
+- マテリアル（`m_Materials.Array.data[N]`、クラス 23 / 137）: 配置の `renderers` に入れ、既存のスロット単位の割り当てで当てる。上書きの無いスロットは None で、.meta・名前一致の結果のまま。1 メッシュの FBX では Renderer が `//RootNode` に載るので、表のメッシュ名（クラス 43 がただ 1 つ）をオブジェクト名にする
+- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`_apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）
+- 当てるのはモデルの最上位のオブジェクトだけ。入れ子のオブジェクトとアーマチュアで変形するものは件数を警告に出す。表に無い fileID は今までどおり数える
+- 室内アセットのシーンでは、FBX 由来の Renderer 120 個すべてで、Unity の外形の中心との差が 1 cm 未満、マテリアルも一致した
 
 **シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
 
@@ -606,6 +613,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_unity_yaml.py`: リポジトリ同梱の **合成フィクスチャ**（手書きの最小 .mat / .meta）でパーサーを検証。`_BaseMap` の GUID、`_Cutoff`、`_Color` を assert。加えて `_local/` にサンプルがあれば、その全 .mat / .meta をパースして例外ゼロを確認（無ければ skip）。
 - `tests/test_mapping.py`: externalObjects の `.001` 解決、名前一致フォールバック。
 - `tests/test_units.py` / `tests/test_arrange.py`: 読み込む単位の候補（読み込めない prefab を理由付きで残す、既定の単位）と、並べ方の計算（1 列 / 格子、間隔、外形の無い単位）。
+- `tests/test_fbx_units.py`: FBX の UnitScaleFactor（バイナリの数値の型、FBX 6 の文字列属性の数、ASCII の FBX 7 / 6、壊れた値）。古い形式のモデルの中への上書きは、`tests/test_meta.py`（fileIDToRecycleName）、`tests/test_hierarchy.py`（名前付きの記録）、シーン用の合成パッケージの `Legacy.unity`（統合テスト）で確かめる。
 - `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。
