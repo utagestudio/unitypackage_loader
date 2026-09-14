@@ -240,8 +240,6 @@ details.more[open] > summary { margin-bottom: 18px; }
 .copy-btn[data-copied="true"] { background: var(--accent-2); color: #fff; }
 :root[data-theme="dark"] .copy-btn[data-copied="true"] { color: var(--on-accent); }
 .alt { font-size: .95rem; color: var(--muted); }
-.install .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-@media (max-width: 860px) { .install .shots { grid-template-columns: 1fr; } }
 
 /* ---------- FAQ ---------- */
 .faq { display: grid; gap: 10px; max-width: 860px; }
