@@ -357,14 +357,14 @@
         <details>
           <summary>読み込まれないものはありますか？</summary>
           <div class="answer">
-            <p>目的は「Blender で正しく見えるモデル」なので、次のものは読み込みません。</p>
+            <p>目的は「Blender で正しく見えるモデルとシーン」なので、次のものは読み込みません。</p>
             <ul>
               <li>シェーダー本体（マテリアルの設定は変換します）</li>
               <li>C# スクリプトとコンポーネント</li>
               <li>アニメーションと Animator Controller</li>
-              <li>prefab の階層（マテリアルの割り当てを調べるためだけに使います）</li>
               <li>VRChat の Expression メニューとパラメーター</li>
               <li>PhysBone などの揺れもの、物理、コライダー（VRM の揺れものは、VRM アドオンが入っていれば再現されます）</li>
+              <li>シーンの地形（Terrain）や UI、ライトマップなどのベイクした結果</li>
             </ul>
           </div>
         </details>
