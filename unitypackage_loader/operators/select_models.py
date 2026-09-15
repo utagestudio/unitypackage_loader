@@ -302,7 +302,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
 
         if prefs is None or prefs.verbose_log:
             print(report.as_text())
-        self.report({"WARNING" if report.warnings else "INFO"}, report.summary())
+        self.report({"WARNING" if report.warnings or report.errors else "INFO"}, report.summary())
         return {"FINISHED"}
 
 
