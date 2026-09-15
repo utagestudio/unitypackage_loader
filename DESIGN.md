@@ -46,7 +46,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 1〜3 は「FBX マテリアル 1 つに .mat を 1 つ」決める順序。Unity で実際に表示されるのは Renderer の `m_Materials` で、externalObjects は FBX を置いたときの既定値にすぎないので、prefab に割り当てがあれば下記のスロット単位の分割で 1・2 の結果より優先する。
 
-**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。
+**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。表は `hierarchy.Expander` で展開した prefab の配置（`placements`）から作るので、名前の決め方（Unity の複製番号「 (N)」を外す、.meta の表で引いたメッシュ名を優先する）も Scenes 単位と同じ。名前で引けないとき（prefab で GameObject の名前を変えたもの）は、オブジェクト名から求めたメッシュの fileID を Renderer のメッシュ参照と照合する。FBX を置いただけの PrefabInstance で、中への上書きを 1 つも名前で引けないものは表に入れない。Models 単位の統合は、名前に加えてメッシュ参照の fileID でも先勝ちにする（Prefab Variant で名前を変えた行と、後の prefab の元の名前の行が並んだとき、パス順で先の prefab の割り当てを使うため）（Issue #71）。
 
 **読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。
 
@@ -55,7 +55,8 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの key は prefab と同じく「PrefabInstance の fileID XOR 元の key」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
 - 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは、新しい形式では fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。Unity 2018.2 以前の形式の .meta は `fileIDToRecycleName`（fileID → 名前）を持つので、それで名前を引けた上書きは当てる（下記「古い形式のモデルの中への上書き」）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab や、FBX から切り離してシーンに置いた小物）は、Renderer ごとにモデルのルートを決め、同じルート・同じモデルの Renderer をまとめる（下記「Renderer をまとめるモデルのルート」）。
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
-- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
+- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトを置き直す（親から順に。ワールド行列は評価を待たずに親をたどって計算する。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_render` をその場で立て、`hide_set` は読み込みがすべて終わってからまとめて当てる（下記の理由で、読み込み中はビューレイヤーに無いため）。
+- 読み込み中のビューレイヤー: インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのオブジェクトが増えるほど 1 回が重くなる（3000 オブジェクトで 1 回 180 ms。Japanese Street の Day_Showcase の読み込み 16 秒の大半）。パッケージのコレクションは読み込みが終わるまで `exclude` し、モデルは空の作業用コレクション「<パッケージ名> (importing)」に読み込んでから配置先へ移す。終わったら（失敗しても）除外を戻して作業用コレクションを消す。これで Day_Showcase は 1.7 秒になった（Issue #75）。
 - 使われていない部品（Issue #58）: 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、表に無いメッシュのオブジェクト（prefab が使っていない LOD、FBX にだけある別のノードなど）を非表示にする（削除はしない。件数を警告に出す）。FBX を直接置いた配置は対象にしない。Renderer の名前は GameObject 名ではなくメッシュ参照（MeshFilter / SkinnedMeshRenderer の `m_Mesh` の fileID）から決める。展開後に GameObject の名前を変えていると、名前の照合では使っている部品まで隠してしまうため。モデルの .meta の表（`fileIDToRecycleName`、古い番号を引き継いだ `internalIDToNameTable`）で名前を引き、表の無い新しい形式では fileID = xxHash64("Type:Mesh-><名前>0")（`core/unity_ids.py`。Unity 6 の prefab と Japanese Street の 100 か所で一致）を Blender のオブジェクト名で計算して照合する。
 - Renderer をまとめるモデルのルート（Issue #60）: 以前は Transform を直接持つアセットでの最上位の祖先に固定していたため、シーンの共通の親（部屋など）の下に同じ小物を複製して並べると、名前が同じ Renderer が 1 つだけ残り、しかも親の原点に置かれていた。モデルの .meta の表（`fileIDToRecycleName` / `internalIDToNameTable`）にある、ルート以外の GameObject 名を FBX のノード名として、次のように決める（`core/hierarchy.py` の `placements`）。
   - 1 メッシュの FBX（表の GameObject はルートだけで、メッシュも 1 つ）: Renderer の GameObject 自身。
@@ -91,7 +92,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - パイプラインはマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）で決める
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
-**Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
+**Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、マテリアルの上書きの件数を警告に出す（Issue #31）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
 
 **スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。すべてのスロットが別の .mat に差し替わると分かっている FBX マテリアルは、組み立てずに差し替えに回す（`core/mapping.py` の `fully_replaced_materials`。Issue #77）。
 
@@ -171,7 +172,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
  ファイルブラウザ（右側にオプション）      ← §3.1   オプションのポップアップ（invoke_props_dialog）
         │  [Import]                                    │  [Import]
         ▼                                              ▼
- パッケージ走査（索引作成、シーン・prefab・モデルの候補列挙）
+ パッケージ走査（索引作成、prefab・モデルの候補列挙。シーンの展開は Scenes を開くか読み込むときまで遅らせる）
         │
         ├─ 読み込める候補が 1 つ以下、または Selection dialog が All / First → そのまま続行（Models 単位）
         └─ それ以外 → 選択ダイアログ（読み込む単位と候補を選ぶ）    ← §3.3
@@ -197,7 +198,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 **Model**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All |
+| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All。All / First は、ラベルに反してオペレーターの `unit` で選んだ単位（Scenes / Prefabs / Models）の候補に効く |
 | Arrange prefabs（Preferences のみ） | Enum: `Side by Side` / `Stack at Origin` = `Side by Side` | §3.3 の並べ方の既定。ダイアログで選んだ値がここに保存される |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
@@ -290,6 +291,9 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 - 候補は推測で外さない。読み込めない候補（Renderer がパッケージ内のモデルを使っていない prefab、使うモデルがすべて読み込めない prefab、非対応形式や同梱 .blend OFF のモデル、パッケージ内のモデルを置いていないシーン、読めないシーン）は灰色にして理由を出す（`core/units.py`）。候補が 1 つも無い単位はタブに出さない。
 - 既定の単位は、前回選んだ単位（Preferences の `last_import_unit`）に読み込める候補があればそれ、無ければ Prefabs → Models → Scenes の順。
+- シーンの展開（数 MB の .unity の解析と prefab の展開）は重いので、ダイアログを開いた時点では行わない。タブの件数はパッケージ内のシーン数で出し、
+  Scenes が既定になりうるとき（前回が Scenes か、ほかに読み込めるものが無い）はダイアログを開くときに、それ以外は Scenes タブに切り替えたときに展開して
+  行を加える（`PreparedPackage.ensure_scenes`。Japanese Street で `prepare_package` が 13.6 秒から 10.2 秒になった。Issue #75）。
 - **並べ方**（Prefabs で 2 つ以上選んだとき有効）: `Side by Side` は prefab ごとのコレクションのワールド座標の外形を求め、1 つ目を動かさずに +X へ並べる。5 つ以上は ceil(√n) 列の格子に折り返し、次の行を +Y に置く。行の中では手前側（Y の最小）を揃える。間隔は最大の幅・奥行きの 25%（最小 0.1 m）（`core/arrange.py`）。動かすのは親を持たないオブジェクト。`Stack at Origin` は動かさない。行を出し入れするとダイアログの高さと Import ボタンの位置が変わるので、Prefabs では常に表示し、選択が 1 つ以下なら淡色にする。
 - 読み込む単位 Prefabs では prefab 内の配置（子オブジェクトの位置など）は再現せず、prefab のモデルはすべてそのコレクションの原点に置く。配置を再現するのは Scenes だけ。
 - 一覧は `UIList` + `CollectionProperty`（WindowManager 側。All / None ボタンから書き換えるため）。表示中の単位への絞り込みは `filter_items` で行う（名前での絞り込みも併用）。単位の enum は候補数入りのラベルを動的 items で出すので、文字列をモジュールで保持する。パッケージ由来の pathname は表示用に `sanitize_display` を通し、選択結果は GUID で持つ。
@@ -323,6 +327,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 | `unity_shader_guid` / `unity_shader_family` | シェーダー GUID と判定したファミリー名 |
 | `unity_props` | 中間表現に落とせなかった値（JSON 文字列）。例: `_ShadowColor`, `_OutlineWidth`, MatCap 参照 |
 | `unity_normalized` | NormalizedMaterial 全体（JSON）。再構築オペレーターが使う。画像側には `unity_guid` / `unity_texture_type` / `unity_clamps` |
+| `unity_build_options` | 組み立てに使った Force Opaque / Backface Culling / Normal Maps / Emission（JSON）。再構築のダイアログの初期値にする（再構築でも更新する） |
 
 ---
 
@@ -347,10 +352,11 @@ unitypackage_loader/
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
-│   ├─ prefab.py                 # prefab の Renderer → モデルごとのマテリアル表（Variant / ネスト込み）
-│   ├─ units.py                  # 読み込む単位（Prefabs / Models）の候補と既定値
+│   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は hierarchy.py）
+│   ├─ units.py                  # 読み込む単位（Scenes / Prefabs / Models）の候補と既定値
 │   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
 │   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
+│   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
@@ -362,10 +368,13 @@ unitypackage_loader/
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
 ├─ blender/                      # bpy 依存
-│   ├─ importer.py               # 全体オーケストレーション
+│   ├─ importer.py               # 全体の流れ（prepare_package、1 回のインポートの状態と手順 _ImportSession）
+│   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
-│   ├─ textures.py               # 画像読み込み・カラースペース
-│   └─ props.py                  # Scene / WindowManager プロパティ
+│   ├─ nodes.py                  # ノードの組み立ての共通関数
+│   ├─ toon_group.py             # UnityToon ノードグループ
+│   ├─ outline.py                # Solidify によるアウトライン
+│   └─ textures.py               # 画像読み込み・カラースペース
 └─ tests/
     ├─ test_unity_yaml.py        # pytest（bpy 不要）
     ├─ test_mapping.py
@@ -378,7 +387,7 @@ unitypackage_loader/
 
 ```
 .unitypackage
-  │ (1) 索引作成: 1 パス目 — pathname と asset.meta だけ読む
+  │ (1) 索引作成: 1 パス目 — pathname と asset.meta、.mat / .prefab / .unity の実体だけ読む
   ▼
 PackageIndex { guid → AssetEntry(pathname, meta_text, has_asset, size) }
   │ (2) 分類: models / materials / textures / other
@@ -387,7 +396,7 @@ PackageIndex { guid → AssetEntry(pathname, meta_text, has_asset, size) }
   │ (5) プロファイル判定 → NormalizedMaterial
   │ (6) 必要なメンバーだけ展開: 2 パス目 — model, 参照 texture を extract_dir へ
   ▼
-  (7) bpy.ops.import_scene.fbx  — 前後の bpy.data 差分で新規 Object / Material を捕捉
+  (7) bpy.ops.import_scene.fbx  — 前後の bpy.data 差分で新規 Object / Material を捕捉（作業用コレクションに読み込んで配置先へ移す）
   (8) 新規 Material ごとに NormalizedMaterial を引き、ノード生成
   (9) 画像読み込み（check_existing、カラースペース、alpha_mode）
  (10) レポート
@@ -414,6 +423,9 @@ class UnityPackage:
 ```
 
 - `tarfile.open(path, "r:gz")` をストリームで 1 回走査。`pathname` と `asset.meta` は即読み。`asset` はサイズだけ記録。
+  ただし `.mat` / `.prefab` / `.unity` の実体（64 MiB まで）はメモリに残し、`read_asset` で走査し直さない。tar では `asset` が `pathname` より
+  先に来るのが普通なので、種類の分からない `asset` はいったん読んで保持し、同じ GUID の `pathname` で拡張子が分かった時点で残すか捨てるかを決める
+  （保持は常に 1 件）。`pathname` が離れた位置にあるパッケージでは 2 MiB 以下だけを残す（Issue #75）。
 - 2 パス目は必要 GUID 集合に絞って `extractfile`。数 GB のパッケージでも展開量は必要分だけ。
 - `pathname` の 1 行目のみ使用（2 行目に `00` が入る形式がある）。
 - パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる
@@ -452,14 +464,14 @@ class UnityPackage:
 prefab が読めないとマテリアルが一つも当たらない）。
 
 - 判定: 先頭 20 バイトのヘッダー（ビッグエンディアン）の version と、ファイルサイズが実際の長さと一致するか（version 22 以降は 64 ビットの欄）。
-  `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `parse_prefab` は bytes をそのまま受け取る。
+  `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `hierarchy.parse_asset` は bytes をそのまま受け取る。
 - 対応範囲: version 14〜22（Unity 5.0 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
   形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。共通文字列表も同じ表を持つ。
 - 読み方: 型ごとの TypeTree（blob 形式。ノードは 24 バイト、version 19 以降は 32 バイト）をたどり、値を YAML パーサーと同じ形に変換する。
   クラスは dict、配列は list、`map` は 1 要素 dict の list、`FastPropertyName` は中の文字列、`PPtr<...>` は externals の GUID
   （各バイトの上下 4 ビットが入れ替わった並び）から作った `UnityRef`。境界揃え（meta flag 0x4000）はオブジェクト先頭基準。
   組み込みリソース（`Resources/unity_builtin_extra`）は YAML と同じ GUID `0000000000000000f000000000000000` にする。
-- 安全性: 全ての読み取りに範囲チェックを置き、件数は残りバイト数で上限を掛ける。TypeTree の階層は 1 バイトなので再帰は 256 段まで。
+- 安全性: 全ての読み取りに範囲チェックを置き、件数は残りバイト数で上限を掛ける（配列は TypeTree から求めた要素の最小バイト数で割る。中身の無い構造体の配列は 4096 件まで）。TypeTree の階層は 1 バイトなので再帰は 256 段まで。
   例外は `UnityBinaryError`（`ValueError` 派生）に揃える。`[SerializeReference]` のデータなど読めないオブジェクトはそれだけ飛ばす。
 
 ### 4.5 `core/material.py` と プロファイル
@@ -611,7 +623,7 @@ def run(ctx, filepath, opts) -> Report:
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外の扱い（#69）:
-  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `prefab.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
+  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
   - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
   - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。
   - モデル 1 つ・シーン 1 つの読み込みの失敗（壊れた FBX など）は、レポートの `errors` に記録して残りを読み込む。読めた分は残す。

@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests.unity_binary_writer import material as binary_material  # noqa: E402
 from tests.unity_binary_writer import prefab_with_renderers as binary_prefab  # noqa: E402
+from unitypackage_loader.core.unity_ids import mesh_file_id  # noqa: E402
 
 
 def guid_of(name: str) -> str:
@@ -191,21 +192,29 @@ def prefab_yaml(renderers: list[tuple[str, str, list[str]]]) -> str:
     """(GameObject 名, メッシュを持つモデルの GUID, m_Materials に並べる .mat GUID) の組から prefab を作る。
 
     Renderer の fileID は 100 * (番号 + 1) + 1。m_Materials は Unity のサブメッシュ順。
+    Unity の prefab と同じく、GameObject ごとに Transform を置く（展開は Transform を持つ GameObject だけを読む。#71）。
     """
     lines = ["%YAML 1.1", "%TAG !u! tag:unity3d.com,2011:"]
     for i, (game_object, model_guid, mat_guids) in enumerate(renderers):
         go_id, renderer_id, filter_id = 100 * (i + 1), 100 * (i + 1) + 1, 100 * (i + 1) + 2
+        transform_id = 100 * (i + 1) + 3
         lines += [
             f"--- !u!1 &{go_id}",
             "GameObject:",
             f"  m_Name: {game_object}",
             "  m_Component:",
+            f"  - component: {{fileID: {transform_id}}}",
             f"  - component: {{fileID: {filter_id}}}",
             f"  - component: {{fileID: {renderer_id}}}",
+            f"--- !u!4 &{transform_id}",
+            "Transform:",
+            f"  m_GameObject: {{fileID: {go_id}}}",
+            "  m_Father: {fileID: 0}",
             f"--- !u!33 &{filter_id}",
             "MeshFilter:",
             f"  m_GameObject: {{fileID: {go_id}}}",
-            f"  m_Mesh: {{fileID: 4300000, guid: {model_guid}, type: 3}}",
+            # 新しい形式のモデルと同じく、メッシュの fileID はメッシュ名（ここでは GameObject 名と同じ）のハッシュ
+            f"  m_Mesh: {{fileID: {mesh_file_id(game_object)}, guid: {model_guid}, type: 3}}",
             f"--- !u!23 &{renderer_id}",
             "MeshRenderer:",
             f"  m_GameObject: {{fileID: {go_id}}}",

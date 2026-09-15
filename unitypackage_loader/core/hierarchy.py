@@ -34,10 +34,11 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from typing import NamedTuple
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
-from .unity_yaml import UnityRef
+from .unity_yaml import UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
 CLASS_TRANSFORM = 4
@@ -139,30 +140,18 @@ class RawAsset:
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
-def _guid(ref: object) -> str | None:
-    return ref.guid.lower() if isinstance(ref, UnityRef) and ref.guid else None
-
-
 def _file_id(ref: object) -> int:
     return ref.file_id if isinstance(ref, UnityRef) else 0
-
-
-def _number(value: object, default: float) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return number if math.isfinite(number) else default
 
 
 def _vector(value: object, default: tuple[float, ...], keys: str) -> list[float]:
     if not isinstance(value, dict):
         return list(default)
-    return [_number(value.get(k), d) for k, d in zip(keys, default)]
+    return [to_float(value.get(k), d) for k, d in zip(keys, default)]
 
 
 def _targets(items: object) -> list[tuple[int, str | None]]:
-    return [(r.file_id, _guid(r)) for r in (items if isinstance(items, list) else []) if isinstance(r, UnityRef)]
+    return [(r.file_id, ref_guid(r)) for r in (items if isinstance(items, list) else []) if isinstance(r, UnityRef)]
 
 
 def parse_asset(data: str | bytes) -> RawAsset:
@@ -183,7 +172,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
         if doc.class_id == CLASS_GAME_OBJECT:
             name = body.get("m_Name")
             raw.names[doc.file_id] = name if isinstance(name, str) else str(name or "")
-            raw.active[doc.file_id] = _number(body.get("m_IsActive"), 1.0) != 0
+            raw.active[doc.file_id] = to_float(body.get("m_IsActive"), 1.0) != 0
         elif doc.class_id in _TRANSFORM_CLASSES:
             raw.transforms[doc.file_id] = _RawTransform(
                 doc.file_id,
@@ -195,7 +184,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 doc.class_id == CLASS_RECT_TRANSFORM,
             )
         elif doc.class_id == CLASS_MESH_FILTER:
-            mesh = _guid(body.get("m_Mesh"))
+            mesh = ref_guid(body.get("m_Mesh"))
             if mesh:
                 meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in _RENDERER_CLASSES:
@@ -204,7 +193,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_PREFAB_INSTANCE:
             # 2018.2 以前は m_ParentPrefab。prefab アセット自身の記録（m_IsPrefabParent: 1）は元の GUID を持たないので飛ばす
-            source = _guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
+            source = ref_guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
             modification = body.get("m_Modification")
             modification = modification if isinstance(modification, dict) else {}
             if not source:
@@ -216,7 +205,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                     continue
                 target, path = item.get("target"), item.get("propertyPath")
                 if isinstance(target, UnityRef) and isinstance(path, str):
-                    mods.append((target.file_id, _guid(target), path, item.get("value"), item.get("objectReference")))
+                    mods.append((target.file_id, ref_guid(target), path, item.get("value"), item.get("objectReference")))
             raw.instances.append(
                 _RawInstance(
                     doc.file_id,
@@ -231,12 +220,12 @@ def parse_asset(data: str | bytes) -> RawAsset:
         body = doc.body
         go = _file_id(body.get("m_GameObject"))
         mats = body.get("m_Materials")
-        materials = [ref.guid if isinstance(ref, UnityRef) and ref.guid else None for ref in (mats if isinstance(mats, list) else [])]
+        materials = [ref_guid(ref) for ref in (mats if isinstance(mats, list) else [])]
         if doc.class_id == CLASS_SKINNED_MESH_RENDERER:
-            mesh, mesh_id = _guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+            mesh, mesh_id = ref_guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
         else:
             mesh, mesh_id = meshes.get(go, (None, 0))
-        enabled = _number(body.get("m_Enabled"), 1.0) != 0
+        enabled = to_float(body.get("m_Enabled"), 1.0) != 0
         raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
     return raw
 
@@ -295,7 +284,10 @@ class Hierarchy:
     components: dict[int, int] = field(default_factory=dict)  # ライト・カメラの key → Node の key
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
+    unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）
     missing_sources: int = 0  # 元がパッケージに無い PrefabInstance
+    # MAX_NESTING で打ち切った PrefabInstance を含む（キャッシュした深さより浅い位置から使うときは展開し直す）
+    depth_truncated: bool = False
 
     def children(self) -> dict[int, list[int]]:
         result: dict[int, list[int]] = {}
@@ -318,7 +310,8 @@ class Expander:
         self._models = {g.lower(): name for g, name in model_names.items()}  # モデルの GUID → ルートの名前
         # モデルの GUID → 古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける）
         self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
-        self._cache: dict[str, Hierarchy | None] = {}
+        # GUID → (展開結果, 深さで打ち切ったときの展開時のスタックの長さ。打ち切りが無ければ None)
+        self._cache: dict[str, tuple[Hierarchy | None, int | None]] = {}
 
     def expand_asset(self, guid: str) -> Hierarchy | None:
         return self._asset(guid.lower(), ())
@@ -328,13 +321,23 @@ class Expander:
         return self._build(raw, ())
 
     def _asset(self, guid: str, stack: tuple[str, ...]) -> Hierarchy | None:
-        if guid in self._cache:
-            return self._cache[guid]
+        """prefab を展開する（結果はキャッシュする）。
+
+        深さの上限で中の PrefabInstance を打ち切った結果は、同じかそれより深い位置からだけ使い回し、浅い位置から
+        呼ばれたら展開し直す（打ち切らずに済むため）。展開し直しは GUID ごとに深さの数までに収まる。
+        循環参照（Unity では作れない不正なデータ）で外した結果は、そのまま使い回す。循環のたびに展開し直すと、
+        細工されたデータで回数が指数的に増えるため。
+        """
+        cached = self._cache.get(guid)
+        if cached is not None:
+            result, truncated_at = cached
+            if truncated_at is None or len(stack) >= truncated_at:
+                return result
         if guid in stack or len(stack) >= MAX_NESTING:
             return None
         raw = self._read(guid)
         result = self._build(raw, stack + (guid,)) if raw is not None else None
-        self._cache[guid] = result
+        self._cache[guid] = (result, len(stack) if result is not None and result.depth_truncated else None)
         return result
 
     def _model(self, guid: str) -> Hierarchy:
@@ -399,10 +402,13 @@ class Expander:
     def _insert(self, h: Hierarchy, instance: _RawInstance, resolve, stack) -> None:
         source = instance.source_guid
         is_model = source in self._models
+        if not is_model and source not in stack and len(stack) >= MAX_NESTING:
+            h.depth_truncated = True
         sub = self._model(source) if is_model else self._asset(source, stack)
         if sub is None:
             h.missing_sources += 1
             return
+        h.depth_truncated = h.depth_truncated or sub.depth_truncated
         iid = instance.file_id
         parent = resolve(instance.parent) if instance.parent else None
         added: dict[int, int] = {}  # 元の key → 差し込んだ key
@@ -426,6 +432,7 @@ class Expander:
             h.components[remap(iid, component)] = remap(iid, key)
         h.counts.update(sub.counts)
         h.unresolved_overrides += sub.unresolved_overrides
+        h.unresolved_material_overrides += sub.unresolved_material_overrides
         h.missing_sources += sub.missing_sources
 
         def target_key(file_id: int, guid: str | None) -> int | None:
@@ -435,11 +442,15 @@ class Expander:
                 file_id = _LEGACY_MODEL_IDS.get(file_id, file_id)
             return remap(iid, file_id)
 
+        added_keys = set(added.values())
+        children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
         for file_id, guid in instance.removed_game_objects:
             key = target_key(file_id, guid)
             node_key = h.game_objects.get(key) if key is not None else None
-            if node_key is not None and node_key in added.values():
-                _remove_subtree(h, node_key)
+            if node_key is not None and node_key in added_keys:
+                if children is None:
+                    children = h.children()
+                _remove_subtree(h, node_key, children)
             elif is_model:
                 h.unresolved_overrides += 1
         for file_id, guid in instance.removed_components:
@@ -453,8 +464,7 @@ class Expander:
             elif is_model:
                 h.unresolved_overrides += 1
 
-        added_keys = set(added.values())
-        root_key = remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
+        root_key =remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
         table = self._recycle.get(source, {}) if is_model else {}
         for file_id, guid, path, value, reference in instance.modifications:
             key = target_key(file_id, guid)
@@ -465,6 +475,8 @@ class Expander:
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
                 continue
             h.unresolved_overrides += 1
+            if _MATERIAL_PATH.fullmatch(path) or path == "m_Materials.Array.size":
+                h.unresolved_material_overrides += 1
 
 
 _CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
@@ -498,7 +510,7 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
         values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
         index = _AXES[match.group(2)]
         if index < size:
-            number = _number(value, float("nan"))
+            number = to_float(value, float("nan"))
             values[index] = None if math.isnan(number) else number
         return True
     material = _MATERIAL_PATH.fullmatch(path)
@@ -509,7 +521,7 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
         slots = root.model_materials.setdefault(name, [])
         if index >= len(slots):
             slots.extend([None] * (index + 1 - len(slots)))
-        slots[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+        slots[index] = ref_guid(reference)
         return True
     return False
 
@@ -532,14 +544,14 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         values = getattr(node, _TRS_FIELDS[match.group(1)])
         index = _AXES[match.group(2)]
         if index < len(values):
-            values[index] = _number(value, values[index])
+            values[index] = to_float(value, values[index])
         return True
     if path in ("m_IsActive", "m_Name"):
         node_key = h.game_objects.get(key)
         if node_key is None or node_key not in added:
             return False
         if path == "m_IsActive":
-            h.nodes[node_key].active = _number(value, 1.0) != 0
+            h.nodes[node_key].active = to_float(value, 1.0) != 0
         else:
             h.nodes[node_key].name = "" if value is None else str(value)
         return True
@@ -555,12 +567,12 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
     if path == "m_Enabled":
         if renderer is None:
             return False
-        renderer.enabled = _number(value, 1.0) != 0
+        renderer.enabled = to_float(value, 1.0) != 0
         return True
     if path == "m_Materials.Array.size":
         if renderer is None:
             return False
-        size = int(_number(value, len(renderer.materials)))
+        size = int(to_float(value, len(renderer.materials)))
         if 0 <= size <= MAX_SLOTS:
             renderer.materials = (renderer.materials + [None] * size)[:size]
         return True
@@ -572,7 +584,7 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         if index < MAX_SLOTS:
             if index >= len(renderer.materials):
                 renderer.materials.extend([None] * (index + 1 - len(renderer.materials)))
-            renderer.materials[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+            renderer.materials[index] = ref_guid(reference)
         return True
     return False
 
@@ -621,7 +633,7 @@ def components(h: Hierarchy, class_ids: Iterable[int] = _COMPONENT_CLASSES) -> l
         for key, (class_id, body) in node.components.items():
             if class_id not in wanted:
                 continue
-            enabled = _number(body.get("m_Enabled"), 1.0) != 0
+            enabled = to_float(body.get("m_Enabled"), 1.0) != 0
             result.append(PlacedComponent(key, node_key, node.name, class_id, body, worlds[node_key], active[node_key] and enabled))
     return result
 
@@ -642,8 +654,10 @@ def _assign_scopes(h: Hierarchy, own: set[int]) -> None:
         node.scope_matrix = chain([h.nodes[k].local for k in reversed(path[:-1])])
 
 
-def _remove_subtree(h: Hierarchy, key: int) -> None:
-    children = h.children()
+def _remove_subtree(h: Hierarchy, key: int, children: dict[int, list[int]] | None = None) -> None:
+    """``key`` の Node と子孫を消す。``children`` は ``h.children()`` の結果（続けて消すときに作り直さないよう渡せる）。"""
+    if children is None:
+        children = h.children()
     stack = [key]
     while stack:
         current = stack.pop()
@@ -797,14 +811,33 @@ def _is_foreign(node: Node, model_guid: str, models: set[str]) -> bool:
 _IDENTITY_NODE = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
 
 
+ModelNames = Mapping[str, str] | Iterable[str]  # モデルの GUID → ルートの名前（名前を使わなければ GUID の並びでもよい）
+
+
+def _model_names(models: ModelNames) -> dict[str, str | None]:
+    """モデルの GUID（小文字）→ ルートの名前。GUID の並びを渡されたら名前は None。"""
+    if isinstance(models, Mapping):
+        return {g.lower(): n for g, n in models.items()}
+    return {g.lower(): None for g in models}
+
+
+class _RendererRow(NamedTuple):
+    """``placements`` の 1 回目で決める、Renderer 1 つの名前とルートの候補。"""
+
+    key: int  # Renderer を持つ Node
+    name: str
+    candidate: int  # まとめる先の候補
+    own: int  # 候補を使わないときのルート
+
+
 def placements(
-    h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None
+    h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
     ``model_guids`` にモデルの GUID → ルートの名前の辞書を渡すと、下の「候補の名前がモデルの名前と同じか」に使う。
 
-    ``mesh_names``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
+    ``name_tables``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
     メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
     変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
 
@@ -818,9 +851,9 @@ def placements(
     FBX の中のノードをルートにした配置は、``node_transforms`` でそのノードを単位行列にする。Unity の GameObject の
     行列がノードの元の変換を含んでいるので、Blender のオブジェクトの元の変換を掛けないようにするため。
     """
-    models = {g.lower() for g in model_guids}
-    root_names = {g.lower(): n for g, n in model_guids.items()} if isinstance(model_guids, Mapping) else {}
-    tables = {g.lower(): table for g, table in (mesh_names or {}).items()}
+    root_names = _model_names(model_guids)
+    models = set(root_names)
+    tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
     # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
     for node in h.nodes.values():
@@ -835,8 +868,8 @@ def placements(
     children = h.children()
 
     # 1 回目: Renderer ごとに名前とルートの候補を決める。モデルの PrefabInstance はそのまま配置にする
-    items: list[ModelPlacement | tuple[int, str, int, int]] = []
-    groups: dict[tuple[int, str], list[tuple[int, str, int, int]]] = {}
+    items: list[ModelPlacement | _RendererRow] = []
+    groups: dict[tuple[int, str], list[_RendererRow]] = {}
     for key, node in h.nodes.items():
         if node.model_guid is not None:
             placement = ModelPlacement(node.model_guid, key, worlds[key], active[key])
@@ -855,7 +888,7 @@ def placements(
         if not (names and name in names) and mesh_name and mesh_name != _ROOT_NODE_NAME:
             name = mesh_name
         candidate, own = _root_candidates(h, key, renderer.mesh_guid, tables.get(renderer.mesh_guid, {}), names)
-        item = (key, name, candidate, own)
+        item = _RendererRow(key, name, candidate, own)
         groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
         items.append(item)
 
@@ -928,9 +961,11 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None) -> SceneContents:
-    models = {g.lower() for g in model_guids}
-    found = placements(h, model_guids if isinstance(model_guids, Mapping) else models, mesh_names)
+def summarize(h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None) -> SceneContents:
+    """シーンの概要。引数は ``placements`` と同じ。"""
+    names = _model_names(model_guids)
+    models = set(names)
+    found = placements(h, names, name_tables)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )

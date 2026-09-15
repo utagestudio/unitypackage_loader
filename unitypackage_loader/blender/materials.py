@@ -10,6 +10,7 @@ import bpy
 
 from ..core.material import GRAY, WHITE, NormalizedMaterial, TexRef, toon_color
 from ..core.meta import TextureImporterInfo
+from .nodes import socket
 
 MODE_PRINCIPLED = "PRINCIPLED"
 MODE_TOON = "TOON"
@@ -68,21 +69,13 @@ class _Builder:
     def link(self, out_socket, in_socket) -> None:
         self.links.new(out_socket, in_socket)
 
-    def image(self, image: bpy.types.Image | None, ref: TexRef | None, info: TextureImporterInfo | None, col: int, label: str):
+    def image(self, image: bpy.types.Image | None, info: TextureImporterInfo | None, col: int, label: str):
+        """画像テクスチャのノード。色空間は画像側の設定に従う。"""
         node = self.add("ShaderNodeTexImage", col, label=label)
         node.image = image
         if info is not None and info.clamps:
             node.extension = "EXTEND"
-        if image is not None and image.colorspace_settings.name == "Non-Color":
-            pass  # 画像側の設定に従う
         return node
-
-
-def _socket(sockets, identifier: str):
-    for s in sockets:
-        if s.identifier == identifier:
-            return s
-    return sockets[identifier]
 
 
 def _json_ready(value: Any) -> Any:
@@ -114,7 +107,7 @@ def build_material(
     alpha_mode = "opaque" if opts.force_opaque else norm.alpha_mode
     _apply_settings(mat, norm, alpha_mode, opts)
     if opts.store_props:
-        _store_props(mat, norm)
+        store_props(mat, norm, opts)
     if mode == MODE_NAMES_ONLY:
         return mode, warnings
 
@@ -134,7 +127,7 @@ def build_material(
     base_img = _image_for(norm.base_color_tex, images, warnings, "base color")
     base_node = None
     if norm.base_color_tex is not None:
-        base_node = b.image(base_img, norm.base_color_tex, tex_infos.get(norm.base_color_tex.guid), 1, "Base Color")
+        base_node = b.image(base_img, tex_infos.get(norm.base_color_tex.guid), 1, "Base Color")
         if mapping_out is not None:
             b.link(mapping_out, base_node.inputs["Vector"])
 
@@ -144,10 +137,10 @@ def build_material(
         mix = b.add("ShaderNodeMix", 2, label="Tint (_Color)")
         mix.data_type = "RGBA"
         mix.blend_type = "MULTIPLY"
-        _socket(mix.inputs, "Factor_Float").default_value = 1.0
-        _socket(mix.inputs, "B_Color").default_value = (*rgb, 1.0)
-        b.link(color_out, _socket(mix.inputs, "A_Color"))
-        color_out = _socket(mix.outputs, "Result_Color")
+        socket(mix.inputs, "Factor_Float").default_value = 1.0
+        socket(mix.inputs, "B_Color").default_value = (*rgb, 1.0)
+        b.link(color_out, socket(mix.inputs, "A_Color"))
+        color_out = socket(mix.outputs, "Result_Color")
 
     # --- アルファ ---
     alpha_out = None
@@ -205,7 +198,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if norm.metallic_tex is not None:
         img = _image_for(norm.metallic_tex, images, warnings, "metallic")
-        node = b.image(img, norm.metallic_tex, tex_infos.get(norm.metallic_tex.guid), 1, "Metallic (R) / Smoothness (A)")
+        node = b.image(img, tex_infos.get(norm.metallic_tex.guid), 1, "Metallic (R) / Smoothness (A)")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         sep = b.add("ShaderNodeSeparateColor", 2, label="Metallic R")
@@ -219,7 +212,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if opts.use_normal_maps and norm.normal_tex is not None:
         img = _image_for(norm.normal_tex, images, warnings, "normal")
-        node = b.image(img, norm.normal_tex, tex_infos.get(norm.normal_tex.guid), 1, "Normal")
+        node = b.image(img, tex_infos.get(norm.normal_tex.guid), 1, "Normal")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         nm = b.add("ShaderNodeNormalMap", 2)
@@ -231,7 +224,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
         bsdf.inputs["Emission Strength"].default_value = norm.emission_strength
         if norm.emission_tex is not None:
             img = _image_for(norm.emission_tex, images, warnings, "emission")
-            node = b.image(img, norm.emission_tex, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
+            node = b.image(img, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
             if mapping_out is not None:
                 b.link(mapping_out, node.inputs["Vector"])
             e_out = node.outputs["Color"]
@@ -239,10 +232,10 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
                 mix = b.add("ShaderNodeMix", 2, label="Emission × _EmissionColor")
                 mix.data_type = "RGBA"
                 mix.blend_type = "MULTIPLY"
-                _socket(mix.inputs, "Factor_Float").default_value = 1.0
-                _socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
-                b.link(e_out, _socket(mix.inputs, "A_Color"))
-                e_out = _socket(mix.outputs, "Result_Color")
+                socket(mix.inputs, "Factor_Float").default_value = 1.0
+                socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
+                b.link(e_out, socket(mix.inputs, "A_Color"))
+                e_out = socket(mix.outputs, "Result_Color")
             b.link(e_out, bsdf.inputs["Emission Color"])
         else:
             bsdf.inputs["Emission Color"].default_value = (*norm.emission_color[:3], 1.0)
@@ -251,7 +244,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if norm.occlusion_tex is not None:
         img = _image_for(norm.occlusion_tex, images, warnings, "occlusion")
-        b.image(img, norm.occlusion_tex, tex_infos.get(norm.occlusion_tex.guid), 1, "Occlusion (unused)")
+        b.image(img, tex_infos.get(norm.occlusion_tex.guid), 1, "Occlusion (unused)")
 
 
 def _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings, opts):
@@ -281,14 +274,14 @@ def _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings
         if ref is not None and opts.use_normal_maps:
             img = images.get(ref.guid)
             if img is not None:
-                b.image(img, ref, tex_infos.get(ref.guid), 1, label)
+                b.image(img, tex_infos.get(ref.guid), 1, label)
 
 
 def _normal_output(b, norm, mapping_out, images, tex_infos, warnings, opts, col: int):
     """ノーマルマップがあれば Normal Map ノード、無ければ Geometry の Normal を返す。"""
     if opts.use_normal_maps and norm.normal_tex is not None:
         img = _image_for(norm.normal_tex, images, warnings, "normal")
-        node = b.image(img, norm.normal_tex, tex_infos.get(norm.normal_tex.guid), col, "Normal")
+        node = b.image(img, tex_infos.get(norm.normal_tex.guid), col, "Normal")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         nm = b.add("ShaderNodeNormalMap", col + 1)
@@ -342,7 +335,7 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         uv.inputs[1].default_value = (0.5, 0.5, 0.0)
         uv.inputs[2].default_value = (0.5, 0.5, 0.0)
         b.link(geo_n.outputs["Vector"], uv.inputs[0])
-        tex = b.image(matcap_img, None, tex_infos.get(matcap.tex), 1, "MatCap")
+        tex = b.image(matcap_img, tex_infos.get(matcap.tex), 1, "MatCap")
         tex.extension = "EXTEND"
         b.link(uv.outputs["Vector"], tex.inputs["Vector"])
         mc_out = tex.outputs["Color"]
@@ -351,10 +344,10 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
             tint = b.add("ShaderNodeMix", 2, label="MatCap Color")
             tint.data_type = "RGBA"
             tint.blend_type = "MULTIPLY"
-            _socket(tint.inputs, "Factor_Float").default_value = 1.0
-            _socket(tint.inputs, "B_Color").default_value = mc_color
-            b.link(mc_out, _socket(tint.inputs, "A_Color"))
-            mc_out = _socket(tint.outputs, "Result_Color")
+            socket(tint.inputs, "Factor_Float").default_value = 1.0
+            socket(tint.inputs, "B_Color").default_value = mc_color
+            b.link(mc_out, socket(tint.inputs, "A_Color"))
+            mc_out = socket(tint.outputs, "Result_Color")
         b.link(mc_out, group.inputs["MatCap"])
         group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, float(matcap.strength)))
         group.inputs["MatCap Mode"].default_value = float(matcap.mode)
@@ -373,7 +366,7 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         group.inputs["Emission Strength"].default_value = norm.emission_strength
         if norm.emission_tex is not None:
             img = _image_for(norm.emission_tex, images, warnings, "emission")
-            node = b.image(img, norm.emission_tex, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
+            node = b.image(img, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
             if mapping_out is not None:
                 b.link(mapping_out, node.inputs["Vector"])
             e_out = node.outputs["Color"]
@@ -381,10 +374,10 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
                 mix = b.add("ShaderNodeMix", 2, label="Emission × _EmissionColor")
                 mix.data_type = "RGBA"
                 mix.blend_type = "MULTIPLY"
-                _socket(mix.inputs, "Factor_Float").default_value = 1.0
-                _socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
-                b.link(e_out, _socket(mix.inputs, "A_Color"))
-                e_out = _socket(mix.outputs, "Result_Color")
+                socket(mix.inputs, "Factor_Float").default_value = 1.0
+                socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
+                b.link(e_out, socket(mix.inputs, "A_Color"))
+                e_out = socket(mix.outputs, "Result_Color")
             b.link(e_out, group.inputs["Emission"])
         else:
             group.inputs["Emission"].default_value = (*norm.emission_color[:3], 1.0)
@@ -397,7 +390,17 @@ def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mod
     mat.diffuse_color = (*norm.base_color[:3], 1.0)
 
 
-def _store_props(mat: bpy.types.Material, norm: NormalizedMaterial) -> None:
+BUILD_OPTIONS_PROP = "unity_build_options"
+_REMEMBERED_OPTIONS = ("force_opaque", "backface_culling", "use_normal_maps", "use_emission")
+
+
+def store_props(mat: bpy.types.Material, norm: NormalizedMaterial, opts: MaterialBuildOptions | None = None) -> None:
+    """Unity 側の情報をカスタムプロパティに残す（別のモードでの再構築と、インポーターが作ったマテリアルを残す場合の記録に使う）。
+
+    ``opts`` を渡すと、組み立てに使った設定も残す（再構築のダイアログの初期値にする。#78）。
+    """
+    if opts is not None:
+        mat[BUILD_OPTIONS_PROP] = json.dumps({name: getattr(opts, name) for name in _REMEMBERED_OPTIONS})
     mat["unity_material_guid"] = norm.source_guid
     mat["unity_material_path"] = norm.source_path
     mat["unity_shader_guid"] = norm.shader_guid or ""
@@ -434,6 +437,17 @@ def collect_tagged_images() -> tuple[dict[str, bpy.types.Image], dict[str, Textu
             info.wrap_u = info.wrap_v = 1
         infos[guid] = info
     return images, infos
+
+
+def stored_build_options(mat: bpy.types.Material) -> dict[str, bool]:
+    """``store_props`` が残した組み立ての設定。無いか壊れていれば空（呼び出し側の既定値を使う）。"""
+    try:
+        data = json.loads(mat.get(BUILD_OPTIONS_PROP) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: bool(data[name]) for name in _REMEMBERED_OPTIONS if name in data}
 
 
 def rebuild_from_props(mat: bpy.types.Material, mode: str, opts: MaterialBuildOptions | None = None) -> tuple[str, list[str]]:

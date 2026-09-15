@@ -43,6 +43,8 @@ MIN_VERSION = 14  # Unity 5.0
 MAX_VERSION = 22  # Unity 2020.1 〜 Unity 6
 
 CLASS_MONO_BEHAVIOUR = 114
+# 最小 0 バイトの要素（中身の無い構造体）の配列で受け付ける件数の上限。件数を残りのバイト数で抑えられないため
+MAX_EMPTY_ELEMENTS = 4096
 _ALIGN_FLAG = 0x4000
 _HEADER_SIZE = 20
 # 組み込みリソースを指す externals のパスと、YAML 側で使われる GUID の対応
@@ -134,9 +136,9 @@ class _Reader:
         return self.unpack(fmt)[0]
 
     def count(self, what: str, min_item_size: int = 1) -> int:
-        """件数を読み、残りのバイト数で収まらない値は壊れたデータとして扱う。"""
+        """件数を読み、残りのバイト数で収まらない値は壊れたデータとして扱う（``min_item_size`` は 1 要素の最小バイト数）。"""
         n = self.one("i")
-        if n < 0 or n * max(1, min_item_size) > self.remaining:
+        if n < 0 or n * max(0, min_item_size) > self.remaining:
             raise UnityBinaryError(f"invalid {what} count {n} at offset {self.pos - 4}")
         return n
 
@@ -255,6 +257,21 @@ class _ValueReader:
     def __init__(self, r: _Reader, externals: list[_External]):
         self.r = r
         self.externals = externals
+        self._min_sizes: dict[int, int] = {}  # id(node) → 値の最小バイト数
+
+    def _min_size(self, node: _Node) -> int:
+        """値が占める最小のバイト数（文字列・配列は件数の 4 バイト）。配列の件数が残りに収まるかの判定に使う。"""
+        size = self._min_sizes.get(id(node))
+        if size is None:
+            fmt = _PRIMITIVES.get(node.type)
+            if fmt is not None and not node.children:
+                size = struct.calcsize(fmt)
+            elif node.type in ("string", "TypelessData") or node.is_array_wrapper:
+                size = 4
+            else:
+                size = sum(self._min_size(child) for child in node.children)
+            self._min_sizes[id(node)] = size
+        return size
 
     def read(self, node: _Node) -> Any:
         r = self.r
@@ -289,7 +306,10 @@ class _ValueReader:
         if len(array.children) < 2:
             raise UnityBinaryError(f"malformed array node {node.name!r}")
         element = array.children[1]
-        size = self.r.count(f"{node.name!r} element")
+        element_size = self._min_size(element)
+        size = self.r.count(f"{node.name!r} element", element_size)
+        if element_size == 0 and size > MAX_EMPTY_ELEMENTS:
+            raise UnityBinaryError(f"invalid {node.name!r} element count {size} for empty elements")
         fmt = _PRIMITIVES.get(element.type)
         if fmt is not None and not element.children and not element.aligned:
             st = struct.Struct(f"{self.r.endian}{size}{fmt}")

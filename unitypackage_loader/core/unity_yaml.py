@@ -15,6 +15,7 @@ YAML サブセットだけを依存無しで扱う。対応する構文:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +27,8 @@ __all__ = [
     "MAX_DEPTH",
     "parse_documents",
     "parse_text",
+    "ref_guid",
+    "to_float",
 ]
 
 
@@ -57,6 +60,20 @@ class UnityRef:
     @property
     def is_null(self) -> bool:
         return self.file_id == 0 and not self.guid
+
+
+def ref_guid(value: object) -> str | None:
+    """参照の GUID を小文字で返す。参照でないか GUID が無ければ None（GUID は大文字小文字を区別しないのでそろえる）。"""
+    return value.guid.lower() if isinstance(value, UnityRef) and value.guid else None
+
+
+def to_float(value: object, default: float) -> float:
+    """値を有限の float にする。数値にできないか、無限大・NaN なら ``default``。"""
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
 
 
 @dataclass

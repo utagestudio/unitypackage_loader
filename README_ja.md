@@ -153,7 +153,7 @@ Unity のシェーダーと Blender のノードは 1:1 に対応しないため
 - **Unlit (Emission)**: テクスチャを Emission に直結する、ライティング無しの最も単純な構成です。
 
 中間表現そのものはカスタムプロパティ `unity_normalized`（JSON）に、Blender で使わなかった値は `unity_props` に保存されます。
-サイドバーの Tools パネルの "Rebuild in Another Mode" を使うと、元パッケージが無くても選択メッシュのマテリアルを別モードで組み直せます。
+サイドバーの Tools パネルの "Rebuild in Another Mode" を使うと、元パッケージが無くても選択メッシュのマテリアルを別モードで組み直せます。ダイアログの Force Opaque などの初期値は、インポート時（または前回の組み直し）の設定です。
 同じパネルからアウトラインの追加・削除もできます。
 
 ## 開発

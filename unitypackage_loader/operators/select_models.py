@@ -1,4 +1,4 @@
-"""インポートの 2 段目: 読み込む単位（Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
+"""インポートの 2 段目: 読み込む単位（Scenes / Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
 
 ``IMPORT_SCENE_OT_unitypackage`` が ``prepare_package`` の結果を ``set_pending`` で渡し、
 ``INVOKE_DEFAULT`` でこのオペレーターを呼ぶ。ダイアログの OK で ``run_import`` を実行する。
@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
-from ..core.package import PackageError
+from ..core.package import PackageError, human_size
 from ..core.report import sanitize_display
 from ..core.units import (
     NO_MESH_REASON,
@@ -29,12 +30,15 @@ from ..core.units import (
 )
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
+if TYPE_CHECKING:
+    from ..blender.importer import ImportOptions, PreparedPackage
+
 
 @dataclass
 class _Pending:
     filepath: str
-    opts: object  # ImportOptions
-    prepared: object | None  # PreparedPackage。execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
+    opts: ImportOptions
+    prepared: PreparedPackage | None  # execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
 
 
 _pending: _Pending | None = None
@@ -51,14 +55,6 @@ def _release_prepared() -> None:
     """
     if _pending is not None:
         _pending.prepared = None
-
-
-def _human_size(size: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
 
 
 def _short_reason(reason: str) -> str:
@@ -94,8 +90,9 @@ def _unit_items(self, context):
     units: list[str] = []
     if _pending is not None:
         prepared = _pending.prepared
-        counts = {UNIT_SCENES: len(prepared.scenes), UNIT_PREFABS: len(prepared.prefabs), UNIT_MODELS: len(prepared.models)}
-        units = available_units(prepared.prefabs, len(prepared.models), prepared.scenes)
+        # シーンの数は展開しなくても分かる（展開は Scenes を開くときまで遅らせる。#75）
+        counts = {UNIT_SCENES: len(prepared.scene_entries), UNIT_PREFABS: len(prepared.prefabs), UNIT_MODELS: len(prepared.models)}
+        units = available_units(prepared.prefabs, len(prepared.models), prepared.scene_entries)
     _unit_enum_cache[:] = [
         (unit, f"{labels[unit][0]} ({counts[unit]})", labels[unit][1], _UNIT_ICONS[unit], _UNIT_NUMBERS[unit])
         for unit in units or [UNIT_MODELS]
@@ -103,8 +100,40 @@ def _unit_items(self, context):
     return _unit_enum_cache
 
 
+def _add_scene_items(items, prepared) -> None:
+    """シーンを展開して候補に加える（加え済みなら何もしない）。"""
+    if any(it.kind == UNIT_SCENES for it in items):
+        return
+    for s in prepared.scenes:
+        item = items.add()
+        item.kind = UNIT_SCENES
+        item.guid = s.guid
+        item.pathname = sanitize_display(s.pathname)
+        if s.supported:
+            models = len(s.contents.model_guids) if s.contents is not None else 0
+            item.detail_text = f"{len(s.placements)} placed · {_plural(models, 'model')}"
+        else:
+            item.detail_text = _short_reason(s.skip_reason)
+        item.supported = s.supported
+        item.selected = s.supported
+
+
+def _on_unit_changed(self, context):
+    """Scenes に切り替えたとき、まだ展開していなければシーンを展開して候補に加える（#75）。"""
+    if _pending is None or _pending.prepared is None or getattr(self, _UNIT_PROP) != UNIT_SCENES:
+        return
+    window = context.window
+    if window is not None:
+        window.cursor_set("WAIT")
+    try:
+        _add_scene_items(getattr(self, _ITEMS_PROP), _pending.prepared)
+    finally:
+        if window is not None:
+            window.cursor_set("DEFAULT")
+
+
 class UNITYPKG_ImportItem(bpy.types.PropertyGroup):
-    kind: StringProperty()  # UNIT_PREFABS / UNIT_MODELS
+    kind: StringProperty()  # UNIT_SCENES / UNIT_PREFABS / UNIT_MODELS
     guid: StringProperty()
     pathname: StringProperty()  # 表示用（sanitize_display 済み）
     size_text: StringProperty()
@@ -175,18 +204,6 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         prepared = _pending.prepared
         items = _items(context)
         items.clear()
-        for s in prepared.scenes:
-            item = items.add()
-            item.kind = UNIT_SCENES
-            item.guid = s.guid
-            item.pathname = sanitize_display(s.pathname)
-            if s.supported:
-                models = len(s.contents.model_guids) if s.contents is not None else 0
-                item.detail_text = f"{len(s.placements)} placed · {_plural(models, 'model')}"
-            else:
-                item.detail_text = _short_reason(s.skip_reason)
-            item.supported = s.supported
-            item.selected = s.supported
         for p in prepared.prefabs:
             item = items.add()
             item.kind = UNIT_PREFABS
@@ -203,7 +220,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             item.kind = UNIT_MODELS
             item.guid = m.guid
             item.pathname = sanitize_display(m.entry.pathname)
-            item.size_text = _human_size(m.entry.size)
+            item.size_text = human_size(m.entry.size)
             if m.supported:
                 item.detail_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
             else:
@@ -214,7 +231,13 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         wm = context.window_manager
         prefs = get_prefs(context)
         last_unit = prefs.last_import_unit if prefs is not None else ""
-        setattr(wm, _UNIT_PROP, default_unit(prepared.prefabs, len(prepared.supported_models), last_unit, prepared.scenes))
+        # シーンの展開は重いので、Scenes が既定になりうるとき（前回が Scenes か、ほかに読み込めるものが無い）だけここで行い、
+        # それ以外は Scenes に切り替えたときに行う（_on_unit_changed。#75）。既定の順では Scenes は最後なので、展開しなくても決まる
+        others = any(p.supported for p in prepared.prefabs) or bool(prepared.supported_models)
+        if prepared.scene_entries and (last_unit == UNIT_SCENES or not others):
+            _add_scene_items(items, prepared)
+        scenes = prepared.scenes if prepared.scenes_expanded else ()
+        setattr(wm, _UNIT_PROP, default_unit(prepared.prefabs, len(prepared.supported_models), last_unit, scenes))
         setattr(wm, _ARRANGE_PROP, prefs.default_arrange if prefs is not None else _pending.opts.arrange)
 
         self.package_name = sanitize_display(prepared.path.name)
@@ -371,7 +394,7 @@ def register() -> None:
     wm = bpy.types.WindowManager
     setattr(wm, _ITEMS_PROP, CollectionProperty(type=UNITYPKG_ImportItem))
     setattr(wm, _INDEX_PROP, IntProperty(default=0))
-    setattr(wm, _UNIT_PROP, EnumProperty(name="Import Unit", items=_unit_items))
+    setattr(wm, _UNIT_PROP, EnumProperty(name="Import Unit", items=_unit_items, update=_on_unit_changed))
     setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
     setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
     setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))

@@ -21,14 +21,15 @@
   3. prefab の Renderer.m_Materials（同名 GameObject の同じサブメッシュ）
   さらに、prefab がスロットごとに別の .mat を指す場合は **スロット単位で Blender マテリアルを分割**する（`blender/importer.py`）。
   prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
-  候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。Prefab Variant / ネストは元が prefab なら
-  上書きを重ねる（fileID は PrefabInstance の fileID XOR 元の fileID）。元が FBX の上書きは未対応（Issue #31）。
+  候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。prefab の展開（Variant / ネスト・上書き・削除・古い形式。
+  fileID は PrefabInstance の fileID XOR 元の fileID）は Scenes 単位と同じ `core/hierarchy.py` の `Expander` で行い、表はその配置から作る（#71）。
+  元が FBX の新しい形式の上書きは未対応（Issue #31）。
 - **読み込む単位**: 選択ダイアログで Scenes / Prefabs / Models を選ぶ（排他。候補は推測で外さず、読めないものは理由付きで灰色）。
   Scenes は `core/hierarchy.py` で .unity を展開し、モデルの配置ごとに Empty の下へ読み込む。Unity のモデル空間の (x, y, z) は
   Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。
 - **マテリアルモード**: Auto（トゥーン系 → Toon ノードグループ、PBR 系 → Principled）/ Principled / Toon / Unlit / Names Only。
   Toon は `blender/toon_group.py` の `UnityToon`（Shader to RGB を使うため EEVEE 向け）。
-- **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）。
+- **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）/ `unity_build_options`（組み立ての設定）。
   画像には `unity_guid` 等。これにより元パッケージ無しで別モードに再構築できる（`operators/rebuild_material.py`）。
 - **パッケージ読み取り**（`core/package.py`）: tar.gz を 1 度走査して索引化し、必要な GUID だけ 2 度目の走査で展開する。
   Unity YAML は依存無しの専用パーサー（`core/unity_yaml.py`。Blender 同梱 Python に PyYAML は無い）。
@@ -42,7 +43,7 @@
 ```
 unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
-  blender/                bpy 依存（importer / materials / textures / toon_group / outline）
+  blender/                bpy 依存（importer / scene_objects / materials / nodes / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成

@@ -3,7 +3,7 @@
 tar.gz はランダムアクセスできないため、
 
 1. ``scan()`` で 1 度ストリーム走査して GUID ごとの索引を作る
-   （``pathname`` と ``asset.meta`` は小さいので常駐、``.mat`` の実体もキャッシュ）
+   （``pathname`` と ``asset.meta`` は小さいので常駐、``.mat`` / ``.prefab`` / ``.unity`` の実体もキャッシュ）
 2. ``extract()`` で必要な GUID だけを 2 度目の走査で書き出す
 
 という 2 パス構成にしている。
@@ -38,7 +38,10 @@ MATERIAL_EXTS = frozenset({".mat"})
 PREFAB_EXTS = frozenset({".prefab"})
 SCENE_EXTS = frozenset({".unity"})
 
-# scan 時に実体をメモリへ載せておく拡張子と上限サイズ
+# scan 時に実体をメモリへ載せておく拡張子。上限は ``_READ_ASSET_MAX_SIZE``。
+# tar では ``asset`` が ``pathname`` より先に来るのが普通なので、種類の分からない ``asset`` はいったん読んで保持し、
+# 同じ GUID の ``pathname`` で拡張子が分かった時点で残すか捨てるかを決める（保持するのは常に 1 件。#75）。
+# ``pathname`` が続けて来ないパッケージでは、保持したものを ``_CACHE_MAX_SIZE`` 以下に限って残す（超えたものは read_asset で再走査）
 _CACHE_EXTS = frozenset({".mat", ".prefab", ".unity"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
@@ -211,7 +214,19 @@ def _open_for_write(target: Path):
     return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
-def _human_size(size: float) -> str:
+def _settle_cache(entry: AssetEntry) -> None:
+    """scan で読んだ実体を残すか決める。拡張子が分かればそれで、分からなければ小さいものだけ残す（最後に決め直す）。"""
+    if entry._cache is None:
+        return
+    if entry.pathname:
+        if entry.ext not in _CACHE_EXTS:
+            entry._cache = None
+    elif len(entry._cache) > _CACHE_MAX_SIZE:
+        entry._cache = None
+
+
+def human_size(size: float) -> str:
+    """バイト数を「12.3 MiB」のような表記にする（警告文とダイアログで使う）。"""
     for unit in ("B", "KiB", "MiB", "GiB"):
         if size < 1024 or unit == "GiB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
@@ -231,6 +246,7 @@ class UnityPackage:
         if self._scanned:
             return self.entries
         entries: dict[str, AssetEntry] = {}
+        held: AssetEntry | None = None  # pathname より先に来た asset を読んで保持しているエントリー
         try:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
@@ -241,6 +257,9 @@ class UnityPackage:
                     entry = entries.get(guid)
                     if entry is None:
                         entry = entries[guid] = AssetEntry(guid)
+                    if held is not None and held is not entry:
+                        _settle_cache(held)  # 別の GUID に移った。pathname は後から来ないものとして扱う
+                        held = None
                     if part in ("pathname", "asset.meta") and member.size > _METADATA_MAX_SIZE:
                         self.warnings.append(
                             f"ignored {member.name}: {member.size} bytes exceeds the {_METADATA_MAX_SIZE} byte limit"
@@ -248,14 +267,19 @@ class UnityPackage:
                     elif part == "pathname":
                         text = tar.extractfile(member).read().decode("utf-8", "replace")
                         entry.pathname = text.splitlines()[0].strip() if text.strip() else ""
+                        _settle_cache(entry)
+                        held = None
                     elif part == "asset.meta":
                         entry.meta_text = tar.extractfile(member).read().decode("utf-8", "replace")
                     elif part == "asset":
                         entry.has_asset = True
                         entry.size = member.size
                         entry.mtime = int(member.mtime)
-                        if member.size <= _CACHE_MAX_SIZE:
+                        known = bool(entry.pathname)
+                        if member.size <= _READ_ASSET_MAX_SIZE and (not known or entry.ext in _CACHE_EXTS):
                             entry._cache = tar.extractfile(member).read()
+                            if not known:
+                                held = entry
                     if progress is not None:
                         progress(0.0, entry.pathname or guid)
         except (tarfile.TarError, EOFError, OSError) as exc:
@@ -264,7 +288,7 @@ class UnityPackage:
         if not entries:
             raise PackageError(f"{self.path.name} does not look like a unitypackage (no GUID entries)")
 
-        # pathname が判明した後で、キャッシュを残す拡張子以外は解放する
+        # pathname が離れた位置にあったものも、判明した拡張子で残すか決め直す
         for entry in entries.values():
             if entry._cache is not None and entry.ext not in _CACHE_EXTS:
                 entry._cache = None
@@ -390,13 +414,13 @@ class UnityPackage:
         total = sum(wanted[g].size for g in pending)
         if max_total_size and total > max_total_size:
             raise PackageError(
-                f"extracting {len(pending)} files needs {_human_size(total)}, "
-                f"more than the {_human_size(max_total_size)} limit set in the add-on preferences"
+                f"extracting {len(pending)} files needs {human_size(total)}, "
+                f"more than the {human_size(max_total_size)} limit set in the add-on preferences"
             )
         free = _free_disk_space(dest_root)
         if free is not None and total > free:
             raise PackageError(
-                f"not enough free disk space in {dest_root}: need {_human_size(total)}, {_human_size(free)} available"
+                f"not enough free disk space in {dest_root}: need {human_size(total)}, {human_size(free)} available"
             )
 
         done = 0

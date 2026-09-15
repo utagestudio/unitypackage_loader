@@ -565,5 +565,31 @@ class RobustnessTest(unittest.TestCase):
         self.assertEqual(h.missing_sources, 5)  # B、A、C、元の無い prefab、Hidden の中の FBX
 
 
+
+class NestingLimitCacheTests(unittest.TestCase):
+    """深さの上限で打ち切った展開結果を、浅い位置で使い回さない（#78 L10）。"""
+
+    def test_truncated_result_is_expanded_again_from_a_shallower_position(self):
+        from unitypackage_loader.core.hierarchy import MAX_NESTING
+
+        count = MAX_NESTING + 2
+        guids = [f"{i:032x}" for i in range(0x100, 0x100 + count)]
+        assets = {}
+        for i, guid in enumerate(guids):
+            # prefab ごとに fileID を変える（同じ番号だと、入れ子の XOR で key が元に戻ってぶつかる）
+            base = 1000 * (i + 1)
+            text = HEADER + game_object(base + 10, f"P{i}") + transform(base + 11, base + 10)
+            if i + 1 < count:
+                text += instance(base + 20, guids[i + 1], base + 11, [])
+            assets[guid] = text
+        expander = Expander(lambda g: parse_asset(assets[g]) if g in assets else None, {})
+        deep = expander.expand_asset(guids[0])
+        self.assertTrue(deep.depth_truncated)
+        self.assertEqual(len(deep.nodes), MAX_NESTING)
+        # 深い位置で打ち切られた prefab も、直接展開すれば最後まで展開される
+        tail = expander.expand_asset(guids[count - 3])
+        self.assertFalse(tail.depth_truncated)
+        self.assertEqual(len(tail.nodes), 3)
+
 if __name__ == "__main__":
     unittest.main()

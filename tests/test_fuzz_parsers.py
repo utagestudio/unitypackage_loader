@@ -28,7 +28,7 @@ from unitypackage_loader.core.hierarchy import (
 )
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
-from unitypackage_loader.core.prefab import parse_prefab, resolve_renderers, tables_by_model, unresolved_material_overrides
+from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
 from unitypackage_loader.core.unity_binary import load_documents
 
@@ -142,11 +142,9 @@ def run_scene(data, assets: dict[str, str]) -> None:
 
 
 def run_prefab(data) -> None:
-    guid = "7" * 32
-    documents = {guid: parse_prefab(data)}
-    resolved: dict = {}
-    unresolved_material_overrides(guid, documents, resolved)
-    tables_by_model(resolve_renderers(guid, documents, resolved).values(), [tp.MODEL_A, th.MODEL])
+    models = {**_MODELS, **tp.MODELS}
+    hierarchy = Expander(_read_from({}), models).expand_raw(parse_asset(data))
+    tables_from_hierarchy(hierarchy, models)
 
 
 def run_material(data) -> None:

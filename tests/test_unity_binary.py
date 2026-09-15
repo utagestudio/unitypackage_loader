@@ -4,7 +4,7 @@ import unittest
 from tests import _paths  # noqa: F401  (sys.path 設定)
 from tests import unity_binary_writer as w
 from unitypackage_loader.core.material import parse_material
-from unitypackage_loader.core.prefab import parse_prefab
+from unitypackage_loader.core.hierarchy import parse_asset
 from unitypackage_loader.core.unity_binary import (
     COMMON_STRINGS,
     UnityBinaryError,
@@ -125,12 +125,12 @@ class BinaryPrefabTest(unittest.TestCase):
     def test_renderers(self):
         for kwargs in ({}, {"version": 22, "big_endian": True}):
             with self.subTest(**kwargs):
-                doc = parse_prefab(w.prefab_with_renderers([("Body", MODEL, [MAT_A, None])], **kwargs))
-                (rm,) = doc.renderers.values()
-                self.assertEqual(rm.game_object, "Body")
-                self.assertEqual(rm.materials, [MAT_A, None])
-                self.assertEqual(rm.renderer_class, 23)
-                self.assertEqual(rm.mesh_guid, MODEL)
+                raw = parse_asset(w.prefab_with_renderers([("Body", MODEL, [MAT_A, None])], **kwargs))
+                ((go, info),) = raw.renderers.values()
+                self.assertEqual(raw.names[go], "Body")
+                self.assertEqual(info.materials, [MAT_A, None])
+                self.assertEqual(info.renderer_class, 23)
+                self.assertEqual(info.mesh_guid, MODEL)
 
     def test_local_reference(self):
         docs = parse_serialized_file(w.prefab_with_renderers([("Body", MODEL, [MAT_A])]))
@@ -175,6 +175,25 @@ class RobustnessTest(unittest.TestCase):
         corrupt = data.replace(marker, struct.pack("<if", 0x7FFFFFFF, 1.5))
         with self.assertRaisesRegex(UnityBinaryError, "count"):
             parse_serialized_file(corrupt)
+
+    def test_array_count_uses_element_size(self):
+        from unitypackage_loader.core.unity_binary import MAX_EMPTY_ELEMENTS, _Node, _Reader, _ValueReader
+
+        def array(element: _Node) -> _Node:
+            return _Node("vector", "m_Items", 0, 0, [_Node("Array", "Array", 1, 0, [_Node("int", "size", 2, 0), element])])
+
+        pair = _Node("Pair", "data", 2, 0, [_Node("float", "x", 3, 0), _Node("float", "y", 3, 0)])
+        # 16 バイトしか残っていないのに 10 要素（1 要素 8 バイト）を読もうとすると、読む前に件数で弾く
+        reader = _ValueReader(_Reader(struct.pack("<i", 10) + bytes(16), "<"), [])
+        with self.assertRaisesRegex(UnityBinaryError, "count"):
+            reader.read(array(pair))
+        # 中身の無い要素の配列は、残りのバイト数によらず件数に上限を置く（大量の dict を作らせない）
+        empty = _Node("Empty", "data", 2, 0)
+        reader = _ValueReader(_Reader(struct.pack("<i", MAX_EMPTY_ELEMENTS + 1) + bytes(MAX_EMPTY_ELEMENTS + 1), "<"), [])
+        with self.assertRaisesRegex(UnityBinaryError, "count"):
+            reader.read(array(empty))
+        ok = _ValueReader(_Reader(struct.pack("<i", 3), "<"), []).read(array(empty))
+        self.assertEqual(ok, [{}, {}, {}])
 
     def test_deep_type_tree(self):
         node, value = w.prim("int", "leaf"), 7
