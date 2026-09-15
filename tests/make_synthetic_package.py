@@ -304,6 +304,8 @@ def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = Non
         path.with_suffix(".glb").rename(path)
     elif path.suffix == ".blend":
         # 既にノードが組まれたマテリアルを持つ .blend（KEEP の確認用）
+        if mat.node_tree is None:  # Blender 4.x の materials.new() はノードを持たない
+            mat.use_nodes = True
         mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.2, 0.9, 0.3, 1.0)
         bpy.ops.wm.save_as_mainfile(filepath=str(path), copy=True)
     else:
