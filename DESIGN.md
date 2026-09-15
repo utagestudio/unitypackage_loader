@@ -595,7 +595,11 @@ def run(ctx, filepath, opts) -> Report:
 - 例外の扱い（#69）:
   - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `prefab.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
   - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
-  - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。モデルの読み込み自体の失敗だけがエラー。
+  - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。
+  - モデル 1 つ・シーン 1 つの読み込みの失敗（壊れた FBX など）は、レポートの `errors` に記録して残りを読み込む。読めた分は残す。
+    失敗したモデルが作りかけたデータとレポートの行は消し、同じモデルの残りの配置は試さない。
+  - 続けられない失敗（展開の失敗など）と、選んだものが 1 つも読み込めなかったときは、この回で作ったデータ（パッケージ用コレクションを含む）を
+    片付けてから失敗にする。どちらの場合も `LAST_REPORT` を更新し、N パネルにエラーを出す。
   - `UnityPackage.read_asset` の再走査の失敗は、`scan` と同じく `PackageError` にする。
 - FBX は新しい C++ のインポーター（`bpy.ops.wm.fbx_import`。Blender 4.5 で追加）を使う。オプションで Legacy を選んだときだけ、Python 製の `bpy.ops.import_scene.fbx` を使う。
   `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。

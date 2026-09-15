@@ -362,7 +362,7 @@ def resolve_extract_root(opts: ImportOptions, package_path: Path) -> Path:
 # bpy.data の差分取得
 # ---------------------------------------------------------------------------
 
-_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions", "collections")
+_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions", "collections", "lights", "cameras")
 
 
 def _snapshot() -> dict[str, set[str]]:
@@ -375,6 +375,30 @@ def _new_since(before: dict[str, set[str]]) -> dict[str, list]:
         coll = getattr(bpy.data, name)
         result[name] = [d for d in coll if d.name not in before[name]]
     return result
+
+
+def _remove_created(before: dict[str, set[str]]) -> None:
+    """``before`` の後に作られたデータブロックを消す（読み込みに失敗したときの片付け）。"""
+    new = _new_since(before)
+    ids = [d for name in _TRACKED for d in new[name]]
+    if ids:
+        bpy.data.batch_remove(ids)
+
+
+def _is_removed(datablock) -> bool:
+    try:
+        datablock.name
+    except ReferenceError:
+        return True
+    return False
+
+
+def _record_failure(report: ImportReport, message: str) -> None:
+    """モデルやシーン 1 つの読み込みの失敗をレポートに記録する（残りの読み込みは続ける。except の中で呼ぶ）。"""
+    message = message.strip()  # Blender の例外の文は末尾に改行が付く
+    if message not in report.errors:
+        report.errors.append(message)
+    _log_exception(message)
 
 
 def _adopt_into_collection(new: dict[str, list], scene, collection) -> None:
@@ -791,6 +815,10 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
 # ---------------------------------------------------------------------------
 
 
+class _NothingImported(PackageError):
+    """選んだモデル・シーンがどれも読み込めなかった（オペレーターが PackageError と同じく本文をそのまま表示する）。"""
+
+
 def run_import(
     context,
     filepath: str,
@@ -798,9 +826,40 @@ def run_import(
     progress=None,
     prepared: PreparedPackage | None = None,
 ) -> ImportReport:
+    """パッケージを読み込み、レポートを返す（``LAST_REPORT`` にも入れる）。
+
+    モデルやシーン 1 つの読み込みの失敗はレポートの ``errors`` に記録して続け、読めた分は残す。
+    続けられない失敗と、選んだものが 1 つも読み込めなかったときは、この回で作ったものを片付けてから例外を送る。
+    どちらの場合も ``LAST_REPORT`` を更新する（#70）。
+    """
     global LAST_REPORT
+    report = ImportReport(package=Path(filepath).name)
+    before = _snapshot()
+    try:
+        _run_import(context, filepath, opts, progress, prepared, report)
+        if report.errors and not (report.objects or report.lights or report.cameras):
+            raise _NothingImported(f"nothing could be imported: {report.errors[0]}")
+    except Exception as exc:
+        if not isinstance(exc, _NothingImported):
+            report.errors.append(f"import failed: {str(exc).strip()}")
+        _remove_created(before)
+        for items in (report.objects, report.materials, report.images):
+            items.clear()  # 片付けたので、Blender には残っていない
+        LAST_REPORT = report
+        raise
+    LAST_REPORT = report
+    return report
+
+
+def _run_import(
+    context,
+    filepath: str,
+    opts: ImportOptions,
+    progress,
+    prepared: PreparedPackage | None,
+    report: ImportReport,
+) -> None:
     package_path = Path(filepath)
-    report = ImportReport(package=package_path.name)
 
     def step(fraction: float, message: str) -> None:
         if progress is not None:
@@ -899,14 +958,14 @@ def run_import(
 
     built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
     imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
+    failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
 
-    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+    def build_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before) -> list[bpy.types.Object]:
         """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
         model = summary.entry
         model_info = _model_info(model, report.warn)
         reimport = model.guid in imported_models
         imported_models.add(model.guid)
-        before = _snapshot()
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
         delegated = _import_model(context, paths[model.guid], model, opts, target, report)
@@ -1020,6 +1079,25 @@ def run_import(
                 report.outlines += added
         return new["objects"]
 
+    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+        """モデルを 1 回読み込む。途中で失敗したら、そのモデルで作ったものとレポートの行を消してから例外を送る（#70）。"""
+        before = _snapshot()
+        rows = (report.models, report.objects, report.materials, report.images)
+        counts = [len(items) for items in rows]
+        known = summary.guid in imported_models
+        try:
+            return build_model(summary, prefab_table, target, before)
+        except Exception:
+            _remove_created(before)
+            for items, count in zip(rows, counts):
+                del items[count:]
+            if not known:
+                imported_models.discard(summary.guid)
+            for guid in [g for g, m in built_by_guid.items() if _is_removed(m)]:
+                del built_by_guid[guid]
+            failed_models.add(summary.guid)
+            raise
+
     model_by_guid = {m.guid: m for m in prepared.models}
 
     def import_scene(scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
@@ -1053,6 +1131,8 @@ def run_import(
                 if skipped is not None:
                     report.warn(f"scene {pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
                 continue
+            if summary.guid in failed_models:
+                continue  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
             root = _scene_empty(hierarchy, placement.root, target, empties, active)
             table = {
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
@@ -1061,7 +1141,11 @@ def run_import(
             key = placement.signature()
             template = templates.get(key)
             if template is None:
-                objects = import_model(summary, table, target)
+                try:
+                    objects = import_model(summary, table, target)
+                except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
+                    _record_failure(report, f"scene {pathname}: could not import {summary.entry.pathname}: {exc}")
+                    continue
                 template = templates[key] = _SceneTemplate.capture(objects)
             else:
                 objects = _duplicate_objects(template, target)
@@ -1190,10 +1274,18 @@ def run_import(
                 view_layer.active_layer_collection = layer_coll
             for summary, prefab_table in group.models:
                 step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
-                import_model(summary, prefab_table, target)
                 done += 1
+                if summary.guid in failed_models:
+                    continue
+                try:
+                    import_model(summary, prefab_table, target)
+                except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
+                    _record_failure(report, f"could not import {summary.entry.pathname}: {exc}")
         for scene_summary in scenes:
-            import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+            try:
+                import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+            except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
+                _record_failure(report, f"could not import scene {scene_summary.pathname}: {exc}")
             done += 1
         if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
             _arrange_collections(context, prefab_collections)
@@ -1203,8 +1295,6 @@ def run_import(
 
     collection["unity_package"] = package_path.name
     step(1.0, "Done")
-    LAST_REPORT = report
-    return report
 
 
 def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:

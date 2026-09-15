@@ -22,6 +22,8 @@ from mathutils import Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_DIR = REPO_ROOT / "_local"
+# 失敗したときに片付けられているかを数えるデータの種類
+_DATA_KINDS = ("objects", "collections", "meshes", "materials", "images", "armatures", "actions", "lights", "cameras")
 
 
 def _args() -> tuple[Path, Path]:
@@ -133,14 +135,24 @@ def main() -> int:
     extract_dir = tempfile.mkdtemp(prefix="unitypackage_loader_test_")
     options = {"filepath": str(package), "extract_mode": "CUSTOM", "extract_path": extract_dir}
     options.update(exp.get("options", {}))
-    result = bpy.ops.import_scene.unitypackage(**options)
+    counts_before = {name: len(getattr(bpy.data, name)) for name in _DATA_KINDS}
+    try:
+        result = bpy.ops.import_scene.unitypackage(**options)
+    except RuntimeError as exc:  # CANCELLED で ERROR を報告すると、バックグラウンドでは例外になる
+        print(f"operator error: {exc}")
+        result = {"CANCELLED"}
     report = importer.LAST_REPORT
 
     c = Check()
-    c.eq("operator result", set(result), {"FINISHED"})
+    c.eq("operator result", set(result), {exp.get("result", "FINISHED")})
     c.true("report exists", report is not None)
     if report is None:
         return _finish(c)
+    if "errors" in exp:
+        c.eq("error count", len(report.errors), exp["errors"])
+    if exp.get("leaves_nothing"):
+        for name in _DATA_KINDS:
+            c.eq(f"{name} left behind", len(getattr(bpy.data, name)), counts_before[name])
 
     objs = exp.get("objects", {})
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
