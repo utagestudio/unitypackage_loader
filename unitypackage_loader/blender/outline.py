@@ -42,8 +42,7 @@ def outline_material(color: tuple[float, float, float, float]) -> bpy.types.Mate
     mat = bpy.data.materials.new(key)
     mat.use_backface_culling = True
     mat.diffuse_color = color
-    if hasattr(mat, "surface_render_method"):
-        mat.surface_render_method = "DITHERED"
+    mat.surface_render_method = "DITHERED"
     if mat.node_tree is None:  # Blender 4.x の materials.new() はノードを持たない（5.0 以降は常に持つ）
         mat.use_nodes = True
     tree = mat.node_tree

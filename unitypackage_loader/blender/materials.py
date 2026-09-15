@@ -406,13 +406,9 @@ def _rgba(value, default):
 
 
 def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mode: str, opts: MaterialBuildOptions) -> None:
-    if hasattr(mat, "surface_render_method"):
-        mat.surface_render_method = "BLENDED" if alpha_mode == "blend" else "DITHERED"
-    else:  # Blender 4.1 以前
-        mat.blend_method = {"opaque": "OPAQUE", "cutout": "CLIP", "blend": "BLEND"}[alpha_mode]
+    mat.surface_render_method = "BLENDED" if alpha_mode == "blend" else "DITHERED"
     mat.use_backface_culling = opts.backface_culling and norm.cull_backface
-    if hasattr(mat, "use_transparency_overlap"):
-        mat.use_transparency_overlap = alpha_mode == "blend"
+    mat.use_transparency_overlap = alpha_mode == "blend"
     mat.diffuse_color = (*norm.base_color[:3], 1.0)
 
 

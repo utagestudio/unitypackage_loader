@@ -612,7 +612,7 @@ def _make_light(name: str, values: BlenderLight) -> bpy.types.Object:
     data.energy = values.energy
     data.use_shadow = values.use_shadow
     data.shadow_soft_size = values.shadow_soft_size
-    if values.use_temperature and hasattr(data, "use_temperature"):  # 色温度は Blender 4.5 以降
+    if values.use_temperature:
         data.use_temperature = True
         data.temperature = values.temperature
     if values.type == "SUN":
