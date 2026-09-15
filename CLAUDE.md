@@ -34,6 +34,8 @@
   Unity YAML は依存無しの専用パーサー（`core/unity_yaml.py`。Blender 同梱 Python に PyYAML は無い）。
   Asset Serialization が Force Binary のプロジェクト由来の .mat / .prefab はバイナリの SerializedFile なので、
   `core/unity_binary.py` が TypeTree をたどって同じ `UnityDocument` に変換する（`load_documents` が自動判定）。
+- **例外の約束**: 解析器は壊れた入力に `ValueError` 系だけを送出する（`tests/test_fuzz_parsers.py` で確認）。`.mat` / `.meta` / prefab / シーンを読む側は
+  `Exception` を捕まえて、そのアセットだけを警告付きで外す（1 つの壊れた補助データでパッケージ全体を止めない）。
 
 ## ディレクトリ構成
 

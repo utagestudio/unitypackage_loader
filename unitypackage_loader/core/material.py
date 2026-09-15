@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
@@ -79,7 +80,14 @@ class UnityMaterial:
         value = self.floats.get(name)
         if value is None:
             value = self.ints.get(name)
-        return float(value) if value is not None else default
+        if value is None:
+            return default
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        # 1e999 や nan のような値は、int() や比較で例外・誤判定になるので既定値にする（#69）
+        return number if math.isfinite(number) else default
 
     def flag(self, name: str, default: bool = False) -> bool:
         value = self.floats.get(name, self.ints.get(name))

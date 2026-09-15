@@ -285,13 +285,16 @@ class UnityPackage:
                 f"({entry.size} bytes > {_READ_ASSET_MAX_SIZE} byte limit)"
             )
         target = f"{entry.guid}/asset"
-        with tarfile.open(self.path, "r:*") as tar:
-            for member in tar:
-                split = _split_member(member.name)
-                if split and split[0] == entry.guid and split[1] == "asset":
-                    if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
-                        raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
-                    return tar.extractfile(member).read()
+        try:
+            with tarfile.open(self.path, "r:*") as tar:
+                for member in tar:
+                    split = _split_member(member.name)
+                    if split and split[0] == entry.guid and split[1] == "asset":
+                        if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
+                            raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
+                        return tar.extractfile(member).read()
+        except (tarfile.TarError, EOFError, OSError) as exc:  # scan と同じく PackageError に揃える
+            raise PackageError(f"cannot read {entry.pathname or target} from {self.path.name}: {exc}") from exc
         raise KeyError(f"{target} not found in {self.path.name}")
 
     def read_text(self, guid: str) -> str:

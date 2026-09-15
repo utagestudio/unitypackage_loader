@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import traceback
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty
 
@@ -80,7 +82,8 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
             try:
                 mat_builder.rebuild_from_props(mat, self.mode, opts)
                 done += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 1 つの失敗で残りの再構築を止めない
+                traceback.print_exc()
                 failed.append(f"{mat.name}: {exc!r}")
         for f in failed:
             print("[Unitypackage Importer] rebuild failed:", f)

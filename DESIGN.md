@@ -592,7 +592,11 @@ def run(ctx, filepath, opts) -> Report:
 - `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。全モデルが委譲対象なら `.mat` 用テクスチャの展開も省く。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
-- 例外は各マテリアル単位で捕捉して警告にする。FBX インポート自体の失敗だけがエラー。
+- 例外の扱い（#69）:
+  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `prefab.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
+  - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
+  - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。モデルの読み込み自体の失敗だけがエラー。
+  - `UnityPackage.read_asset` の再走査の失敗は、`scan` と同じく `PackageError` にする。
 - FBX は新しい C++ のインポーター（`bpy.ops.wm.fbx_import`。Blender 4.5 で追加）を使う。オプションで Legacy を選んだときだけ、Python 製の `bpy.ops.import_scene.fbx` を使う。
   `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。
 - Blender 4.x の `bpy.data.materials.new()` はノードツリーを持たない（5.0 以降は持つ）。こちらで作るマテリアル（スロット分割・アウトライン）は、組み立ての前に `use_nodes` を立てる。
