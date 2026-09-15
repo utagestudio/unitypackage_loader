@@ -46,7 +46,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 1〜3 は「FBX マテリアル 1 つに .mat を 1 つ」決める順序。Unity で実際に表示されるのは Renderer の `m_Materials` で、externalObjects は FBX を置いたときの既定値にすぎないので、prefab に割り当てがあれば下記のスロット単位の分割で 1・2 の結果より優先する。
 
-**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。
+**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。表は `hierarchy.Expander` で展開した prefab の配置（`placements`）から作るので、名前の決め方（Unity の複製番号「 (N)」を外す、.meta の表で引いたメッシュ名を優先する）も Scenes 単位と同じ。名前で引けないとき（prefab で GameObject の名前を変えたもの）は、オブジェクト名から求めたメッシュの fileID を Renderer のメッシュ参照と照合する。FBX を置いただけの PrefabInstance で、中への上書きを 1 つも名前で引けないものは表に入れない。Models 単位の統合は、名前に加えてメッシュ参照の fileID でも先勝ちにする（Prefab Variant で名前を変えた行と、後の prefab の元の名前の行が並んだとき、パス順で先の prefab の割り当てを使うため）（Issue #71）。
 
 **読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。
 
@@ -92,7 +92,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - パイプラインはマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）で決める
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
-**Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
+**Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、マテリアルの上書きの件数を警告に出す（Issue #31）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
 
 **スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。すべてのスロットが別の .mat に差し替わると分かっている FBX マテリアルは、組み立てずに差し替えに回す（`core/mapping.py` の `fully_replaced_materials`。Issue #77）。
 
@@ -351,7 +351,7 @@ unitypackage_loader/
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
-│   ├─ prefab.py                 # prefab の Renderer → モデルごとのマテリアル表（Variant / ネスト込み）
+│   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は hierarchy.py）
 │   ├─ units.py                  # 読み込む単位（Prefabs / Models）の候補と既定値
 │   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
 │   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
@@ -459,7 +459,7 @@ class UnityPackage:
 prefab が読めないとマテリアルが一つも当たらない）。
 
 - 判定: 先頭 20 バイトのヘッダー（ビッグエンディアン）の version と、ファイルサイズが実際の長さと一致するか（version 22 以降は 64 ビットの欄）。
-  `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `parse_prefab` は bytes をそのまま受け取る。
+  `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `hierarchy.parse_asset` は bytes をそのまま受け取る。
 - 対応範囲: version 14〜22（Unity 5.0 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
   形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。共通文字列表も同じ表を持つ。
 - 読み方: 型ごとの TypeTree（blob 形式。ノードは 24 バイト、version 19 以降は 32 バイト）をたどり、値を YAML パーサーと同じ形に変換する。
@@ -618,7 +618,7 @@ def run(ctx, filepath, opts) -> Report:
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外の扱い（#69）:
-  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `prefab.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
+  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
   - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
   - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。
   - モデル 1 つ・シーン 1 つの読み込みの失敗（壊れた FBX など）は、レポートの `errors` に記録して残りを読み込む。読めた分は残す。

@@ -21,8 +21,9 @@
   3. prefab の Renderer.m_Materials（同名 GameObject の同じサブメッシュ）
   さらに、prefab がスロットごとに別の .mat を指す場合は **スロット単位で Blender マテリアルを分割**する（`blender/importer.py`）。
   prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
-  候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。Prefab Variant / ネストは元が prefab なら
-  上書きを重ねる（fileID は PrefabInstance の fileID XOR 元の fileID）。元が FBX の上書きは未対応（Issue #31）。
+  候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。prefab の展開（Variant / ネスト・上書き・削除・古い形式。
+  fileID は PrefabInstance の fileID XOR 元の fileID）は Scenes 単位と同じ `core/hierarchy.py` の `Expander` で行い、表はその配置から作る（#71）。
+  元が FBX の新しい形式の上書きは未対応（Issue #31）。
 - **読み込む単位**: 選択ダイアログで Scenes / Prefabs / Models を選ぶ（排他。候補は推測で外さず、読めないものは理由付きで灰色）。
   Scenes は `core/hierarchy.py` で .unity を展開し、モデルの配置ごとに Empty の下へ読み込む。Unity のモデル空間の (x, y, z) は
   Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。

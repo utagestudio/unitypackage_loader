@@ -22,6 +22,7 @@ from ..core.hierarchy import (
     CLASS_LIGHT,
     Expander,
     Hierarchy,
+    RawAsset,
     effective_active,
     parse_asset,
     summarize,
@@ -36,15 +37,7 @@ from ..core.mapping import fully_replaced_materials, resolve_materials, slot_ass
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import (
-    PrefabDocument,
-    RendererMaterials,
-    merge_prefab_tables,
-    parse_prefab,
-    resolve_renderers,
-    tables_by_model,
-    unresolved_material_overrides,
-)
+from ..core.prefab import RendererMaterials, merge_prefab_tables, tables_from_hierarchy
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -152,6 +145,7 @@ class PreparedPackage:
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
     _scenes: list[SceneSummary] | None = field(default=None, repr=False)
+    _expander: Expander | None = field(default=None, repr=False)  # prefab の展開結果を持つ（シーンの展開で使い回す）
 
     def ensure_scenes(self) -> list[SceneSummary]:
         """シーンを展開して、読み込む単位 Scenes の候補（pathname 順）を返す。展開は初めて呼ばれたときの 1 回だけ。
@@ -160,7 +154,12 @@ class PreparedPackage:
         """
         if self._scenes is None:
             unsupported = {m.guid: m.skip_reason for m in self.models if not m.supported}
-            self._scenes, self.scene_hierarchies = _prepare_scenes(self.pkg, self.models, self.warnings.append, unsupported)
+            if self._expander is None:
+                model_names, recycle = _model_tables(self.models)
+                self._expander = Expander(_prefab_reader(self.pkg, self.warnings.append), model_names, recycle)
+            self._scenes, self.scene_hierarchies = _prepare_scenes(
+                self.pkg, self._expander, self.models, self.warnings.append, unsupported
+            )
         return self._scenes
 
     @property
@@ -287,30 +286,25 @@ def prepare_package(
         referenced.update(norm.extra_texture_guids())
     missing = {g for g in referenced if pkg.get(g) is None}
 
-    # Prefab Variant / ネストの元をたどれるよう、先に全 prefab を読んでから Renderer を解決する
-    documents: dict[str, PrefabDocument] = {}
-    for entry in pkg.prefabs():
-        try:
-            documents[entry.guid.lower()] = parse_prefab(pkg.read_asset(entry.guid))
-        except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
-            warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
-            _log_exception(f"could not parse prefab {entry.pathname}")
+    # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
+    # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
-    resolved: dict[str, dict[int, RendererMaterials]] = {}
+    model_names, recycle = _model_tables(models)
+    expander = Expander(_prefab_reader(pkg, warnings.append), model_names, recycle)
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     for entry in pkg.prefabs():
-        if entry.guid.lower() not in documents:
-            continue
         try:
-            unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
-            tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
+            hierarchy = expander.expand_asset(entry.guid)
+            if hierarchy is None:  # 読めなかった（警告は読むときに出している）
+                continue
+            tables = tables_from_hierarchy(hierarchy, model_names, recycle)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
             _log_exception(f"could not resolve prefab {entry.pathname}")
             continue
-        if unresolved:
+        if hierarchy.unresolved_material_overrides:  # 位置などの上書きは Models / Prefabs 単位では使わないので数えない
             warnings.append(
-                f"prefab {entry.pathname}: {unresolved} material override(s) on objects inside a model "
+                f"prefab {entry.pathname}: {hierarchy.unresolved_material_overrides} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
         if tables:
@@ -319,34 +313,41 @@ def prepare_package(
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, scene_entries=pkg.scenes(),
+        prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=detect_pipeline(n.family for n in normalized.values()),
     )
 
 
-def _prepare_scenes(
-    pkg: UnityPackage, models: list[ModelSummary], warn: Callable[[str], None], unsupported: dict[str, str]
-) -> tuple[list[SceneSummary], dict[str, Hierarchy]]:
-    """シーンを展開して候補にする。prefab の展開結果はシーンの間で共有する。"""
-    entries = pkg.scenes()
-    if not entries:
-        return [], {}
-    prefab_guids = {e.guid for e in pkg.prefabs()}
-    model_names = {m.guid: Path(m.entry.pathname).stem for m in models}
+def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str, dict[int, str]]]:
+    """展開器に渡す、モデルの GUID → ルートの名前と、古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける。#53）。"""
+    return {m.guid: Path(m.entry.pathname).stem for m in models}, {m.guid: m.info.recycle_names for m in models}
 
-    def read(guid: str):
+
+def _prefab_reader(pkg: UnityPackage, warn: Callable[[str], None]) -> Callable[[str], RawAsset | None]:
+    """展開器に渡す読み取り関数。prefab 以外と、読めない prefab は None（元の無いインスタンスとして扱う。#69）。"""
+    prefab_guids = {e.guid for e in pkg.prefabs()}
+
+    def read(guid: str) -> RawAsset | None:
         if guid not in prefab_guids:
             return None
         try:
             return parse_asset(pkg.read_asset(guid))
-        except Exception as exc:  # noqa: BLE001 - 読めない prefab は、元の無いインスタンスとして扱う（#69）
+        except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので、その prefab だけを外して続ける
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
             _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")
             return None
 
-    # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
-    recycle = {m.guid: m.info.recycle_names for m in models}
-    expander = Expander(read, model_names, recycle)
+    return read
+
+
+def _prepare_scenes(
+    pkg: UnityPackage, expander: Expander, models: list[ModelSummary], warn: Callable[[str], None], unsupported: dict[str, str]
+) -> tuple[list[SceneSummary], dict[str, Hierarchy]]:
+    """シーンを展開して候補にする。prefab の展開結果は prefab の表づくりと共有する（``expander`` のキャッシュ）。"""
+    entries = pkg.scenes()
+    if not entries:
+        return [], {}
+    model_names, recycle = _model_tables(models)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:

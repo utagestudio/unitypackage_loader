@@ -4,7 +4,7 @@ import unittest
 from tests import _paths  # noqa: F401  (sys.path 設定)
 from tests import unity_binary_writer as w
 from unitypackage_loader.core.material import parse_material
-from unitypackage_loader.core.prefab import parse_prefab
+from unitypackage_loader.core.hierarchy import parse_asset
 from unitypackage_loader.core.unity_binary import (
     COMMON_STRINGS,
     UnityBinaryError,
@@ -125,12 +125,12 @@ class BinaryPrefabTest(unittest.TestCase):
     def test_renderers(self):
         for kwargs in ({}, {"version": 22, "big_endian": True}):
             with self.subTest(**kwargs):
-                doc = parse_prefab(w.prefab_with_renderers([("Body", MODEL, [MAT_A, None])], **kwargs))
-                (rm,) = doc.renderers.values()
-                self.assertEqual(rm.game_object, "Body")
-                self.assertEqual(rm.materials, [MAT_A, None])
-                self.assertEqual(rm.renderer_class, 23)
-                self.assertEqual(rm.mesh_guid, MODEL)
+                raw = parse_asset(w.prefab_with_renderers([("Body", MODEL, [MAT_A, None])], **kwargs))
+                ((go, info),) = raw.renderers.values()
+                self.assertEqual(raw.names[go], "Body")
+                self.assertEqual(info.materials, [MAT_A, None])
+                self.assertEqual(info.renderer_class, 23)
+                self.assertEqual(info.mesh_guid, MODEL)
 
     def test_local_reference(self):
         docs = parse_serialized_file(w.prefab_with_renderers([("Body", MODEL, [MAT_A])]))
