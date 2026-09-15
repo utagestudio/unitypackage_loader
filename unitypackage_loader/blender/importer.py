@@ -712,6 +712,13 @@ def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.O
     return list(mapping.values())
 
 
+def _by_object_name(table: dict, name: str):
+    """オブジェクト名で表を引く。完全一致 → 連番を外した形の順（元の名前が数字で終わる部品を連番と取り違えない）。"""
+    if name in table:
+        return table[name]
+    return table.get(strip_numeric_suffix(name))
+
+
 def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
     """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
 
@@ -728,7 +735,7 @@ def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_sc
     members = set(objects)
     skipped = 0
     for original, obj in zip(template.objects, objects):
-        spec = overrides.get(strip_numeric_suffix(obj.name))
+        spec = _by_object_name(overrides, obj.name)
         if spec is None:
             continue
         nested = obj.parent in members
@@ -761,7 +768,7 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
             obj, count = obj.parent, count + 1
         return count
 
-    targets = [o for o in objects if strip_numeric_suffix(o.name) in offsets]
+    targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
     if not targets:
         return 0
     view_layer.update()
@@ -775,7 +782,7 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
             skipped += 1
             continue
         view_layer.update()
-        obj.matrix_world = Matrix(unity_to_blender(offsets[strip_numeric_suffix(obj.name)])) @ scale_matrix @ origins[obj]
+        obj.matrix_world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ origins[obj]
     return skipped
 
 

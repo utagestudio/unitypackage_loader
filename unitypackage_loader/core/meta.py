@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,12 +44,17 @@ def parse_meta(text: str) -> MetaInfo:
     return MetaInfo(guid=guid, importer=importer, data=data)
 
 
+_NUMERIC_SUFFIX_RE = re.compile(r"\.[0-9]{3,}$")
+
+
 def strip_numeric_suffix(name: str) -> str:
-    """``Body.001`` → ``Body``。Unity / Blender が付ける連番サフィックスを外す。"""
-    base, dot, tail = name.rpartition(".")
-    if dot and tail.isdigit() and len(tail) == 3:
-        return base
-    return name
+    """``Body.001`` / ``Pole.1003`` → ``Body`` / ``Pole``。Unity / Blender が付ける連番サフィックスを外す。
+
+    Blender は同名が 1000 を超えると ``.1000`` 以上の連番を付ける（#67）。元の名前が数字で終わる場合と区別できないので、
+    照合する側は「完全一致 → 外した形」の順で引く。
+    """
+    match = _NUMERIC_SUFFIX_RE.search(name)
+    return name[: match.start()] if match else name
 
 
 @dataclass
