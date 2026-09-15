@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..material import BLACK, NormalizedMaterial, UnityMaterial
+from ..material import BLACK, NormalizedMaterial, UnityMaterial, toon_values_from_extras
 from .base import ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, cull_backface, is_black, texture_transform
 
 
@@ -94,4 +94,5 @@ class LilToonProfile(ShaderProfile):
         if hsvg != (0.0, 1.0, 1.0, 1.0):
             extras["main_tex_hsvg"] = hsvg
             n.warnings.append("_MainTexHSVG adjustment is not reproduced")
+        n.shadow, n.matcap, n.rim = toon_values_from_extras(extras)  # 1.7.4 までと同じ換算（#73）
         return n

@@ -8,7 +8,17 @@ _Color や _EmissionColor がそのまま残っていることが多い。その
 
 from __future__ import annotations
 
-from ..material import BLACK, NormalizedMaterial, UnityMaterial
+from ..material import (
+    BLACK,
+    MATCAP_MULTIPLY,
+    NormalizedMaterial,
+    ToonMatCap,
+    ToonRim,
+    ToonShadow,
+    UnityMaterial,
+    clamp01,
+    matcap_blend_mode,
+)
 from .base import ShaderInfo, ShaderProfile, cull_backface, is_black, texture_transform
 
 
@@ -126,6 +136,27 @@ class VRChatMobileProfile(ShaderProfile):
                 "additive": int(mat.f("_MatcapType", 0)) == 0,
                 "strength": mat.f("_MatcapStrength", 1.0),
             }
+        # Toon ノードの値。意味のはっきりした値だけを換算し、置き換えられないものは既定値にして知らせる（#73）
+        n.shadow = ToonShadow()
+        n.warnings.append(
+            "shader approximation: VRChat/Mobile/Toon Standard shades with a ramp texture, _ShadowBoost and _ShadowAlbedo, "
+            "which the toon node group cannot reproduce; a default toon shadow is used"
+        )
+        rim = n.extras.get("rim")
+        if rim:
+            n.rim = ToonRim(
+                color=rim["color"],
+                strength=clamp01(rim["intensity"]),
+                border=clamp01(1.0 - rim["range"]),  # 範囲が広いほど、正面寄りから光る
+                blur=max(0.02, clamp01(1.0 - rim["sharpness"])),  # 鋭いほど、立ち上がりの幅が狭い
+            )
+            if rim["albedo_tint"] > 0.0:
+                n.warnings.append("shader approximation: VRChat/Mobile/Toon Standard rim albedo tint is not reproduced")
+        matcap = n.extras.get("matcap")
+        if matcap:
+            n.matcap = ToonMatCap(tex=matcap["tex"], strength=clamp01(matcap["strength"]), mode=matcap_blend_mode(matcap))
+            if matcap["mask"]:
+                n.warnings.append("shader approximation: VRChat/Mobile/Toon Standard matcap mask is not reproduced")
         if "USE_DETAIL_MAPS" in keywords:
             n.extras["detail"] = {
                 "albedo": _guid(mat, "_DetailAlbedoMap"),
@@ -180,6 +211,7 @@ class VRChatMobileProfile(ShaderProfile):
         n.lighting = "pbr"
         if mat.tex("_MatCap"):
             n.extras["matcap"] = {"tex": _guid(mat, "_MatCap"), "additive": False, "strength": 1.0}
+            n.matcap = ToonMatCap(tex=_guid(mat, "_MatCap"), mode=MATCAP_MULTIPLY)
 
     def _particle(self, mat: UnityMaterial, info: ShaderInfo | None, n: NormalizedMaterial) -> None:
         """VRChat/Mobile/Particles/*: _MainTex だけの Unlit 半透明・両面。Additive / Multiply はアルファブレンドで近似。"""
