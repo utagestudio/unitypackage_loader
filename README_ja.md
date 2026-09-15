@@ -6,7 +6,7 @@
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
 - 対応 Blender: 4.5 以降（開発は 5.2 LTS、検証は 4.5 LTS と 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
+- 読み込むもの: FBX / OBJ / glTF / VRM / Collada（Blender 4.5 のみ。5.0 で削除された）/ 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
 - 読み込まないもの: シェーダー本体、C#、アニメーション、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
