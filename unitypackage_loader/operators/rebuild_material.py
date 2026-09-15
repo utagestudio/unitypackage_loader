@@ -44,6 +44,7 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         default="SELECTED",
     )
     force_opaque: BoolProperty(name="Force Opaque", default=False)
+    backface_culling: BoolProperty(name="Backface Culling", default=True)
     use_normal_maps: BoolProperty(name="Normal Maps", default=True)
     use_emission: BoolProperty(name="Emission", default=True)
 
@@ -56,6 +57,11 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         )
 
     def invoke(self, context, event):
+        # 初期値は、インポート（または前回の再構築）で使った設定（#78）。無ければプロパティの既定値
+        targets = _target_materials(context, self.scope)
+        stored = next((mat_builder.stored_build_options(m) for m in targets if m.get(mat_builder.BUILD_OPTIONS_PROP)), {})
+        for name, value in stored.items():
+            setattr(self, name, value)
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
@@ -64,6 +70,7 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         layout.prop(self, "mode")
         layout.prop(self, "scope")
         layout.prop(self, "force_opaque")
+        layout.prop(self, "backface_culling")
         layout.prop(self, "use_normal_maps")
         layout.prop(self, "use_emission")
 
@@ -71,6 +78,7 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         opts = mat_builder.MaterialBuildOptions(
             mode=self.mode,
             force_opaque=self.force_opaque,
+            backface_culling=self.backface_culling,
             use_normal_maps=self.use_normal_maps,
             use_emission=self.use_emission,
         )

@@ -225,7 +225,8 @@ def _settle_cache(entry: AssetEntry) -> None:
         entry._cache = None
 
 
-def _human_size(size: float) -> str:
+def human_size(size: float) -> str:
+    """バイト数を「12.3 MiB」のような表記にする（警告文とダイアログで使う）。"""
     for unit in ("B", "KiB", "MiB", "GiB"):
         if size < 1024 or unit == "GiB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
@@ -413,13 +414,13 @@ class UnityPackage:
         total = sum(wanted[g].size for g in pending)
         if max_total_size and total > max_total_size:
             raise PackageError(
-                f"extracting {len(pending)} files needs {_human_size(total)}, "
-                f"more than the {_human_size(max_total_size)} limit set in the add-on preferences"
+                f"extracting {len(pending)} files needs {human_size(total)}, "
+                f"more than the {human_size(max_total_size)} limit set in the add-on preferences"
             )
         free = _free_disk_space(dest_root)
         if free is not None and total > free:
             raise PackageError(
-                f"not enough free disk space in {dest_root}: need {_human_size(total)}, {_human_size(free)} available"
+                f"not enough free disk space in {dest_root}: need {human_size(total)}, {human_size(free)} available"
             )
 
         done = 0

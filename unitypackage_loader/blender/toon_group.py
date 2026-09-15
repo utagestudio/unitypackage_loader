@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import bpy
 
+from .nodes import socket
+
 GROUP_NAME = "UnityToon"
 GROUP_VERSION = 1
 
@@ -32,13 +34,6 @@ _INPUTS = (
     ("Emission", "NodeSocketColor", (0.0, 0.0, 0.0, 1.0), None, None),
     ("Emission Strength", "NodeSocketFloat", 1.0, 0.0, None),
 )
-
-
-def _socket(sockets, identifier: str):
-    for s in sockets:
-        if s.identifier == identifier:
-            return s
-    return sockets[identifier]
 
 
 def get_toon_group() -> bpy.types.ShaderNodeTree:
@@ -124,42 +119,42 @@ def _build(tree: bpy.types.ShaderNodeTree) -> None:
 
     # --- 影色: base * shadow color と base を factor で混ぜ、強さで元に戻す ---
     shadowed = mix_color(3, 2, "MULTIPLY", "Base × Shadow Color")
-    _socket(shadowed.inputs, "Factor_Float").default_value = 1.0
-    links.new(inp.outputs["Base Color"], _socket(shadowed.inputs, "A_Color"))
-    links.new(inp.outputs["Shadow Color"], _socket(shadowed.inputs, "B_Color"))
+    socket(shadowed.inputs, "Factor_Float").default_value = 1.0
+    links.new(inp.outputs["Base Color"], socket(shadowed.inputs, "A_Color"))
+    links.new(inp.outputs["Shadow Color"], socket(shadowed.inputs, "B_Color"))
     lit_mix = mix_color(4, 1, "MIX", "Lit / Shadow")
-    links.new(shadow_fac.outputs[0], _socket(lit_mix.inputs, "Factor_Float"))
-    links.new(_socket(shadowed.outputs, "Result_Color"), _socket(lit_mix.inputs, "A_Color"))
-    links.new(inp.outputs["Base Color"], _socket(lit_mix.inputs, "B_Color"))
+    links.new(shadow_fac.outputs[0], socket(lit_mix.inputs, "Factor_Float"))
+    links.new(socket(shadowed.outputs, "Result_Color"), socket(lit_mix.inputs, "A_Color"))
+    links.new(inp.outputs["Base Color"], socket(lit_mix.inputs, "B_Color"))
     strength_mix = mix_color(5, 1, "MIX", "Shadow Strength")
-    links.new(inp.outputs["Shadow Strength"], _socket(strength_mix.inputs, "Factor_Float"))
-    links.new(inp.outputs["Base Color"], _socket(strength_mix.inputs, "A_Color"))
-    links.new(_socket(lit_mix.outputs, "Result_Color"), _socket(strength_mix.inputs, "B_Color"))
-    color = _socket(strength_mix.outputs, "Result_Color")
+    links.new(inp.outputs["Shadow Strength"], socket(strength_mix.inputs, "Factor_Float"))
+    links.new(inp.outputs["Base Color"], socket(strength_mix.inputs, "A_Color"))
+    links.new(socket(lit_mix.outputs, "Result_Color"), socket(strength_mix.inputs, "B_Color"))
+    color = socket(strength_mix.outputs, "Result_Color")
 
     # --- MatCap: モード別に合成し、Compare で選ぶ ---
     branches = []
     for i, (blend, label) in enumerate((("MIX", "Normal"), ("ADD", "Add"), ("SCREEN", "Screen"), ("MULTIPLY", "Multiply"))):
         node = mix_color(6, 3 + i, blend, f"MatCap {label}")
-        _socket(node.inputs, "Factor_Float").default_value = 1.0
-        links.new(color, _socket(node.inputs, "A_Color"))
-        links.new(inp.outputs["MatCap"], _socket(node.inputs, "B_Color"))
-        branches.append(_socket(node.outputs, "Result_Color"))
+        socket(node.inputs, "Factor_Float").default_value = 1.0
+        links.new(color, socket(node.inputs, "A_Color"))
+        links.new(inp.outputs["MatCap"], socket(node.inputs, "B_Color"))
+        branches.append(socket(node.outputs, "Result_Color"))
     selected = branches[0]
     for i in (1, 2, 3):
         cmp = math(7, 3 + i, "COMPARE", f"mode == {i}", float(i))
         cmp.inputs[2].default_value = 0.5
         links.new(inp.outputs["MatCap Mode"], cmp.inputs[0])
         sel = mix_color(8, 3 + i, "MIX")
-        links.new(cmp.outputs[0], _socket(sel.inputs, "Factor_Float"))
-        links.new(selected, _socket(sel.inputs, "A_Color"))
-        links.new(branches[i], _socket(sel.inputs, "B_Color"))
-        selected = _socket(sel.outputs, "Result_Color")
+        links.new(cmp.outputs[0], socket(sel.inputs, "Factor_Float"))
+        links.new(selected, socket(sel.inputs, "A_Color"))
+        links.new(branches[i], socket(sel.inputs, "B_Color"))
+        selected = socket(sel.outputs, "Result_Color")
     matcap_mix = mix_color(9, 3, "MIX", "MatCap Strength")
-    links.new(inp.outputs["MatCap Strength"], _socket(matcap_mix.inputs, "Factor_Float"))
-    links.new(color, _socket(matcap_mix.inputs, "A_Color"))
-    links.new(selected, _socket(matcap_mix.inputs, "B_Color"))
-    color = _socket(matcap_mix.outputs, "Result_Color")
+    links.new(inp.outputs["MatCap Strength"], socket(matcap_mix.inputs, "Factor_Float"))
+    links.new(color, socket(matcap_mix.inputs, "A_Color"))
+    links.new(selected, socket(matcap_mix.inputs, "B_Color"))
+    color = socket(matcap_mix.outputs, "Result_Color")
 
     # --- リム: Facing を境界/ぼかしで 0..1 にし、色 × 強さを加算 ---
     layer = add("ShaderNodeLayerWeight", 4, 8, "Rim facing")
@@ -182,26 +177,26 @@ def _build(tree: bpy.types.ShaderNodeTree) -> None:
     links.new(rim_fac.outputs[0], rim_amount.inputs[0])
     links.new(inp.outputs["Rim Strength"], rim_amount.inputs[1])
     rim_color = mix_color(8, 8, "MULTIPLY", "Rim Color × amount")
-    _socket(rim_color.inputs, "Factor_Float").default_value = 1.0
-    links.new(inp.outputs["Rim Color"], _socket(rim_color.inputs, "A_Color"))
-    links.new(rim_amount.outputs[0], _socket(rim_color.inputs, "B_Color"))
+    socket(rim_color.inputs, "Factor_Float").default_value = 1.0
+    links.new(inp.outputs["Rim Color"], socket(rim_color.inputs, "A_Color"))
+    links.new(rim_amount.outputs[0], socket(rim_color.inputs, "B_Color"))
     rim_add = mix_color(10, 3, "ADD", "+ Rim")
-    _socket(rim_add.inputs, "Factor_Float").default_value = 1.0
-    links.new(color, _socket(rim_add.inputs, "A_Color"))
-    links.new(_socket(rim_color.outputs, "Result_Color"), _socket(rim_add.inputs, "B_Color"))
-    color = _socket(rim_add.outputs, "Result_Color")
+    socket(rim_add.inputs, "Factor_Float").default_value = 1.0
+    links.new(color, socket(rim_add.inputs, "A_Color"))
+    links.new(socket(rim_color.outputs, "Result_Color"), socket(rim_add.inputs, "B_Color"))
+    color = socket(rim_add.outputs, "Result_Color")
 
     # --- エミッション加算 ---
     emis_scaled = mix_color(9, 10, "MULTIPLY", "Emission × strength")
-    _socket(emis_scaled.inputs, "Factor_Float").default_value = 1.0
-    links.new(inp.outputs["Emission"], _socket(emis_scaled.inputs, "A_Color"))
-    links.new(inp.outputs["Emission Strength"], _socket(emis_scaled.inputs, "B_Color"))
+    socket(emis_scaled.inputs, "Factor_Float").default_value = 1.0
+    links.new(inp.outputs["Emission"], socket(emis_scaled.inputs, "A_Color"))
+    links.new(inp.outputs["Emission Strength"], socket(emis_scaled.inputs, "B_Color"))
     emis_add = mix_color(10, 5, "ADD", "+ Emission")
     emis_add.clamp_result = False
-    _socket(emis_add.inputs, "Factor_Float").default_value = 1.0
-    links.new(color, _socket(emis_add.inputs, "A_Color"))
-    links.new(_socket(emis_scaled.outputs, "Result_Color"), _socket(emis_add.inputs, "B_Color"))
-    color = _socket(emis_add.outputs, "Result_Color")
+    socket(emis_add.inputs, "Factor_Float").default_value = 1.0
+    links.new(color, socket(emis_add.inputs, "A_Color"))
+    links.new(socket(emis_scaled.outputs, "Result_Color"), socket(emis_add.inputs, "B_Color"))
+    color = socket(emis_add.outputs, "Result_Color")
 
     # --- 出力: Emission シェーダー + アルファで Transparent と Mix ---
     emit = add("ShaderNodeEmission", 11, 3, "Toon result")

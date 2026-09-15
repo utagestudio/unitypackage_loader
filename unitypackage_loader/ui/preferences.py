@@ -20,9 +20,9 @@ EXTRACT_MODE_ITEMS = (
     ("CUSTOM", "Custom Path", "The directory given below"),
 )
 MODELS_ITEMS = (
-    ("ASK", "Ask", "Show the selection dialog when the package has more than one prefab or model to choose from"),
-    ("ALL", "All Models", "Import every model file in the package without asking"),
-    ("FIRST", "First Model Only", "Import only the first model file found, without asking"),
+    ("ASK", "Ask", "Show the selection dialog when the package has more than one scene, prefab or model to choose from"),
+    ("ALL", "All Models", "Import everything of the chosen import unit (every model file by default) without asking"),
+    ("FIRST", "First Model Only", "Import only the first scene, prefab or model of the chosen import unit, without asking"),
 )
 UNIT_ITEMS = (
     ("SCENES", "Scenes", "Import scenes with prefabs and models placed as in Unity; each scene gets its own collection"),
@@ -46,7 +46,7 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
         description="How to place prefabs when importing more than one. The choice made in the selection dialog is saved here",
     )
     # 選択ダイアログで最後に選んだ単位（PREFABS / MODELS）。次に開いたときの既定にする
-    last_import_unit: StringProperty(default="", options={"HIDDEN"})
+    last_import_unit: StringProperty(default="", options={"HIDDEN"})  # ダイアログで前回選んだ単位（SCENES / PREFABS / MODELS）
     default_material_mode: EnumProperty(name="Material Mode", items=MATERIAL_MODE_ITEMS, default="AUTO")
     default_extract_mode: EnumProperty(name="Extract To", items=EXTRACT_MODE_ITEMS, default="BESIDE_BLEND")
     default_extract_path: StringProperty(name="Custom Path", subtype="DIR_PATH", default="")

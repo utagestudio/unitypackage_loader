@@ -17,10 +17,9 @@ SkinnedMeshRenderer の ``m_Mesh``）の GUID で決める。パッケージ内�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, placements
+from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelNames, placements
 
 
 @dataclass
@@ -34,18 +33,18 @@ class RendererMaterials:
 
 def tables_from_hierarchy(
     h: Hierarchy,
-    model_names: Mapping[str, str] | Iterable[str],
-    mesh_names: dict[str, dict[int, str]] | None = None,
+    model_names: ModelNames,
+    name_tables: dict[str, dict[int, str]] | None = None,
 ) -> dict[str, dict[str, RendererMaterials]]:
     """展開した prefab の階層から、モデルの GUID → GameObject 名 → Renderer の表を作る。
 
-    ``model_names`` と ``mesh_names`` は ``hierarchy.placements`` と同じ（モデルの GUID → ルートの名前、.meta の表）。
+    ``model_names`` と ``name_tables`` は ``hierarchy.placements`` と同じ（モデルの GUID → ルートの名前、.meta の表）。
     同じモデルに同名の GameObject があれば先のもの（配置の順）を採用する。モデルをそのまま置いた PrefabInstance は、
     中への上書きを名前で引けたものだけが表に入る。1 つも引けなければ表に入れない（FBX を置いただけの prefab を、
     モデルを使う prefab として数えない。読み込む単位 Prefabs の候補は以前と同じ）。
     """
     result: dict[str, dict[str, RendererMaterials]] = {}
-    for placement in placements(h, model_names, mesh_names):
+    for placement in placements(h, model_names, name_tables):
         if not placement.renderers:
             continue
         table = result.setdefault(placement.model_guid, {})

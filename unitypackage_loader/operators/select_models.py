@@ -1,4 +1,4 @@
-"""インポートの 2 段目: 読み込む単位（Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
+"""インポートの 2 段目: 読み込む単位（Scenes / Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
 
 ``IMPORT_SCENE_OT_unitypackage`` が ``prepare_package`` の結果を ``set_pending`` で渡し、
 ``INVOKE_DEFAULT`` でこのオペレーターを呼ぶ。ダイアログの OK で ``run_import`` を実行する。
@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
-from ..core.package import PackageError
+from ..core.package import PackageError, human_size
 from ..core.report import sanitize_display
 from ..core.units import (
     NO_MESH_REASON,
@@ -29,12 +30,15 @@ from ..core.units import (
 )
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
+if TYPE_CHECKING:
+    from ..blender.importer import ImportOptions, PreparedPackage
+
 
 @dataclass
 class _Pending:
     filepath: str
-    opts: object  # ImportOptions
-    prepared: object | None  # PreparedPackage。execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
+    opts: ImportOptions
+    prepared: PreparedPackage | None  # execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
 
 
 _pending: _Pending | None = None
@@ -51,14 +55,6 @@ def _release_prepared() -> None:
     """
     if _pending is not None:
         _pending.prepared = None
-
-
-def _human_size(size: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
 
 
 def _short_reason(reason: str) -> str:
@@ -137,7 +133,7 @@ def _on_unit_changed(self, context):
 
 
 class UNITYPKG_ImportItem(bpy.types.PropertyGroup):
-    kind: StringProperty()  # UNIT_PREFABS / UNIT_MODELS
+    kind: StringProperty()  # UNIT_SCENES / UNIT_PREFABS / UNIT_MODELS
     guid: StringProperty()
     pathname: StringProperty()  # 表示用（sanitize_display 済み）
     size_text: StringProperty()
@@ -224,7 +220,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             item.kind = UNIT_MODELS
             item.guid = m.guid
             item.pathname = sanitize_display(m.entry.pathname)
-            item.size_text = _human_size(m.entry.size)
+            item.size_text = human_size(m.entry.size)
             if m.supported:
                 item.detail_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
             else:
