@@ -4,7 +4,7 @@
 
     blender -b --factory-startup --python tests/make_synthetic_package.py -- <出力パス.unitypackage>
 
-内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
+内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.gltf 1 つ（.bin 付き）、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
 .mat を割り当てる prefab。Pair のサブメッシュの割り当てを入れ替えた色違いの prefab（PairSwap）と、Renderer を持たない
 prefab（Empty）。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
@@ -298,6 +298,9 @@ def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = Non
             polygon.material_index = 1
     if path.suffix == ".fbx":
         bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False)
+    elif path.suffix == ".gltf":
+        # .gltf と .bin を別々に書き出す（読み込むときは、同じフォルダの .bin を一緒に展開する必要がある）
+        bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLTF_SEPARATE", use_selection=False)
     elif path.suffix == ".vrm":
         # .vrm は glTF バイナリ。VRM 拡張の無い .glb を .vrm 名で置き、glTF インポーターへのフォールバック経路を確認する
         bpy.ops.export_scene.gltf(filepath=str(path.with_suffix(".glb")), export_format="GLB", use_selection=False)
@@ -364,6 +367,16 @@ def main() -> None:
     vrm_path = "Assets/Synthetic/Models/Monkey.vrm"
     add(vrm_path, path.read_bytes(),
         f"fileFormatVersion: 2\nguid: {guid_of(vrm_path)}\nScriptedImporter:\n  internalIDToNameTable: []\n  externalObjects: {{}}\n")
+
+    # .gltf と、同じフォルダに置く .bin（glTF の .meta は ScriptedImporter。マテリアルは名前一致で CubeMat に解決する）
+    gltf_dir = tmp / "gltf"
+    gltf_dir.mkdir()
+    path = gltf_dir / "Rock.gltf"
+    export_model("icosphere", "CubeMat", path, name="SyntheticRock")
+    gltf_path = "Assets/Synthetic/Models/Rock.gltf"
+    add(gltf_path, path.read_bytes(),
+        f"fileFormatVersion: 2\nguid: {guid_of(gltf_path)}\nScriptedImporter:\n  internalIDToNameTable: []\n  externalObjects: {{}}\n")
+    add("Assets/Synthetic/Models/Rock.bin", path.with_suffix(".bin").read_bytes(), None)
 
     # 同梱 .blend（マテリアルは既に設定済み。externalObjects は CubeMat を指す）
     path = tmp / "torus.blend"
