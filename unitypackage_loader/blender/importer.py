@@ -914,12 +914,14 @@ def _run_import(
     report.extract_root = str(extract_root)
     step(0.2, "Extracting files")
     sidecars = [g for m in models for g in _sidecar_guids(pkg, m.entry)]
+    written: set[str] = set()  # 実際に書き出した（展開し直した）ファイル
     paths = pkg.extract(
         [m.guid for m in models] + sidecars + sorted(needed_tex),
         extract_root,
         overwrite=opts.overwrite_extracted,
         progress=lambda f, n: step(0.2 + 0.3 * f, f"Extracting {n}"),
         max_total_size=opts.max_extract_size,
+        written=written,
     )
 
     # --- 画像の読み込み ---
@@ -931,7 +933,7 @@ def _run_import(
         info = _texture_info(entry, report.warn)
         tex_infos[guid] = info
         path = paths.get(guid)
-        image = load_image(path, info, pack=opts.pack_images) if path else None
+        image = load_image(path, info, pack=opts.pack_images, refresh=guid in written) if path else None
         images[guid] = image
         if image is None:
             report.warn(f"could not load texture {entry.pathname} (unsupported format?)")
