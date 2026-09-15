@@ -197,15 +197,27 @@ class PreparedPackage:
 
 
 def build_shader_table(extra_path: str = "") -> ShaderTable:
-    if extra_path:
-        path = Path(bpy.path.abspath(extra_path))
-        if path.is_file():
-            merged = ShaderTable()
-            extra = ShaderTable(path)
-            merged.by_guid.update(extra.by_guid)
-            merged.by_builtin_id.update(extra.by_builtin_id)
-            return merged
-    return default_table()
+    """同梱の表に、Preferences で指定した追加の表を重ねる。
+
+    追加の表が見つからないか読めなければ、同梱の表だけで続けて理由を ``warnings`` に残す（``prepare_package`` が
+    レポートの警告に写す）。以前は壊れた JSON ですべてのインポートが止まり、見つからないときは黙って無視していた（#78）。
+    """
+    if not extra_path:
+        return default_table()
+    path = Path(bpy.path.abspath(extra_path))
+    merged = ShaderTable()
+    if not path.is_file():
+        merged.warnings.append(f"shader table {path} was not found; only the built-in table is used")
+        return merged
+    try:
+        extra = ShaderTable(path)
+    except Exception as exc:  # noqa: BLE001 - 補助データなので、同梱の表だけで続ける
+        merged.warnings.append(f"could not read shader table {path}: {exc}; only the built-in table is used")
+        _log_exception(f"could not read shader table {path}")
+        return merged
+    merged.by_guid.update(extra.by_guid)
+    merged.by_builtin_id.update(extra.by_builtin_id)
+    return merged
 
 
 def _log_exception(message: str) -> None:
@@ -247,7 +259,7 @@ def prepare_package(
     pkg = UnityPackage(path)
     pkg.scan()
     table = shader_table or default_table()
-    warnings: list[str] = list(pkg.warnings)
+    warnings: list[str] = list(pkg.warnings) + list(table.warnings)
 
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}

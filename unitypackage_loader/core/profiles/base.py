@@ -38,6 +38,7 @@ class ShaderTable:
     """shader_guids.json を読み、マテリアルのシェーダー参照から ShaderInfo を返す。"""
 
     def __init__(self, path: Path | None = None):
+        self.warnings: list[str] = []  # 表を組み立てたときの注意（追加の表が読めなかったなど。インポートの警告に出す）
         data = json.loads((path or _TABLE_PATH).read_text("utf-8"))
         self.builtin_guid: str = data.get("builtin_guid", "0000000000000000f000000000000000")
         self.by_guid: dict[str, ShaderInfo] = {
