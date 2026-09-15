@@ -21,6 +21,9 @@
 
     --scene=<部分一致>       scene / both で読むシーン（省略時は配置が一番多いシーン）
     --limit=<N>              pile で読むモデル数の上限（既定 0 = 全部）
+    --materials=<MODE>       AUTO（既定。Unity のマテリアルを組む）/ NAMES_ONLY（FBX インポーターが作った
+                             マテリアルのまま。テクスチャの付かない「素で読んだ」状態の画になる）/
+                             TOON / PRINCIPLED / UNLIT
     --view=<X>,<Z>           視点の向き。X は真上が 0・真横が 90、Z は方位（既定 66,46）
     --zoom=<倍率>            収めた後の寄り（1 より小さいほど寄る。既定 1.0）
     --camera                 scene でシーンのカメラから見た画にする（構図の比較にはならない）
@@ -144,7 +147,7 @@ def import_package(package: Path, prepared, unit: str, opts: dict[str, str], sce
         scene_paths=[scene.pathname] if scene is not None else None,
         scene_lights=True,
         scene_cameras=True,
-        material_mode="AUTO",
+        material_mode=opts.get("materials", "AUTO").upper(),
         extract_mode="CUSTOM",
         extract_path=extract_root(package, opts),
         max_extract_size=0,  # Preferences が無いので上限なし。手元の信頼できるパッケージにだけ使う
