@@ -182,6 +182,9 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 blender -b --factory-startup --python tests/integration_import.py
 ```
 
+Pull requests and pushes to main / release branches run `.github/workflows/tests.yml`: the unit tests on Python 3.11 and 3.13
+(the versions bundled with Blender 4.5 and 5.2), and the integration tests with the synthetic packages on Blender 4.5 LTS and 5.2 LTS.
+
 Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
 and the data of the assets used for testing is never committed (the committed test data is synthetic only).
 See `tests/expectations.schema.md` for the file format.

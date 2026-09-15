@@ -48,7 +48,7 @@ unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
 tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、スクリーンショット撮影（shoot_screenshots.py）
 web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
-.github/workflows/        Pages への Extension Repository 公開
+.github/workflows/        Pages への Extension Repository 公開（pages.yml）と、単体テスト・Blender 4.5 / 5.2 での統合テスト（tests.yml）
 _local/                   検証用データ置き場（gitignore。詳細は CLAUDE.local.md）
 ```
 
