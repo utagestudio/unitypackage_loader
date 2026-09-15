@@ -128,6 +128,7 @@ class ModelSummary:
     resolved_count: int  # そのうちパッケージ内の .mat に対応付けできた数
     supported: bool
     skip_reason: str = ""  # supported が False の理由
+    info: ModelImporterInfo = field(default_factory=ModelImporterInfo)  # .meta の設定（読み込みのたびに解析し直さない。#75）
 
     @property
     def guid(self) -> str:
@@ -147,9 +148,28 @@ class PreparedPackage:
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
-    scenes: list[SceneSummary] = field(default_factory=list)  # 読み込む単位 Scenes の候補（pathname 順）
-    scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層
+    scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
+    scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
+    _scenes: list[SceneSummary] | None = field(default=None, repr=False)
+
+    def ensure_scenes(self) -> list[SceneSummary]:
+        """シーンを展開して、読み込む単位 Scenes の候補（pathname 順）を返す。展開は初めて呼ばれたときの 1 回だけ。
+
+        大きなシーンの解析は重いので、Models / Prefabs だけを読む場合には展開しない（#75）。展開中の警告は ``warnings`` に加える。
+        """
+        if self._scenes is None:
+            unsupported = {m.guid: m.skip_reason for m in self.models if not m.supported}
+            self._scenes, self.scene_hierarchies = _prepare_scenes(self.pkg, self.models, self.warnings.append, unsupported)
+        return self._scenes
+
+    @property
+    def scenes(self) -> list[SceneSummary]:
+        return self.ensure_scenes()
+
+    @property
+    def scenes_expanded(self) -> bool:
+        return self._scenes is not None
 
     @property
     def supported_models(self) -> list[ModelSummary]:
@@ -164,9 +184,12 @@ class PreparedPackage:
         return [s for s in self.scenes if s.supported]
 
     @property
-    def choice_count(self) -> int:
-        """ダイアログで選べる（読み込める）候補の総数。"""
-        return choice_count(self.prefabs, len(self.supported_models), self.scenes)
+    def has_choices(self) -> bool:
+        """読み込める候補が 2 つ以上あるか（ダイアログを出すか）。シーンを数えなくても決まるなら、シーンは展開しない。"""
+        others = choice_count(self.prefabs, len(self.supported_models))
+        if others > 1 or not self.scene_entries:
+            return others > 1
+        return choice_count(self.prefabs, len(self.supported_models), self.scenes) > 1
 
     def table_for(self, model_guid: str) -> dict[str, RendererMaterials]:
         """Models 単位でモデルに当てはめる表。そのモデルを使う prefab をパス順に先勝ちで統合したもの。"""
@@ -254,7 +277,7 @@ def prepare_package(
             skip_reason = BLEND_DISABLED_REASON
         elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
             skip_reason = COLLADA_UNAVAILABLE_REASON
-        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
+        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason, info))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
@@ -294,10 +317,9 @@ def prepare_package(
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
-    scenes, hierarchies = _prepare_scenes(pkg, models, warnings.append, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, scenes=scenes, scene_hierarchies=hierarchies,
+        prefabs=prefabs, scene_entries=pkg.scenes(),
         pipeline=detect_pipeline(n.family for n in normalized.values()),
     )
 
@@ -323,7 +345,7 @@ def _prepare_scenes(
             return None
 
     # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
-    recycle = {m.guid: _model_info(m.entry, warn).recycle_names for m in models}
+    recycle = {m.guid: m.info.recycle_names for m in models}
     expander = Expander(read, model_names, recycle)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
@@ -916,6 +938,8 @@ def _run_import(
             filepath, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
         )
     pkg = prepared.pkg
+    if opts.unit == UNIT_SCENES:
+        prepared.ensure_scenes()  # 展開中の警告もレポートに載せるため、警告を写す前に展開する
     for w in prepared.warnings:
         report.warn(w)
     for m in prepared.models:
@@ -1015,7 +1039,7 @@ def _run_import(
     def build_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before) -> list[bpy.types.Object]:
         """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
         model = summary.entry
-        model_info = _model_info(model, report.warn)
+        model_info = summary.info
         imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
@@ -1192,7 +1216,6 @@ def _run_import(
         empties: dict[int, bpy.types.Object] = {}
         templates: dict[tuple, _SceneTemplate] = {}
         skipped_offsets = 0
-        scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
         skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
         hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
@@ -1225,9 +1248,7 @@ def _run_import(
             else:
                 objects = _duplicate_objects(template, target)
                 report.objects.extend(o.name for o in objects)
-            if summary.guid not in scales:
-                scales[summary.guid] = _model_info(summary.entry, report.warn).global_scale
-            scale = scales[summary.guid]
+            scale = summary.info.global_scale
             _attach_to_empty(objects, root, scale)
             if placement.node_transforms:
                 if summary.guid not in unit_scales:
