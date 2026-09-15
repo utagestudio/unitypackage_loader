@@ -1,7 +1,7 @@
 # unitypackage_loader — 設計書
 
 Blender から `.unitypackage` を直接読み込み、メッシュ（アーマチュア・シェイプキー込み）とマテリアル／テクスチャの設定までを一度に行うアドオンの設計。
-対象 Blender: **4.2 以降（Extension 形式）**、開発・検証環境は **5.2 LTS / Python 3.13**。
+対象 Blender: **4.5 以降（Extension 形式）**、開発環境は **5.2 LTS / Python 3.13**、検証は **4.5 LTS と 5.2 LTS**。
 
 ---
 
@@ -329,7 +329,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 ```
 unitypackage_loader/
-├─ blender_manifest.toml         # id, version, blender_version_min="4.2.0", permissions=["files"]
+├─ blender_manifest.toml         # id, version, blender_version_min="4.5.0", permissions=["files"]
 ├─ __init__.py                   # register / unregister、メニュー登録
 ├─ operators/
 │   ├─ import_package.py         # IMPORT_SCENE_OT_unitypackage（ImportHelper）
@@ -593,7 +593,9 @@ def run(ctx, filepath, opts) -> Report:
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外は各マテリアル単位で捕捉して警告にする。FBX インポート自体の失敗だけがエラー。
-- `bpy.ops.import_scene.fbx` は `wm.fbx_import` の旧名。4.2 以降では両方存在するが、5.x 系では新 C++ インポーター（`bpy.ops.wm.fbx_import`）を優先し、無ければ旧名にフォールバック。
+- FBX は新しい C++ のインポーター（`bpy.ops.wm.fbx_import`。Blender 4.5 で追加）を使う。オプションで Legacy を選んだときだけ、Python 製の `bpy.ops.import_scene.fbx` を使う。
+  `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。
+- Blender 4.x の `bpy.data.materials.new()` はノードツリーを持たない（5.0 以降は持つ）。こちらで作るマテリアル（スロット分割・アウトライン）は、組み立ての前に `use_nodes` を立てる。
 
 ### 4.8 `blender/textures.py`
 

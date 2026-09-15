@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "unitypackage_loader"
-version = "1.7.3"
+version = "1.7.4-dev.3"
 name = "Unitypackage Importer"
 tagline = "Import meshes, materials and textures from .unitypackage files"
 maintainer = "utagestudio"
 type = "add-on"
 
 tags = ["Import-Export"]
-blender_version_min = "4.2.0"
+blender_version_min = "4.5.0"
 license = ["SPDX:GPL-3.0-or-later"]
 
 # ファイルの読み書き（tar 展開・テクスチャ書き出し）に必要

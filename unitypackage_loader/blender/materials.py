@@ -46,6 +46,8 @@ def effective_mode(norm: NormalizedMaterial, mode: str) -> str:
 class _Builder:
     def __init__(self, mat: bpy.types.Material):
         self.mat = mat
+        if mat.node_tree is None:  # Blender 4.x の materials.new() はノードを持たない（5.0 以降は常に持つ）
+            mat.use_nodes = True
         self.tree = mat.node_tree
         self.nodes = self.tree.nodes
         self.links = self.tree.links
@@ -404,13 +406,9 @@ def _rgba(value, default):
 
 
 def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mode: str, opts: MaterialBuildOptions) -> None:
-    if hasattr(mat, "surface_render_method"):
-        mat.surface_render_method = "BLENDED" if alpha_mode == "blend" else "DITHERED"
-    else:  # Blender 4.1 以前
-        mat.blend_method = {"opaque": "OPAQUE", "cutout": "CLIP", "blend": "BLEND"}[alpha_mode]
+    mat.surface_render_method = "BLENDED" if alpha_mode == "blend" else "DITHERED"
     mat.use_backface_culling = opts.backface_culling and norm.cull_backface
-    if hasattr(mat, "use_transparency_overlap"):
-        mat.use_transparency_overlap = alpha_mode == "blend"
+    mat.use_transparency_overlap = alpha_mode == "blend"
     mat.diffuse_color = (*norm.base_color[:3], 1.0)
 
 
