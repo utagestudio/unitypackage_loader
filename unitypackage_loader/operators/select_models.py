@@ -55,10 +55,12 @@ def _human_size(size: int) -> str:
 
 def _short_reason(reason: str) -> str:
     """行の右端に出す、読み込めない理由の短い表記。"""
-    from ..blender.importer import BLEND_DISABLED_REASON
+    from ..blender.importer import BLEND_DISABLED_REASON, COLLADA_UNAVAILABLE_REASON
 
     if reason == BLEND_DISABLED_REASON:
         return ".blend import disabled"
+    if reason == COLLADA_UNAVAILABLE_REASON:
+        return "not supported in Blender 5"
     if reason in (NO_MESH_REASON, NO_SCENE_MESH_REASON, UNREADABLE_SCENE_REASON):
         return reason
     return "unsupported format"

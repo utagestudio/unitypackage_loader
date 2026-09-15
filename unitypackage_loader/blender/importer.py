@@ -117,6 +117,7 @@ BLEND_DISABLED_REASON = (
     "bundled .blend files are not imported unless 'Import Bundled .blend Files' is enabled "
     "(a .blend can contain Python scripts)"
 )
+COLLADA_UNAVAILABLE_REASON = "Collada (.dae) import is not available in this Blender (it was removed in Blender 5.0)"
 
 
 @dataclass
@@ -238,6 +239,8 @@ def prepare_package(
             skip_reason = "model format not supported yet"
         elif entry.ext == ".blend" and not import_blend:
             skip_reason = BLEND_DISABLED_REASON
+        elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
+            skip_reason = COLLADA_UNAVAILABLE_REASON
         models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
@@ -372,9 +375,18 @@ def _adopt_into_collection(new: dict[str, list], scene, collection) -> None:
                 collection.objects.link(obj)
 
 
+def operator_available(module: str, name: str) -> bool:
+    """``bpy.ops.<module>.<name>`` が登録されているか。
+
+    ``hasattr(bpy.ops.<module>, name)`` はどんな名前でも True になり、C で定義されたオペレーター
+    （wm.collada_import など）は ``bpy.types`` にも現れないので、``dir`` で登録済みの名前を見る。
+    """
+    return name in dir(getattr(bpy.ops, module))
+
+
 def vrm_addon_available() -> bool:
-    """VRM add-on（import_scene.vrm）が登録されているか。bpy.ops の属性は常に存在するので bpy.types で見る。"""
-    return hasattr(bpy.types, "IMPORT_SCENE_OT_vrm")
+    """VRM add-on（import_scene.vrm）が登録されているか。"""
+    return operator_available("import_scene", "vrm")
 
 
 def _find_layer_collection(layer_coll, target):
