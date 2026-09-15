@@ -170,6 +170,9 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 blender -b --factory-startup --python tests/integration_import.py
 ```
 
+PR と main / release ブランチへの push では、`.github/workflows/tests.yml` が単体テスト（Blender 4.5 / 5.2 に同梱の Python 3.11 / 3.13）と、
+合成パッケージの統合テスト（Blender 4.5 LTS / 5.2 LTS）を回します。
+
 検証用データ（unitypackage、展開物、期待値）は `_local/` に置きます。このディレクトリは gitignore 対象で、
 検証に使ったアセットのデータはリポジトリに含めません（コミットするテスト用データは合成データだけです）。
 書式は `tests/expectations.schema.md` を参照してください。

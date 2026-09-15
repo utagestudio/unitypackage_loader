@@ -1,0 +1,135 @@
+# PR と main / release ブランチへの push で、単体テストと合成パッケージの統合テストを回す（Pages の公開とは別）。
+# 統合テストは、対応する最小版の LTS（4.5）と最新の LTS（5.2）の 2 つで回す。
+# 合成パッケージは 5.2 で 1 回だけ生成し、両方の版で使う（4.5 は 5.2 で保存した .blend を読める）。
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FIXTURE_BLENDER_VERSION: "5.2.1"
+  FIXTURE_BLENDER_URL: "https://download.blender.org/release/Blender5.2/blender-5.2.1-linux-x64.tar.xz"
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]  # Blender 4.5 / 5.2 に同梱の Python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t .
+
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ env.FIXTURE_BLENDER_VERSION }}-linux-x64
+
+      - name: Download Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/blender
+          curl -sSL "$FIXTURE_BLENDER_URL" | tar -xJ --strip-components=1 -C ~/blender
+
+      - name: Install runtime libraries for headless Blender
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libegl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0
+
+      - name: Generate synthetic packages
+        run: |
+          mkdir -p fixtures
+          ~/blender/blender -b --factory-startup --python tests/make_synthetic_package.py -- fixtures/synthetic_multi.unitypackage
+          ~/blender/blender -b --factory-startup --python tests/make_synthetic_scene_package.py -- fixtures/synthetic_scene.unitypackage
+          python3 tests/make_synthetic_broken_packages.py fixtures/synthetic_multi.unitypackage fixtures
+          ls -la fixtures
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-packages
+          path: fixtures/*.unitypackage
+          retention-days: 3
+
+  integration:
+    needs: fixtures
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - blender: "4.5.12"
+            url: "https://download.blender.org/release/Blender4.5/blender-4.5.12-linux-x64.tar.xz"
+          - blender: "5.2.1"
+            url: "https://download.blender.org/release/Blender5.2/blender-5.2.1-linux-x64.tar.xz"
+    name: integration (Blender ${{ matrix.blender }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Blender
+        id: cache-blender
+        uses: actions/cache@v4
+        with:
+          path: ~/blender
+          key: blender-${{ matrix.blender }}-linux-x64
+
+      - name: Download Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/blender
+          curl -sSL "${{ matrix.url }}" | tar -xJ --strip-components=1 -C ~/blender
+
+      - name: Install runtime libraries for headless Blender
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgl1 libegl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: synthetic-packages
+          path: fixtures
+
+      - name: Integration tests
+        run: |
+          # 1 本が失敗しても残りを回し、最後にまとめて失敗にする
+          failed=""
+          run() {
+            echo "::group::$2"
+            if ! ~/blender/blender -b --factory-startup --python tests/integration_import.py -- "fixtures/$1" "tests/$2"; then
+              failed="$failed $2"
+              echo "::error title=integration test failed::$2 (Blender ${{ matrix.blender }})"
+            fi
+            echo "::endgroup::"
+          }
+          run synthetic_multi.unitypackage expectations_synthetic.json
+          run synthetic_multi.unitypackage expectations_synthetic_noblend.json
+          run synthetic_multi.unitypackage expectations_synthetic_prefabs.json
+          run synthetic_multi.unitypackage expectations_synthetic_prefabs_stack.json
+          run synthetic_scene.unitypackage expectations_synthetic_scene.json
+          run synthetic_broken_model.unitypackage expectations_synthetic_broken_model.json
+          run synthetic_broken_all.unitypackage expectations_synthetic_broken_all.json
+          if [ -n "$failed" ]; then
+            echo "failed:$failed"
+            exit 1
+          fi
