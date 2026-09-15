@@ -246,7 +246,8 @@ _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿�
 [TexImage base] × _Color ─▶ Base Color ─┐
 [Normal Map | Geometry.Normal] ─▶ Normal ─┤ UnityToon ─▶ Output
 [MatCap tex via view-space normal UV] ──▶ MatCap ─┘
-  Shadow Color/Strength/Border/Blur, MatCap Strength/Mode, Rim Color/Strength/Border, Emission は extras から入力値として設定
+  Shadow Color/Strength/Border/Blur, MatCap Strength/Mode, Rim Color/Strength/Border/Blur は NormalizedMaterial の shadow / matcap / rim、
+  Emission は emission_* から入力値として設定（extras は読まない）
 ```
 グループ内部: Diffuse BSDF → Shader to RGB → RGB to BW でライティング量を取り、Map Range（border ± blur/2）で影係数に。
 Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻す。MatCap は 4 種のブレンドを Compare で選択。
@@ -486,7 +487,10 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
     metallic: float; roughness: float; metallic_tex: TexRef | None
     cull_backface: bool
     uv_scale: tuple2; uv_offset: tuple2
-    extras: dict                         # カスタムプロパティ行き
+    shadow: ToonShadow | None            # Toon ノードの影（color / strength / border / blur）
+    matcap: ToonMatCap | None            # Toon ノードの MatCap（tex / color / strength / mode）
+    rim: ToonRim | None                  # Toon ノードのリム（color / strength / border / blur）
+    extras: dict                         # 組み立てには使わない参考値。カスタムプロパティ行き
     warnings: list[str]
 ```
 
@@ -513,7 +517,7 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 | `_TransparentMode` (0 Normal / 1 OnePass / 2 TwoPass)、`_SrcBlend/_DstBlend`、`m_CustomRenderQueue`、シェーダー名の `Cutout`/`Transparent` | alpha_mode。判定: DstBlend==10(OneMinusSrcAlpha) or queue≥3000 → blend、queue 2450〜2999 or `_Cutoff`>0.001 and `_AlphaMaskMode`>0 → cutout、それ以外 opaque |
 | `_Cutoff` | alpha_cutoff |
 | `_MainTex_ST` | uv_scale / uv_offset |
-| `_ShadowColor` `_Shadow2ndColor` `_ShadowStrength` `_OutlineColor` `_OutlineWidth` `_MatCapTex` `_MatCap2ndTex` `_RimColor` `_AlphaMask` | extras（Phase 3 のトゥーンノードグループ用に温存） |
+| `_ShadowColor` `_Shadow2ndColor` `_ShadowStrength` `_OutlineColor` `_OutlineWidth` `_MatCapTex` `_MatCap2ndTex` `_RimColor` `_AlphaMask` | extras。影・MatCap・リムは extras から shadow / matcap / rim にも換算する（`toon_values_from_extras`。MToon も同じ関数） |
 
 サンプルでの観測: 顔用の Transparent マテリアルはシェーダー名が Transparent 系で `_DstBlend: 10`, queue 2450 → `blend` と判定。衣装マテリアルは `_AlphaToMask: 1` → cutout 相当。
 
@@ -542,11 +546,23 @@ VRChat SDK 同梱の Quest 向けシェーダー。機能が少なく、Standard
 |---|---|---|---|
 | `toon_lit` | Toon Lit | unlit | `_MainTex` のみ |
 | `standard_lite` | Standard Lite | pbr | `_Color` `_BumpMap` `_Metallic` `_Glossiness` `_MetallicGlossMap` `_OcclusionMap`。emission は `_EMISSION` キーワードが有効なときだけ。不透明のみ |
-| `toon_standard` | Toon Standard / (Outline) | toon | `_Color` `_Culling`、`USE_NORMAL_MAPS` / `USE_SPECULAR`（`_MetallicStrength` `_GlossStrength`）/ `USE_OCCLUSION_MAP` / `USE_MATCAP` / `USE_DETAIL_MAPS` / `USE_HUE_SHIFT` / `USE_COLOR_MASK` の各キーワードで機能を ON。emission は常に有効で `_EmissionStrength` を乗数に。Ramp・リム・MatCap・アウトライン等は extras。不透明のみ |
-| `matcap_lit` | MatCap Lit | pbr | `_MainTex`、`_MatCap` は乗算として extras |
+| `toon_standard` | Toon Standard / (Outline) | toon | `_Color` `_Culling`、`USE_NORMAL_MAPS` / `USE_SPECULAR`（`_MetallicStrength` `_GlossStrength`）/ `USE_OCCLUSION_MAP` / `USE_MATCAP` / `USE_DETAIL_MAPS` / `USE_HUE_SHIFT` / `USE_COLOR_MASK` の各キーワードで機能を ON。emission は常に有効で `_EmissionStrength` を乗数に。Ramp・リム・MatCap・アウトライン等は extras。不透明のみ。Toon ノードへは意味のはっきりした値だけを換算する（下記） |
+| `matcap_lit` | MatCap Lit | pbr | `_MainTex`、`_MatCap` は乗算として extras と matcap（Multiply。Toon モードで組むときだけ使う） |
 | `diffuse` / `bumped_diffuse` / `bumped_specular` | Diffuse / Lightmapped / Bumped Diffuse / Bumped Mapped Specular | pbr | `_MainTex`（+ `_BumpMap`、`_Shininess` → roughness） |
 | `particle` | Particles/Additive, Alpha Blended, Multiply | unlit | `_MainTex`。半透明・両面。Additive / Multiply はアルファブレンドで近似し警告 |
 | `ui` | Worlds/Supersampled UI, Sprites/* | unlit / pbr | `_MainTex` `_Color`。半透明・両面 |
+
+**Toon ノードへの換算（#73）**
+
+Toon の組み立ては `NormalizedMaterial.shadow` / `matcap` / `rim` だけを読む。プロファイルごとに extras のキーの名前が違っても、値が黙って無視されないようにするため。`tests/test_toon_values.py` が、トゥーン系のプロファイルがこれらを埋めていることを確かめる。
+
+| プロファイル | 影 | MatCap | リム |
+|---|---|---|---|
+| lilToon / MToon | 1.7.4 までの組み立てと同じ換算（`toon_values_from_extras`） | 同左 | 同左 |
+| VRChat Mobile Toon Standard | 既定の影。ramp テクスチャ・`_ShadowBoost`・`_ShadowAlbedo` は再現できないので警告 | `_MatcapStrength` → 強さ、`_MatcapType` 0 → Add、それ以外 → Normal。マスクは警告 | `_RimIntensity` → 強さ、1 − `_RimRange` → 境界、1 − `_RimSharpness` → ぼかし。`_RimAlbedoTint` は警告 |
+| Poiyomi | `_ShadowStrength` → 強さだけ。影色・ライティングモード・オフセットは警告 | なし | なし |
+
+Toon Standard と Poiyomi は手元に使用例が無く、Unity での見た目と突き合わせていない。近似の警告は `shader approximation:` で始め、レポートにはシェーダー単位で 1 回だけ出す。1.7.4 までに保存した `unity_normalized`（shadow / matcap / rim のキーが無い）を組み直すときは、`toon_values_from_extras` で当時と同じ値を補う。
 
 ### 4.6 `core/mapping.py`
 
@@ -651,7 +667,7 @@ def run(ctx, filepath, opts) -> Report:
 |---|---|---|
 | **1 (MVP)** | Extension 雛形、tar 索引、Unity YAML パーサー、externalObjects マッピング、lilToon + generic プロファイル、Principled / Unlit 生成、テクスチャ展開、Info バー報告 | `_local/` のサンプルが 1 操作でテクスチャ付きで読める |
 | **2** | モデル選択ダイアログ、N パネルレポート、Standard/URP/HDRP・MToon・Poiyomi プロファイル、prefab 経由マッピング、`.obj`/`.gltf`/`.dae`/`.blend` 同梱対応、未参照画像の読み込み、Preferences | 実装済み。合成パッケージ（`tests/make_synthetic_package.py`）と手元のサンプルで検証。他の実パッケージでの検証は入手次第 |
-| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Emission を extras から再現）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | 実装済み。手元のサンプルと合成パッケージで検証 |
+| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Emission を再現。1.7.5 から型付きの shadow / matcap / rim を読む）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | 実装済み。手元のサンプルと合成パッケージで検証 |
 
 ---
 
@@ -660,7 +676,7 @@ def run(ctx, filepath, opts) -> Report:
 - **検証用データはリポジトリに含めない。** unitypackage・展開物・参考 .blend・実パッケージ用の期待値 JSON は全て `_local/` 配下に置く。コミットするテスト用データは合成データだけ。アセット名などをドキュメントやコミットに書くのはかまわない（2026-09-14 に方針を変更）。
 
 - **VRM は再実装しない**。VRM add-on が MToon・Humanoid・スプリングボーンを再現するので、入っていればそちらに委譲する。add-on 無しの環境向けの glTF フォールバックは、既存の glTF 経路と `.mat` 再構築の組み合わせに留める。
-- **Unity のライティング再現はしない**。lilToon の影色・MatCap・リムは Phase 3 まではカスタムプロパティに保存するだけ。
+- **Unity のライティング再現はしない**。影色・MatCap・リムは Toon ノードグループで近い見た目にするだけで、ramp などシェーダー固有の計算は再現しない。
 - FBX の座標系・スケールは Blender 標準インポーターに委ねる。Unity の `globalScale` / `useFileScale` は参考値としてレポートに出すのみ。
 - テクスチャの `maxTextureSize`（Unity 側の縮小設定）は無視し、元解像度で読み込む。
 - 同一テクスチャが複数マテリアルから参照される場合は 1 つの Image を共有する。

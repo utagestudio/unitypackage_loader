@@ -1310,7 +1310,7 @@ def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg
     mrep.mode = mode
     mrep.warnings.extend(warnings)
     for w in warnings:
-        if w.startswith("shader table entry"):
+        if w.startswith(("shader table entry", "shader approximation:")):
             report.warn(w)  # シェーダー単位の注意なので 1 回だけ
         else:
             report.warn(f"material {bmat.name!r}: {w}")
