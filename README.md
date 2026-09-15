@@ -166,7 +166,8 @@ Unity shaders and Blender nodes do not map 1:1, so conversion happens in two sta
 
 The intermediate representation itself is stored in the custom property `unity_normalized` (JSON), and values not used by
 Blender are stored in `unity_props`. "Rebuild in Another Mode" in the sidebar's Tools panel rebuilds the materials of the
-selected meshes in a different mode without the original package. Outlines can be added and removed from the same panel.
+selected meshes in a different mode without the original package; its options (Force Opaque and so on) start from the
+settings used at import (or the last rebuild). Outlines can be added and removed from the same panel.
 
 ## Development
 

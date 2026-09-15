@@ -29,7 +29,7 @@
   Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。
 - **マテリアルモード**: Auto（トゥーン系 → Toon ノードグループ、PBR 系 → Principled）/ Principled / Toon / Unlit / Names Only。
   Toon は `blender/toon_group.py` の `UnityToon`（Shader to RGB を使うため EEVEE 向け）。
-- **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）。
+- **カスタムプロパティ**: `unity_material_guid` / `unity_shader_*` / `unity_props`（extras JSON）/ `unity_normalized`（中間表現 JSON）/ `unity_build_options`（組み立ての設定）。
   画像には `unity_guid` 等。これにより元パッケージ無しで別モードに再構築できる（`operators/rebuild_material.py`）。
 - **パッケージ読み取り**（`core/package.py`）: tar.gz を 1 度走査して索引化し、必要な GUID だけ 2 度目の走査で展開する。
   Unity YAML は依存無しの専用パーサー（`core/unity_yaml.py`。Blender 同梱 Python に PyYAML は無い）。
