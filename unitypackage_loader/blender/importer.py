@@ -32,7 +32,7 @@ from ..core.unity_yaml import UnityRef
 from ..core.fbx_units import read_unit_scale
 from ..core.unity_ids import mesh_file_id
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
-from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
+from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
@@ -956,7 +956,9 @@ def _run_import(
         store_props=opts.store_props,
     )
 
-    built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
+    # 同じ .mat は、この回の読み込みの中で 1 つの Blender マテリアルを共有する（別のモデル同士、同じモデルの読み直し、
+    # 1 つのモデルの複数のスロット、prefab のスロット分割のどれでも。#77）
+    built_by_guid: dict[str, bpy.types.Material] = {}
     imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
     failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
 
@@ -964,7 +966,6 @@ def _run_import(
         """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
         model = summary.entry
         model_info = _model_info(model, report.warn)
-        reimport = model.guid in imported_models
         imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
@@ -997,6 +998,8 @@ def _run_import(
             fbx_names, model_info, unity_mats, model.pathname, prefab_table, object_slots, submesh_order
         )
         assignments = slot_assignments(object_slots, prefab_table, unity_mats, submesh_order)
+        # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
+        replaced = fully_replaced_materials(object_slots, assignments, resolution)
 
         # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
         keep_materials = delegated or (model.ext == ".blend" and opts.blend_materials == "KEEP")
@@ -1014,10 +1017,17 @@ def _run_import(
                     if opts.store_props:
                         mat_builder._store_props(bmat, norm)
                 continue
+            if bmat.name in replaced:
+                if res.guid:
+                    norm = normalized[res.guid]
+                    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                remaining.append(bmat)  # 差し替えの後、使われなくなったところで "replaced" にして消す
+                continue
             if res.warning:
                 mrep.warnings.append(res.warning)
                 report.warn(f"material {bmat.name!r}: {res.warning}")
 
+            # ファイルに既にある同名のマテリアルを使う設定なら、それを先に見る。無ければ、この回で組み立て済みのものを共有する
             if opts.reuse_existing:
                 base = strip_numeric_suffix(bmat.name)
                 existing = existing_materials.get(base)
@@ -1034,9 +1044,22 @@ def _run_import(
                 report.warn(f"material {bmat.name!r}: no matching .mat in package")
                 continue
 
-            shared = built_by_guid.get(res.guid) if reimport else None
+            shared = built_by_guid.get(res.guid)
+            if shared is not None and shared is not bmat and _named_after_mat(bmat, shared, unity_mats[res.guid]):
+                # 共有するマテリアルの名前は、なるべく .mat の名前にする。先に組んだものが FBX 側の別の名前（prefab で
+                # 解決したものなど）なら、.mat と同じ名前のこちらを組み、先のものの使用箇所をこちらへ付け替える
+                _build_and_report(bmat, res.guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
+                old_name = shared.name
+                shared.user_remap(bmat)
+                for row in report.materials:
+                    if row is not mrep and row.blender_name == old_name:
+                        row.method, row.blender_name = "shared", bmat.name
+                if shared in remaining:
+                    remaining.remove(shared)
+                bpy.data.materials.remove(shared)
+                built_by_guid[res.guid] = bmat
+                continue
             if shared is not None and shared is not bmat:
-                # 同じモデルを別の prefab 用に読み直したときは、組み立て済みの同じ .mat のマテリアルを使う
                 remaining.pop()
                 _replace_material(new["objects"], bmat, shared)
                 bpy.data.materials.remove(bmat)
@@ -1364,6 +1387,12 @@ def _submesh_order(obj) -> list[int]:
     indices = [0] * len(polygons)
     polygons.foreach_get("material_index", indices)
     return submesh_slot_order(indices, len(obj.material_slots))
+
+
+def _named_after_mat(candidate: bpy.types.Material, current: bpy.types.Material, umat: UnityMaterial) -> bool:
+    """共有しているマテリアルより、``candidate`` のほうが .mat の名前に合うか（連番は外して比べる）。"""
+    name = umat.name
+    return bool(name) and strip_numeric_suffix(candidate.name) == name and strip_numeric_suffix(current.name) != name
 
 
 def _replace_material(objects, old: bpy.types.Material, new: bpy.types.Material) -> None:

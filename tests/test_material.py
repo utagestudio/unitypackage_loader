@@ -384,6 +384,36 @@ class HdrpEmissionTests(unittest.TestCase):
         self.assertEqual(restored.extras["hdrp_emissive"], n.extras["hdrp_emissive"])
 
 
+
+class FullyReplacedMaterialsTests(unittest.TestCase):
+    """prefab の割り当てで、組み立てても捨てるだけのマテリアルを見分ける（#77）。"""
+
+    def test_material_replaced_in_every_slot(self):
+        from unitypackage_loader.core.mapping import MaterialResolution, fully_replaced_materials
+
+        object_slots = {"Body": ["FbxMat", "Shared"], "Wheel": ["FbxMat"], "Seat": ["Shared"]}
+        resolution = {
+            "FbxMat": MaterialResolution("FbxMat", "a" * 32, "external"),
+            "Shared": MaterialResolution("Shared", "b" * 32, "external"),
+        }
+        # FbxMat は使われている 2 スロットとも別の .mat に差し替わる。Shared は Seat では差し替わらない
+        assignments = {("Body", 0): "c" * 32, ("Wheel", 0): "d" * 32, ("Body", 1): "c" * 32}
+        self.assertEqual(fully_replaced_materials(object_slots, assignments, resolution), {"FbxMat"})
+
+    def test_assignment_to_the_same_mat_is_not_a_replacement(self):
+        from unitypackage_loader.core.mapping import MaterialResolution, fully_replaced_materials
+
+        resolution = {"FbxMat": MaterialResolution("FbxMat", "a" * 32, "external")}
+        self.assertEqual(fully_replaced_materials({"Body": ["FbxMat"]}, {("Body", 0): "a" * 32}, resolution), set())
+
+    def test_unresolved_material_replaced_everywhere(self):
+        from unitypackage_loader.core.mapping import MaterialResolution, fully_replaced_materials
+
+        resolution = {"Unknown": MaterialResolution("Unknown", None, "none")}
+        slots = {"Body": ["Unknown", ""]}
+        self.assertEqual(fully_replaced_materials(slots, {("Body", 0): "c" * 32}, resolution), {"Unknown"})
+        self.assertEqual(fully_replaced_materials(slots, {}, resolution), set())
+
 if __name__ == "__main__":
     unittest.main()
 
