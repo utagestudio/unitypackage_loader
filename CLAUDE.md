@@ -38,7 +38,7 @@
 ## ディレクトリ構成
 
 ```
-unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.2 以降の Extension 形式）
+unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
   blender/                bpy 依存（importer / materials / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
@@ -60,8 +60,10 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
   アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
   （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
-- Blender API は 4.2 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
-  新 FBX インポーター `wm.fbx_import` を優先し、無ければ `import_scene.fbx`。
+- Blender API は 4.5 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
+  FBX は新インポーター `wm.fbx_import` を使い、Legacy を選んだときだけ `import_scene.fbx`。
+  オペレーターの有無は `bpy.ops` の `hasattr` でも `bpy.types` でも判定できない（C のオペレーターは `bpy.types` に無い）。
+  4.x の `materials.new()` はノードツリーを持たないので、組み立ての前に `use_nodes` を立てる。
 - ドキュメント（README.md / README_ja.md / DESIGN.md）は実装と乖離させない。仕様を変えたら同じ作業内で更新する。
 - **バージョン番号の運用**（`unitypackage_loader/blender_manifest.toml` の `version`）は下記「バージョン番号のルール」に従う。
   ソースコードに関わるコミットごとに `-dev.<dev>` を上げるので、コードを変えたコミットには manifest の変更も含める。

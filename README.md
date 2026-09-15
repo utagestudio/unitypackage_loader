@@ -5,7 +5,7 @@ English | [日本語](README_ja.md) | [GitHub](https://github.com/utagestudio/un
 A Blender Extension that imports `.unitypackage` files directly from File > Import, placing meshes
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
-- Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
+- Supported Blender: 4.5 or later (developed on 5.2 LTS, tested on 4.5 LTS and 5.2 LTS)
 - What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
 - What is not imported: shader source code, C# scripts, animations, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
