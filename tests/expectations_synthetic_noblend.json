@@ -2,11 +2,11 @@
   "options": { "material_mode": "AUTO", "models": "ALL" },
   "errors": 0,
   "objects": { "count": 13, "mesh_count": 13, "armature_count": 0 },
-  "materials": { "count": 15, "mapped": 15, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "name", "prefab"] },
+  "materials": { "count": 15, "mapped": 12, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "name", "prefab", "shared"] },
   "images": { "count": 2 },
   "warnings_max": 3,
   "split_slots": 0,
-  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat.001"] },
+  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"] },
   "material_checks": [
     { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard" },
     { "name": "TwinAFbxMat", "alpha_mode": "opaque" },
