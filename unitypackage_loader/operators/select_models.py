@@ -1,4 +1,4 @@
-"""インポートの 2 段目: 読み込む単位（Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
+"""インポートの 2 段目: 読み込む単位（Scenes / Prefabs / Models）を選び、その候補から読み込むものを選ぶダイアログ。
 
 ``IMPORT_SCENE_OT_unitypackage`` が ``prepare_package`` の結果を ``set_pending`` で渡し、
 ``INVOKE_DEFAULT`` でこのオペレーターを呼ぶ。ダイアログの OK で ``run_import`` を実行する。
@@ -129,7 +129,7 @@ def _on_unit_changed(self, context):
 
 
 class UNITYPKG_ImportItem(bpy.types.PropertyGroup):
-    kind: StringProperty()  # UNIT_PREFABS / UNIT_MODELS
+    kind: StringProperty()  # UNIT_SCENES / UNIT_PREFABS / UNIT_MODELS
     guid: StringProperty()
     pathname: StringProperty()  # 表示用（sanitize_display 済み）
     size_text: StringProperty()

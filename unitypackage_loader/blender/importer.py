@@ -68,7 +68,7 @@ _SIDECAR_EXTS = {".obj": {".mtl"}, ".gltf": {".bin"}}
 @dataclass
 class ImportOptions:
     models: str = "ASK"  # ASK / ALL / FIRST
-    unit: str = "MODELS"  # 読み込む単位: MODELS / PREFABS
+    unit: str = "MODELS"  # 読み込む単位: SCENES / PREFABS / MODELS
     model_guids: list[str] | None = None  # 明示的に選ばれたモデル（ダイアログ経由）
     prefab_paths: list[str] | None = None  # 明示的に選ばれた prefab の pathname（ダイアログ経由）
     scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）

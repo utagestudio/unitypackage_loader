@@ -198,7 +198,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 **Model**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All |
+| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All。All / First は、ラベルに反してオペレーターの `unit` で選んだ単位（Scenes / Prefabs / Models）の候補に効く |
 | Arrange prefabs（Preferences のみ） | Enum: `Side by Side` / `Stack at Origin` = `Side by Side` | §3.3 の並べ方の既定。ダイアログで選んだ値がここに保存される |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
