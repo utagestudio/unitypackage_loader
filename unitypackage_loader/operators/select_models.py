@@ -34,7 +34,7 @@ from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 class _Pending:
     filepath: str
     opts: object  # ImportOptions
-    prepared: object  # PreparedPackage
+    prepared: object | None  # PreparedPackage。execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
 
 
 _pending: _Pending | None = None
@@ -43,6 +43,14 @@ _pending: _Pending | None = None
 def set_pending(filepath: str, opts, prepared) -> None:
     global _pending
     _pending = _Pending(filepath, opts, prepared)
+
+
+def _release_prepared() -> None:
+    """解析結果を手放す。ファイルとオプションは残し、やり直し（Adjust Last Operation）で execute が
+    もう一度呼ばれたときはパッケージを解析し直す（#76）。
+    """
+    if _pending is not None:
+        _pending.prepared = None
 
 
 def _human_size(size: int) -> str:
@@ -79,6 +87,8 @@ _unit_enum_cache: list[tuple[str, str, str, str, int]] = []
 
 def _unit_items(self, context):
     """単位の切り替え。候補が 1 つも無い単位は出さない。ラベルに候補数を付ける。"""
+    if _pending is not None and _pending.prepared is None and _unit_enum_cache:
+        return _unit_enum_cache  # 解析結果を手放した後（やり直しのパネル）は、ダイアログで出した選択肢のまま
     labels = {identifier: (name, description) for identifier, name, description in UNIT_ITEMS}
     counts = {UNIT_SCENES: 0, UNIT_PREFABS: 0, UNIT_MODELS: 0}
     units: list[str] = []
@@ -248,7 +258,17 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         col.label(text=self.summary_textures, icon="TEXTURE")
 
     def execute(self, context):
-        from ..blender.importer import run_import
+        try:
+            return self._execute(context)
+        finally:
+            _release_prepared()
+
+    def cancel(self, context):
+        global _pending
+        _pending = None  # ダイアログを閉じた（やり直しも無い）ので、すべて手放す（#76）
+
+    def _execute(self, context):
+        from ..blender.importer import build_shader_table, prepare_package, run_import
 
         if _pending is None:
             self.report({"ERROR"}, "No pending package to import")
@@ -260,8 +280,16 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         if not chosen:
             self.report({"WARNING"}, "Nothing selected to import")
             return {"CANCELLED"}
-        prepared = _pending.prepared
         opts = _pending.opts
+        prepared = _pending.prepared
+        if prepared is None:  # やり直し。前回の execute の後で解析結果を手放している
+            try:
+                prepared = prepare_package(
+                    _pending.filepath, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
+                )
+            except PackageError as exc:
+                self.report({"ERROR"}, sanitize_display(str(exc)))
+                return {"CANCELLED"}
         opts.unit = unit
         opts.arrange = arrange
         opts.scene_lights = getattr(wm, _LIGHTS_PROP)
