@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,6 @@ from ..core.hierarchy import (
     CLASS_LIGHT,
     Expander,
     Hierarchy,
-    HierarchyError,
     effective_active,
     parse_asset,
     summarize,
@@ -33,7 +33,7 @@ from ..core.fbx_units import read_unit_scale
 from ..core.unity_ids import mesh_file_id
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
-from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
+from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import (
@@ -57,6 +57,7 @@ from ..core.units import (
     summarize_prefabs,
     summarize_scene,
 )
+from ..ui.preferences import get_prefs
 from . import materials as mat_builder
 from . import outline as outline_builder
 from .textures import load_image
@@ -186,14 +187,23 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     return table
 
 
+def _log_exception(message: str) -> None:
+    """捕まえて続けた例外の traceback を、verbose ログが有効ならコンソールに出す（警告には要約だけを出す）。"""
+    prefs = get_prefs(bpy.context)
+    if prefs is None or prefs.verbose_log:
+        print(f"[Unitypackage Importer] {message}")
+        traceback.print_exc()
+
+
 def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
     """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
     if not entry.meta_text:
         return ModelImporterInfo()
     try:
         return ModelImporterInfo.from_meta(entry.meta_text)
-    except ValueError as exc:
+    except Exception as exc:  # noqa: BLE001 - 補助データなので、そのモデルだけ既定値で続ける（#69）
         warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        _log_exception(f"could not parse .meta of {entry.pathname}")
         return ModelImporterInfo()
 
 
@@ -202,8 +212,9 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
         return TextureImporterInfo()
     try:
         return TextureImporterInfo.from_meta(entry.meta_text)
-    except ValueError as exc:
+    except Exception as exc:  # noqa: BLE001 - 補助データなので、その画像だけ既定値で続ける（#69）
         warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        _log_exception(f"could not parse .meta of {entry.pathname}")
         return TextureImporterInfo()
 
 
@@ -222,11 +233,13 @@ def prepare_package(
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
-        except (MaterialParseError, ValueError, PackageError) as exc:
+            norm = normalize_material(umat, table)
+        except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warnings.append(f"could not parse {entry.pathname}: {exc}")
+            _log_exception(f"could not parse {entry.pathname}")
             continue
         unity_mats[entry.guid] = umat
-        normalized[entry.guid] = normalize_material(umat, table)
+        normalized[entry.guid] = norm
 
     models: list[ModelSummary] = []
     for entry in pkg.models():
@@ -258,19 +271,25 @@ def prepare_package(
             documents[entry.guid.lower()] = parse_prefab(pkg.read_asset(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
+            _log_exception(f"could not parse prefab {entry.pathname}")
     model_guids = [m.guid for m in models]
     resolved: dict[str, dict[int, RendererMaterials]] = {}
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     for entry in pkg.prefabs():
         if entry.guid.lower() not in documents:
             continue
-        unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
+        try:
+            unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
+            tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
+        except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
+            warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
+            _log_exception(f"could not resolve prefab {entry.pathname}")
+            continue
         if unresolved:
             warnings.append(
                 f"prefab {entry.pathname}: {unresolved} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
-        tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
         if tables:
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
@@ -298,8 +317,9 @@ def _prepare_scenes(
             return None
         try:
             return parse_asset(pkg.read_asset(guid))
-        except (ValueError, PackageError) as exc:
+        except Exception as exc:  # noqa: BLE001 - 読めない prefab は、元の無いインスタンスとして扱う（#69）
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
+            _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")
             return None
 
     # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
@@ -313,8 +333,9 @@ def _prepare_scenes(
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
             contents = summarize(hierarchy, model_names, recycle)
             hierarchies[entry.guid] = hierarchy
-        except (HierarchyError, ValueError, PackageError, RecursionError) as exc:
+        except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn(f"could not read scene {entry.pathname}: {exc}")
+            _log_exception(f"could not read scene {entry.pathname}")
         scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
     return scenes, hierarchies
 
@@ -1187,6 +1208,7 @@ def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg
     except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
         mrep.warnings.append(f"node build failed: {exc!r}")
         report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
+        _log_exception(f"node build failed for material {bmat.name!r}")
         return
     mrep.mode = mode
     mrep.warnings.extend(warnings)
