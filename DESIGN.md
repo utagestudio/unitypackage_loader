@@ -221,7 +221,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 | Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現 |
 | Pack into .blend | Bool = OFF | |
 | Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
-| Overwrite extracted files | Bool = OFF | 既に展開済みならスキップ |
+| Overwrite extracted files | Bool = OFF | OFF なら、展開先の記録（`.unitypackage_importer.json`）で元の tar メンバーの GUID・サイズ・更新時刻が一致する展開済みファイルだけを使い回す（サイズだけでは同じ名前・同じサイズの別ファイルと区別できない。#72）。書き直した画像は、読み込み済みなら読み直す |
 
 ### 3.2 マテリアルモード別の生成ノード
 
