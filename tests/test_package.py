@@ -306,6 +306,60 @@ class SizeLimitTests(unittest.TestCase):
         self.assertEqual(paths[GUID_FBX].stat().st_size, len(b"Kaydara-fake" * 100))
 
 
+class ScanCacheTests(unittest.TestCase):
+    """scan 時に .mat / .prefab / .unity の実体をメモリに残す判断（#75）。上限側を小さくして検証する。"""
+
+    SCENE = b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n  m_Name: Root\n" + b"# " + b"s" * 200
+    PREFAB = b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n  m_Name: Prefab\n" + b"# " + b"p" * 200
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "order.unitypackage"
+        with tarfile.open(self.path, "w:gz") as tar:
+            # Unity が書き出す順（asset → asset.meta → preview.png → pathname）
+            _add(tar, f"{GUID_SCENE}/asset", self.SCENE)
+            _add(tar, f"{GUID_SCENE}/asset.meta", b"fileFormatVersion: 2\n")
+            _add(tar, f"{GUID_SCENE}/preview.png", b"ignored")
+            _add(tar, f"{GUID_SCENE}/pathname", b"Assets/Order/Showcase.unity")
+            _add(tar, f"{GUID_TEX}/asset", b"\x89PNG" + b"t" * 200)
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Order/Big.png")
+            # pathname が別の GUID を挟んで離れている
+            _add(tar, f"{GUID_OTHER}/asset", self.PREFAB)
+            _add(tar, f"{GUID_FBX}/pathname", b"Assets/Order/Model.fbx")
+            _add(tar, f"{GUID_FBX}/asset", b"Kaydara-fake" * 30)
+            _add(tar, f"{GUID_OTHER}/pathname", b"Assets/Order/Far.prefab")
+
+    def _scan(self) -> UnityPackage:
+        with mock.patch.object(package_module, "_CACHE_MAX_SIZE", 32), \
+             mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 1024):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+        return pkg
+
+    def test_large_scene_before_pathname_is_cached(self):
+        pkg = self._scan()
+        self.assertEqual(pkg.entries[GUID_SCENE]._cache, self.SCENE)
+
+    def test_other_kinds_are_dropped(self):
+        pkg = self._scan()
+        self.assertIsNone(pkg.entries[GUID_TEX]._cache)
+        self.assertIsNone(pkg.entries[GUID_FBX]._cache)
+
+    def test_distant_pathname_falls_back_to_rescan(self):
+        pkg = self._scan()
+        self.assertIsNone(pkg.entries[GUID_OTHER]._cache, "only small assets are kept while the pathname is unknown")
+        self.assertEqual(pkg.read_asset(GUID_OTHER), self.PREFAB)
+
+    def test_assets_over_read_limit_are_not_cached(self):
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+            self.assertIsNone(pkg.entries[GUID_SCENE]._cache)
+            with self.assertRaises(PackageError):
+                pkg.read_asset(GUID_SCENE)
+
+
 class ExtractBudgetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
