@@ -545,7 +545,7 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         return True
     component_node = h.components.get(key)
     if component_node is not None:
-        if component_node not in added:
+        if component_node not in added or component_node not in h.nodes:
             return False
         _set_property(h.nodes[component_node].components[key][1], path, value, reference)
         return True
@@ -653,6 +653,8 @@ def _remove_subtree(h: Hierarchy, key: int) -> None:
         h.game_objects.pop(node.game_object, None)
         if node.renderer is not None:
             h.renderers.pop(node.renderer_key, None)
+        for component in node.components:  # 消した GameObject のライト・カメラへの上書きが残っていることがある（#68）
+            h.components.pop(component, None)
         stack.extend(children.get(current, []))
 
 
