@@ -107,7 +107,7 @@ def build_material(
     alpha_mode = "opaque" if opts.force_opaque else norm.alpha_mode
     _apply_settings(mat, norm, alpha_mode, opts)
     if opts.store_props:
-        store_props(mat, norm)
+        store_props(mat, norm, opts)
     if mode == MODE_NAMES_ONLY:
         return mode, warnings
 
@@ -390,8 +390,17 @@ def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mod
     mat.diffuse_color = (*norm.base_color[:3], 1.0)
 
 
-def store_props(mat: bpy.types.Material, norm: NormalizedMaterial) -> None:
-    """Unity 側の情報をカスタムプロパティに残す（別のモードでの再構築と、インポーターが作ったマテリアルを残す場合の記録に使う）。"""
+BUILD_OPTIONS_PROP = "unity_build_options"
+_REMEMBERED_OPTIONS = ("force_opaque", "backface_culling", "use_normal_maps", "use_emission")
+
+
+def store_props(mat: bpy.types.Material, norm: NormalizedMaterial, opts: MaterialBuildOptions | None = None) -> None:
+    """Unity 側の情報をカスタムプロパティに残す（別のモードでの再構築と、インポーターが作ったマテリアルを残す場合の記録に使う）。
+
+    ``opts`` を渡すと、組み立てに使った設定も残す（再構築のダイアログの初期値にする。#78）。
+    """
+    if opts is not None:
+        mat[BUILD_OPTIONS_PROP] = json.dumps({name: getattr(opts, name) for name in _REMEMBERED_OPTIONS})
     mat["unity_material_guid"] = norm.source_guid
     mat["unity_material_path"] = norm.source_path
     mat["unity_shader_guid"] = norm.shader_guid or ""
@@ -428,6 +437,17 @@ def collect_tagged_images() -> tuple[dict[str, bpy.types.Image], dict[str, Textu
             info.wrap_u = info.wrap_v = 1
         infos[guid] = info
     return images, infos
+
+
+def stored_build_options(mat: bpy.types.Material) -> dict[str, bool]:
+    """``store_props`` が残した組み立ての設定。無いか壊れていれば空（呼び出し側の既定値を使う）。"""
+    try:
+        data = json.loads(mat.get(BUILD_OPTIONS_PROP) or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: bool(data[name]) for name in _REMEMBERED_OPTIONS if name in data}
 
 
 def rebuild_from_props(mat: bpy.types.Material, mode: str, opts: MaterialBuildOptions | None = None) -> tuple[str, list[str]]:
