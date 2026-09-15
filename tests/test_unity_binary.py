@@ -176,6 +176,25 @@ class RobustnessTest(unittest.TestCase):
         with self.assertRaisesRegex(UnityBinaryError, "count"):
             parse_serialized_file(corrupt)
 
+    def test_array_count_uses_element_size(self):
+        from unitypackage_loader.core.unity_binary import MAX_EMPTY_ELEMENTS, _Node, _Reader, _ValueReader
+
+        def array(element: _Node) -> _Node:
+            return _Node("vector", "m_Items", 0, 0, [_Node("Array", "Array", 1, 0, [_Node("int", "size", 2, 0), element])])
+
+        pair = _Node("Pair", "data", 2, 0, [_Node("float", "x", 3, 0), _Node("float", "y", 3, 0)])
+        # 16 バイトしか残っていないのに 10 要素（1 要素 8 バイト）を読もうとすると、読む前に件数で弾く
+        reader = _ValueReader(_Reader(struct.pack("<i", 10) + bytes(16), "<"), [])
+        with self.assertRaisesRegex(UnityBinaryError, "count"):
+            reader.read(array(pair))
+        # 中身の無い要素の配列は、残りのバイト数によらず件数に上限を置く（大量の dict を作らせない）
+        empty = _Node("Empty", "data", 2, 0)
+        reader = _ValueReader(_Reader(struct.pack("<i", MAX_EMPTY_ELEMENTS + 1) + bytes(MAX_EMPTY_ELEMENTS + 1), "<"), [])
+        with self.assertRaisesRegex(UnityBinaryError, "count"):
+            reader.read(array(empty))
+        ok = _ValueReader(_Reader(struct.pack("<i", 3), "<"), []).read(array(empty))
+        self.assertEqual(ok, [{}, {}, {}])
+
     def test_deep_type_tree(self):
         node, value = w.prim("int", "leaf"), 7
         for _ in range(254):  # ルートを含めて TypeTree の階層（1 バイト）の上限 255 まで
