@@ -5,8 +5,8 @@
 `.unitypackage` を Blender の File > Import から直接読み込み、メッシュ（アーマチュア・シェイプキー込み）に
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
-- 対応 Blender: 4.2 以降（開発・検証は 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / VRM / Collada / 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
+- 対応 Blender: 4.5 以降（開発は 5.2 LTS、検証は 4.5 LTS と 5.2 LTS）
+- 読み込むもの: FBX / OBJ / glTF / VRM / Collada（Blender 4.5 のみ。5.0 で削除された）/ 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
 - 読み込まないもの: シェーダー本体、C#、アニメーション、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
@@ -169,6 +169,9 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 # 手元の実パッケージでの統合テスト（_local/ に検証用パッケージと expectations.json が必要）
 blender -b --factory-startup --python tests/integration_import.py
 ```
+
+PR と main / release ブランチへの push では、`.github/workflows/tests.yml` が単体テスト（Blender 4.5 / 5.2 に同梱の Python 3.11 / 3.13）と、
+合成パッケージの統合テスト（Blender 4.5 LTS / 5.2 LTS）を回します。
 
 検証用データ（unitypackage、展開物、期待値）は `_local/` に置きます。このディレクトリは gitignore 対象で、
 検証に使ったアセットのデータはリポジトリに含めません（コミットするテスト用データは合成データだけです）。

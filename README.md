@@ -5,8 +5,8 @@ English | [日本語](README_ja.md) | [GitHub](https://github.com/utagestudio/un
 A Blender Extension that imports `.unitypackage` files directly from File > Import, placing meshes
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
-- Supported Blender: 4.2 or later (developed and tested on 5.2 LTS)
-- What is imported: FBX / OBJ / glTF / VRM / Collada / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
+- Supported Blender: 4.5 or later (developed on 5.2 LTS, tested on 4.5 LTS and 5.2 LTS)
+- What is imported: FBX / OBJ / glTF / VRM / Collada (Blender 4.5 only; removed in Blender 5.0) / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), and referenced textures
 - What is not imported: shader source code, C# scripts, animations, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
@@ -181,6 +181,9 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 # Integration test with a real package on your machine (requires the package and expectations.json in _local/)
 blender -b --factory-startup --python tests/integration_import.py
 ```
+
+Pull requests and pushes to main / release branches run `.github/workflows/tests.yml`: the unit tests on Python 3.11 and 3.13
+(the versions bundled with Blender 4.5 and 5.2), and the integration tests with the synthetic packages on Blender 4.5 LTS and 5.2 LTS.
 
 Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
 and the data of the assets used for testing is never committed (the committed test data is synthetic only).

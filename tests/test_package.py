@@ -95,6 +95,13 @@ class SyntheticPackageTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.pkg.read_asset(GUID_FOLDER)
 
+    def test_read_asset_rescan_failure_is_package_error(self):
+        # scan の後でファイルが壊れても、再走査の失敗は scan と同じく PackageError にする（#69）
+        self.pkg.scan()
+        self.pkg_path.write_bytes(b"not a tar archive")
+        with self.assertRaises(PackageError):
+            self.pkg.read_asset(GUID_TEX)
+
     def test_extract_writes_pathname_tree_and_skips_existing(self):
         dest = Path(self.tmp.name) / "out"
         paths = self.pkg.extract([GUID_TEX, GUID_FBX, GUID_FOLDER, "f" * 32], dest)

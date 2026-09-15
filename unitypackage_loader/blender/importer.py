@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,6 @@ from ..core.hierarchy import (
     CLASS_LIGHT,
     Expander,
     Hierarchy,
-    HierarchyError,
     effective_active,
     parse_asset,
     summarize,
@@ -33,7 +33,7 @@ from ..core.fbx_units import read_unit_scale
 from ..core.unity_ids import mesh_file_id
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.mapping import resolve_materials, slot_assignments, submesh_slot_order
-from ..core.material import MaterialParseError, NormalizedMaterial, UnityMaterial, parse_material
+from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import (
@@ -57,6 +57,7 @@ from ..core.units import (
     summarize_prefabs,
     summarize_scene,
 )
+from ..ui.preferences import get_prefs
 from . import materials as mat_builder
 from . import outline as outline_builder
 from .textures import load_image
@@ -117,6 +118,7 @@ BLEND_DISABLED_REASON = (
     "bundled .blend files are not imported unless 'Import Bundled .blend Files' is enabled "
     "(a .blend can contain Python scripts)"
 )
+COLLADA_UNAVAILABLE_REASON = "Collada (.dae) import is not available in this Blender (it was removed in Blender 5.0)"
 
 
 @dataclass
@@ -185,14 +187,23 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     return table
 
 
+def _log_exception(message: str) -> None:
+    """捕まえて続けた例外の traceback を、verbose ログが有効ならコンソールに出す（警告には要約だけを出す）。"""
+    prefs = get_prefs(bpy.context)
+    if prefs is None or prefs.verbose_log:
+        print(f"[Unitypackage Importer] {message}")
+        traceback.print_exc()
+
+
 def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
     """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
     if not entry.meta_text:
         return ModelImporterInfo()
     try:
         return ModelImporterInfo.from_meta(entry.meta_text)
-    except ValueError as exc:
+    except Exception as exc:  # noqa: BLE001 - 補助データなので、そのモデルだけ既定値で続ける（#69）
         warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        _log_exception(f"could not parse .meta of {entry.pathname}")
         return ModelImporterInfo()
 
 
@@ -201,8 +212,9 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
         return TextureImporterInfo()
     try:
         return TextureImporterInfo.from_meta(entry.meta_text)
-    except ValueError as exc:
+    except Exception as exc:  # noqa: BLE001 - 補助データなので、その画像だけ既定値で続ける（#69）
         warn(f"could not parse .meta of {entry.pathname}: {exc}")
+        _log_exception(f"could not parse .meta of {entry.pathname}")
         return TextureImporterInfo()
 
 
@@ -221,11 +233,13 @@ def prepare_package(
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
-        except (MaterialParseError, ValueError, PackageError) as exc:
+            norm = normalize_material(umat, table)
+        except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warnings.append(f"could not parse {entry.pathname}: {exc}")
+            _log_exception(f"could not parse {entry.pathname}")
             continue
         unity_mats[entry.guid] = umat
-        normalized[entry.guid] = normalize_material(umat, table)
+        normalized[entry.guid] = norm
 
     models: list[ModelSummary] = []
     for entry in pkg.models():
@@ -238,6 +252,8 @@ def prepare_package(
             skip_reason = "model format not supported yet"
         elif entry.ext == ".blend" and not import_blend:
             skip_reason = BLEND_DISABLED_REASON
+        elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
+            skip_reason = COLLADA_UNAVAILABLE_REASON
         models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
@@ -255,19 +271,25 @@ def prepare_package(
             documents[entry.guid.lower()] = parse_prefab(pkg.read_asset(entry.guid))
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので失敗しても続ける
             warnings.append(f"could not parse prefab {entry.pathname}: {exc}")
+            _log_exception(f"could not parse prefab {entry.pathname}")
     model_guids = [m.guid for m in models]
     resolved: dict[str, dict[int, RendererMaterials]] = {}
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     for entry in pkg.prefabs():
         if entry.guid.lower() not in documents:
             continue
-        unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
+        try:
+            unresolved = unresolved_material_overrides(entry.guid, documents, resolved)
+            tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
+        except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
+            warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
+            _log_exception(f"could not resolve prefab {entry.pathname}")
+            continue
         if unresolved:
             warnings.append(
                 f"prefab {entry.pathname}: {unresolved} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
-        tables = tables_by_model(resolve_renderers(entry.guid, documents, resolved).values(), model_guids)
         if tables:
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
@@ -295,8 +317,9 @@ def _prepare_scenes(
             return None
         try:
             return parse_asset(pkg.read_asset(guid))
-        except (ValueError, PackageError) as exc:
+        except Exception as exc:  # noqa: BLE001 - 読めない prefab は、元の無いインスタンスとして扱う（#69）
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
+            _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")
             return None
 
     # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
@@ -310,8 +333,9 @@ def _prepare_scenes(
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
             contents = summarize(hierarchy, model_names, recycle)
             hierarchies[entry.guid] = hierarchy
-        except (HierarchyError, ValueError, PackageError, RecursionError) as exc:
+        except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn(f"could not read scene {entry.pathname}: {exc}")
+            _log_exception(f"could not read scene {entry.pathname}")
         scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
     return scenes, hierarchies
 
@@ -338,7 +362,7 @@ def resolve_extract_root(opts: ImportOptions, package_path: Path) -> Path:
 # bpy.data の差分取得
 # ---------------------------------------------------------------------------
 
-_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions", "collections")
+_TRACKED = ("objects", "materials", "images", "meshes", "armatures", "actions", "collections", "lights", "cameras")
 
 
 def _snapshot() -> dict[str, set[str]]:
@@ -351,6 +375,30 @@ def _new_since(before: dict[str, set[str]]) -> dict[str, list]:
         coll = getattr(bpy.data, name)
         result[name] = [d for d in coll if d.name not in before[name]]
     return result
+
+
+def _remove_created(before: dict[str, set[str]]) -> None:
+    """``before`` の後に作られたデータブロックを消す（読み込みに失敗したときの片付け）。"""
+    new = _new_since(before)
+    ids = [d for name in _TRACKED for d in new[name]]
+    if ids:
+        bpy.data.batch_remove(ids)
+
+
+def _is_removed(datablock) -> bool:
+    try:
+        datablock.name
+    except ReferenceError:
+        return True
+    return False
+
+
+def _record_failure(report: ImportReport, message: str) -> None:
+    """モデルやシーン 1 つの読み込みの失敗をレポートに記録する（残りの読み込みは続ける。except の中で呼ぶ）。"""
+    message = message.strip()  # Blender の例外の文は末尾に改行が付く
+    if message not in report.errors:
+        report.errors.append(message)
+    _log_exception(message)
 
 
 def _adopt_into_collection(new: dict[str, list], scene, collection) -> None:
@@ -372,9 +420,18 @@ def _adopt_into_collection(new: dict[str, list], scene, collection) -> None:
                 collection.objects.link(obj)
 
 
+def operator_available(module: str, name: str) -> bool:
+    """``bpy.ops.<module>.<name>`` が登録されているか。
+
+    ``hasattr(bpy.ops.<module>, name)`` はどんな名前でも True になり、C で定義されたオペレーター
+    （wm.collada_import など）は ``bpy.types`` にも現れないので、``dir`` で登録済みの名前を見る。
+    """
+    return name in dir(getattr(bpy.ops, module))
+
+
 def vrm_addon_available() -> bool:
-    """VRM add-on（import_scene.vrm）が登録されているか。bpy.ops の属性は常に存在するので bpy.types で見る。"""
-    return hasattr(bpy.types, "IMPORT_SCENE_OT_vrm")
+    """VRM add-on（import_scene.vrm）が登録されているか。"""
+    return operator_available("import_scene", "vrm")
 
 
 def _find_layer_collection(layer_coll, target):
@@ -401,7 +458,8 @@ def _sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
 
 
 def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
-    use_new = hasattr(bpy.ops.wm, "fbx_import") and opts.fbx_importer in ("AUTO", "NEW")
+    # wm.fbx_import は Blender 4.5 で追加された（最小版は 4.5）。bpy.ops の hasattr は常に True なので判定には使えない
+    use_new = opts.fbx_importer in ("AUTO", "NEW")
     if use_new:
         kwargs = dict(
             filepath=str(path),
@@ -611,7 +669,7 @@ def _make_light(name: str, values: BlenderLight) -> bpy.types.Object:
     data.energy = values.energy
     data.use_shadow = values.use_shadow
     data.shadow_soft_size = values.shadow_soft_size
-    if values.use_temperature and hasattr(data, "use_temperature"):  # 色温度は Blender 4.5 以降
+    if values.use_temperature:
         data.use_temperature = True
         data.temperature = values.temperature
     if values.type == "SUN":
@@ -678,6 +736,13 @@ def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.O
     return list(mapping.values())
 
 
+def _by_object_name(table: dict, name: str):
+    """オブジェクト名で表を引く。完全一致 → 連番を外した形の順（元の名前が数字で終わる部品を連番と取り違えない）。"""
+    if name in table:
+        return table[name]
+    return table.get(strip_numeric_suffix(name))
+
+
 def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
     """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
 
@@ -694,7 +759,7 @@ def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_sc
     members = set(objects)
     skipped = 0
     for original, obj in zip(template.objects, objects):
-        spec = overrides.get(strip_numeric_suffix(obj.name))
+        spec = _by_object_name(overrides, obj.name)
         if spec is None:
             continue
         nested = obj.parent in members
@@ -727,7 +792,7 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
             obj, count = obj.parent, count + 1
         return count
 
-    targets = [o for o in objects if strip_numeric_suffix(o.name) in offsets]
+    targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
     if not targets:
         return 0
     view_layer.update()
@@ -741,13 +806,17 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
             skipped += 1
             continue
         view_layer.update()
-        obj.matrix_world = Matrix(unity_to_blender(offsets[strip_numeric_suffix(obj.name)])) @ scale_matrix @ origins[obj]
+        obj.matrix_world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ origins[obj]
     return skipped
 
 
 # ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
+
+
+class _NothingImported(PackageError):
+    """選んだモデル・シーンがどれも読み込めなかった（オペレーターが PackageError と同じく本文をそのまま表示する）。"""
 
 
 def run_import(
@@ -757,9 +826,40 @@ def run_import(
     progress=None,
     prepared: PreparedPackage | None = None,
 ) -> ImportReport:
+    """パッケージを読み込み、レポートを返す（``LAST_REPORT`` にも入れる）。
+
+    モデルやシーン 1 つの読み込みの失敗はレポートの ``errors`` に記録して続け、読めた分は残す。
+    続けられない失敗と、選んだものが 1 つも読み込めなかったときは、この回で作ったものを片付けてから例外を送る。
+    どちらの場合も ``LAST_REPORT`` を更新する（#70）。
+    """
     global LAST_REPORT
+    report = ImportReport(package=Path(filepath).name)
+    before = _snapshot()
+    try:
+        _run_import(context, filepath, opts, progress, prepared, report)
+        if report.errors and not (report.objects or report.lights or report.cameras):
+            raise _NothingImported(f"nothing could be imported: {report.errors[0]}")
+    except Exception as exc:
+        if not isinstance(exc, _NothingImported):
+            report.errors.append(f"import failed: {str(exc).strip()}")
+        _remove_created(before)
+        for items in (report.objects, report.materials, report.images):
+            items.clear()  # 片付けたので、Blender には残っていない
+        LAST_REPORT = report
+        raise
+    LAST_REPORT = report
+    return report
+
+
+def _run_import(
+    context,
+    filepath: str,
+    opts: ImportOptions,
+    progress,
+    prepared: PreparedPackage | None,
+    report: ImportReport,
+) -> None:
     package_path = Path(filepath)
-    report = ImportReport(package=package_path.name)
 
     def step(fraction: float, message: str) -> None:
         if progress is not None:
@@ -858,14 +958,14 @@ def run_import(
 
     built_by_guid: dict[str, bpy.types.Material] = {}  # 同じ .mat は 1 つの Blender マテリアルを共有
     imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
+    failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
 
-    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+    def build_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before) -> list[bpy.types.Object]:
         """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
         model = summary.entry
         model_info = _model_info(model, report.warn)
         reimport = model.guid in imported_models
         imported_models.add(model.guid)
-        before = _snapshot()
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
         delegated = _import_model(context, paths[model.guid], model, opts, target, report)
@@ -979,6 +1079,25 @@ def run_import(
                 report.outlines += added
         return new["objects"]
 
+    def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+        """モデルを 1 回読み込む。途中で失敗したら、そのモデルで作ったものとレポートの行を消してから例外を送る（#70）。"""
+        before = _snapshot()
+        rows = (report.models, report.objects, report.materials, report.images)
+        counts = [len(items) for items in rows]
+        known = summary.guid in imported_models
+        try:
+            return build_model(summary, prefab_table, target, before)
+        except Exception:
+            _remove_created(before)
+            for items, count in zip(rows, counts):
+                del items[count:]
+            if not known:
+                imported_models.discard(summary.guid)
+            for guid in [g for g, m in built_by_guid.items() if _is_removed(m)]:
+                del built_by_guid[guid]
+            failed_models.add(summary.guid)
+            raise
+
     model_by_guid = {m.guid: m for m in prepared.models}
 
     def import_scene(scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
@@ -1012,6 +1131,8 @@ def run_import(
                 if skipped is not None:
                     report.warn(f"scene {pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
                 continue
+            if summary.guid in failed_models:
+                continue  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
             root = _scene_empty(hierarchy, placement.root, target, empties, active)
             table = {
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
@@ -1020,7 +1141,11 @@ def run_import(
             key = placement.signature()
             template = templates.get(key)
             if template is None:
-                objects = import_model(summary, table, target)
+                try:
+                    objects = import_model(summary, table, target)
+                except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
+                    _record_failure(report, f"scene {pathname}: could not import {summary.entry.pathname}: {exc}")
+                    continue
                 template = templates[key] = _SceneTemplate.capture(objects)
             else:
                 objects = _duplicate_objects(template, target)
@@ -1149,10 +1274,18 @@ def run_import(
                 view_layer.active_layer_collection = layer_coll
             for summary, prefab_table in group.models:
                 step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
-                import_model(summary, prefab_table, target)
                 done += 1
+                if summary.guid in failed_models:
+                    continue
+                try:
+                    import_model(summary, prefab_table, target)
+                except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
+                    _record_failure(report, f"could not import {summary.entry.pathname}: {exc}")
         for scene_summary in scenes:
-            import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+            try:
+                import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+            except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
+                _record_failure(report, f"could not import scene {scene_summary.pathname}: {exc}")
             done += 1
         if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
             _arrange_collections(context, prefab_collections)
@@ -1162,8 +1295,6 @@ def run_import(
 
     collection["unity_package"] = package_path.name
     step(1.0, "Done")
-    LAST_REPORT = report
-    return report
 
 
 def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:
@@ -1174,6 +1305,7 @@ def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg
     except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
         mrep.warnings.append(f"node build failed: {exc!r}")
         report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
+        _log_exception(f"node build failed for material {bmat.name!r}")
         return
     mrep.mode = mode
     mrep.warnings.extend(warnings)

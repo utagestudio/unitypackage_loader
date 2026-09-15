@@ -1,7 +1,7 @@
 # unitypackage_loader — 設計書
 
 Blender から `.unitypackage` を直接読み込み、メッシュ（アーマチュア・シェイプキー込み）とマテリアル／テクスチャの設定までを一度に行うアドオンの設計。
-対象 Blender: **4.2 以降（Extension 形式）**、開発・検証環境は **5.2 LTS / Python 3.13**。
+対象 Blender: **4.5 以降（Extension 形式）**、開発環境は **5.2 LTS / Python 3.13**、検証は **4.5 LTS と 5.2 LTS**。
 
 ---
 
@@ -145,7 +145,7 @@ Material:
 ## 1. スコープ
 
 ### 読み込む
-- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲）と同梱 `.blend`（append。Python スクリプトを含み得るので既定 OFF のオプトイン。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
+- モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲。Collada は Blender 5.0 で削除されたので、`wm.collada_import` が無い版では `.dae` を理由付きの読み込めない候補にする）と同梱 `.blend`（append。Python スクリプトを含み得るので既定 OFF のオプトイン。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
 - `.vrm`: VRM add-on（extensions.blender.org の "VRM format"、`import_scene.vrm`）が登録されていればそちらに委譲し、マテリアルも add-on のもの（MToon ノードグループ）をそのまま使う。無ければ glTF バイナリとして標準 glTF インポーターで読み、`.mat`（UniVRM が展開した MToon マテリアル）から組み直す。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
@@ -329,7 +329,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 ```
 unitypackage_loader/
-├─ blender_manifest.toml         # id, version, blender_version_min="4.2.0", permissions=["files"]
+├─ blender_manifest.toml         # id, version, blender_version_min="4.5.0", permissions=["files"]
 ├─ __init__.py                   # register / unregister、メニュー登録
 ├─ operators/
 │   ├─ import_package.py         # IMPORT_SCENE_OT_unitypackage（ImportHelper）
@@ -592,8 +592,18 @@ def run(ctx, filepath, opts) -> Report:
 - `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。全モデルが委譲対象なら `.mat` 用テクスチャの展開も省く。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
-- 例外は各マテリアル単位で捕捉して警告にする。FBX インポート自体の失敗だけがエラー。
-- `bpy.ops.import_scene.fbx` は `wm.fbx_import` の旧名。4.2 以降では両方存在するが、5.x 系では新 C++ インポーター（`bpy.ops.wm.fbx_import`）を優先し、無ければ旧名にフォールバック。
+- 例外の扱い（#69）:
+  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `prefab.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
+  - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
+  - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。
+  - モデル 1 つ・シーン 1 つの読み込みの失敗（壊れた FBX など）は、レポートの `errors` に記録して残りを読み込む。読めた分は残す。
+    失敗したモデルが作りかけたデータとレポートの行は消し、同じモデルの残りの配置は試さない。
+  - 続けられない失敗（展開の失敗など）と、選んだものが 1 つも読み込めなかったときは、この回で作ったデータ（パッケージ用コレクションを含む）を
+    片付けてから失敗にする。どちらの場合も `LAST_REPORT` を更新し、N パネルにエラーを出す。
+  - `UnityPackage.read_asset` の再走査の失敗は、`scan` と同じく `PackageError` にする。
+- FBX は新しい C++ のインポーター（`bpy.ops.wm.fbx_import`。Blender 4.5 で追加）を使う。オプションで Legacy を選んだときだけ、Python 製の `bpy.ops.import_scene.fbx` を使う。
+  `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。
+- Blender 4.x の `bpy.data.materials.new()` はノードツリーを持たない（5.0 以降は持つ）。こちらで作るマテリアル（スロット分割・アウトライン）は、組み立ての前に `use_nodes` を立てる。
 
 ### 4.8 `blender/textures.py`
 
@@ -630,6 +640,7 @@ def run(ctx, filepath, opts) -> Report:
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
+- CI（`.github/workflows/tests.yml`。PR と main / release ブランチへの push）: 単体テストを Python 3.11 / 3.13（Blender 4.5 / 5.2 に同梱の版）で回す。合成パッケージ（`tests/make_synthetic_*.py`）を Blender 5.2 で 1 回だけ生成し、統合テストを Blender 4.5 LTS と 5.2 LTS で回す（4.5 は 5.2 で保存した .blend を読める）。実在アセットを使うテストは CI では回さない。
 - 見た目の確認は、`_local/` に置いた参考 .blend と並べて比較する手動項目とする。
 
 ---

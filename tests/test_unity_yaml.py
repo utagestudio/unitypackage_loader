@@ -155,6 +155,17 @@ class ParseDocumentsTests(unittest.TestCase):
         self.assertEqual(body["b"], -math.inf)
         self.assertTrue(math.isnan(body["c"]))
 
+    def test_non_mapping_document_body_is_empty(self):
+        # 本文がリストの壊れたドキュメントは、例外にせず空として扱う（#69）
+        docs = parse_documents("%YAML 1.1\n--- !u!1 &1\n- a\n- b\n--- !u!4 &2\nTransform:\n  m_Father: {fileID: 0}\n")
+        self.assertEqual((docs[0].type_name, docs[0].body), (None, {}))
+        self.assertEqual(docs[1].body, {"m_Father": UnityRef(0, None, None)})
+
+    def test_value_glued_to_flow_mapping_is_yaml_error(self):
+        # 「y:{」のように空白の無い値の後で値が空になると、IndexError になっていた（#69 のファズテストで発見）
+        with self.assertRaises(UnityYamlError):
+            parse_text("a: {x: 1, y:{fileID: 1, guid: , type: 3} 1}\n")
+
     def test_bad_indentation_raises(self):
         with self.assertRaises(UnityYamlError):
             parse_text("a:\n  b: 1\n c: 2\n")
@@ -162,6 +173,26 @@ class ParseDocumentsTests(unittest.TestCase):
     def test_crlf_and_bom(self):
         body = parse_text("\ufeffa: 1\r\nb:\r\n  c: x\r\n")
         self.assertEqual(body, {"a": 1, "b": {"c": "x"}})
+
+
+class EscapeTests(unittest.TestCase):
+    """ダブルクォートの文字列のエスケープ（#74）。"""
+
+    def test_escape_keeps_multibyte_text(self):
+        self.assertEqual(parse_text('m_Name: "マテリアル\\tA"\n'), {"m_Name": "マテリアル\tA"})
+
+    def test_yaml_escapes(self):
+        body = parse_text('a: "q\\"b\\\\c\\/d\\ne\\x41\\u3042\\U0001F600"\n')
+        self.assertEqual(body["a"], 'q"b\\c/d\neAあ😀')
+
+    def test_surrogate_pair_is_joined(self):
+        self.assertEqual(parse_text('a: "\\uD83D\\uDE00"\n')["a"], "😀")
+
+    def test_unknown_or_incomplete_escape_is_kept(self):
+        self.assertEqual(parse_text('a: "x\\qy\\x4"\n')["a"], "x\\qy\\x4")
+
+    def test_flow_mapping_value(self):
+        self.assertEqual(parse_text('a: {name: "日本\\"語\\t"}\n')["a"], {"name": '日本"語\t'})
 
 
 class ParseTextTests(unittest.TestCase):

@@ -1,0 +1,15 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
+  "result": "FINISHED",
+  "errors": 1,
+  "objects": { "count": 13, "mesh_count": 13, "armature_count": 0 },
+  "materials": { "count": 15, "mapped": 15, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab"] },
+  "images": { "count": 2 },
+  "warnings_max": 2,
+  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"] },
+  "material_checks": [
+    { "name": "CubeMat", "alpha_mode": "opaque", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png", "normal_image": "Normal.png" },
+    { "name": "CylinderMat", "alpha_mode": "blend", "render_method": "BLENDED", "mode": "PRINCIPLED" },
+    { "name": "QuestToonMat", "alpha_mode": "opaque", "mode": "UNLIT", "shader_name": "VRChat/Mobile/Toon Lit", "base_image": "ColorA.png" }
+  ]
+}

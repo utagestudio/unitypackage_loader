@@ -77,8 +77,11 @@ class ImportReport:
         if self.lights or self.cameras:
             parts.append(f"{self.lights} lights, {self.cameras} cameras")
         text = ", ".join(parts)
+        problems = [f"{len(self.errors)} error(s)"] if self.errors else []
         if self.warnings:
-            text += f". {len(self.warnings)} warning(s) — see the system console"
+            problems.append(f"{len(self.warnings)} warning(s)")
+        if problems:
+            text += f". {', '.join(problems)} — see the system console"
         return text
 
     def as_text(self) -> str:

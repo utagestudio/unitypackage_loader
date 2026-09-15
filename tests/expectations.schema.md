@@ -63,6 +63,9 @@
 | `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared`） |
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
+| `result` | オペレーターの結果（既定は `FINISHED`。何も読み込めずに失敗する場合は `CANCELLED`） |
+| `errors` | レポートのエラー数（読み込めなかったモデル・シーン、続けられなかった失敗） |
+| `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
 | `material_checks[].emission_strength` / `emission_color` | Principled BSDF の Emission Strength と、リンクされていない Emission Color（RGB、小数 4 桁で比較） |
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |

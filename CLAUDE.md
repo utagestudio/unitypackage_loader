@@ -34,11 +34,13 @@
   Unity YAML は依存無しの専用パーサー（`core/unity_yaml.py`。Blender 同梱 Python に PyYAML は無い）。
   Asset Serialization が Force Binary のプロジェクト由来の .mat / .prefab はバイナリの SerializedFile なので、
   `core/unity_binary.py` が TypeTree をたどって同じ `UnityDocument` に変換する（`load_documents` が自動判定）。
+- **例外の約束**: 解析器は壊れた入力に `ValueError` 系だけを送出する（`tests/test_fuzz_parsers.py` で確認）。`.mat` / `.meta` / prefab / シーンを読む側は
+  `Exception` を捕まえて、そのアセットだけを警告付きで外す（1 つの壊れた補助データでパッケージ全体を止めない）。
 
 ## ディレクトリ構成
 
 ```
-unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.2 以降の Extension 形式）
+unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
   blender/                bpy 依存（importer / materials / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
@@ -46,7 +48,7 @@ unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.2
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
 tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、スクリーンショット撮影（shoot_screenshots.py）
 web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
-.github/workflows/        Pages への Extension Repository 公開
+.github/workflows/        Pages への Extension Repository 公開（pages.yml）と、単体テスト・Blender 4.5 / 5.2 での統合テスト（tests.yml）
 _local/                   検証用データ置き場（gitignore。詳細は CLAUDE.local.md）
 ```
 
@@ -60,8 +62,10 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
   アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
   （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
-- Blender API は 4.2 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
-  新 FBX インポーター `wm.fbx_import` を優先し、無ければ `import_scene.fbx`。
+- Blender API は 4.5 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
+  FBX は新インポーター `wm.fbx_import` を使い、Legacy を選んだときだけ `import_scene.fbx`。
+  オペレーターの有無は `bpy.ops` の `hasattr` でも `bpy.types` でも判定できない（C のオペレーターは `bpy.types` に無い）。
+  4.x の `materials.new()` はノードツリーを持たないので、組み立ての前に `use_nodes` を立てる。
 - ドキュメント（README.md / README_ja.md / DESIGN.md）は実装と乖離させない。仕様を変えたら同じ作業内で更新する。
 - **バージョン番号の運用**（`unitypackage_loader/blender_manifest.toml` の `version`）は下記「バージョン番号のルール」に従う。
   ソースコードに関わるコミットごとに `-dev.<dev>` を上げるので、コードを変えたコミットには manifest の変更も含める。
@@ -94,6 +98,9 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/synt
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
 blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/synthetic_scene.unitypackage）
 blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
+python3 tests/make_synthetic_broken_packages.py _local/synthetic_multi.unitypackage _local                                                           # 読み込みに失敗するモデルを含む合成パッケージ
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_broken_model.unitypackage tests/expectations_synthetic_broken_model.json  # 1 つ失敗しても残りを読む
+blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_broken_all.unitypackage tests/expectations_synthetic_broken_all.json      # 全部失敗したら何も残さない
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py

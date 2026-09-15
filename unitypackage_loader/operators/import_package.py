@@ -37,7 +37,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
-            ("AUTO", "Auto", "Use the new FBX importer when available"),
+            ("AUTO", "Auto", "Use the new FBX importer"),
             ("NEW", "New (C++)", "bpy.ops.wm.fbx_import"),
             ("LEGACY", "Legacy (Python)", "bpy.ops.import_scene.fbx"),
         ),
@@ -285,7 +285,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             objects = sum(len(r.objects) for r in reports)
             materials = sum(len(r.materials) for r in reports)
             mapped = sum(r.mapped_count for r in reports)
-            warnings = sum(len(r.warnings) for r in reports) + len(failures)
+            warnings = sum(len(r.warnings) + len(r.errors) for r in reports) + len(failures)
             summary = f"Imported {len(reports)} packages: {objects} objects, {materials} materials ({mapped} mapped)"
             if failures:
                 summary += f", {len(failures)} package(s) failed"
@@ -294,7 +294,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             self.report({"WARNING" if warnings else "INFO"}, summary)
         else:
             report = reports[0]
-            self.report({"WARNING" if report.warnings else "INFO"}, report.summary())
+            self.report({"WARNING" if report.warnings or report.errors else "INFO"}, report.summary())
         return {"FINISHED"}
 
 

@@ -114,12 +114,40 @@ def _split_lines(text: str) -> list[_Line]:
 # ---------------------------------------------------------------------------
 
 
+# YAML のダブルクォートの文字列のエスケープ
+_ESCAPES = {
+    "0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f", "r": "\r",
+    "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\", "N": "\x85", "_": "\xa0", "L": " ", "P": " ",
+}
+_ESCAPE_RE = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)", re.DOTALL)
+
+
+def _unescape_double_quoted(text: str) -> str:
+    """ダブルクォートの中のエスケープを 1 つずつ外す。知らないエスケープ・途中で切れたエスケープは文字のまま残す。
+
+    ``bytes.decode("unicode_escape")`` はバイト列を Latin-1 として読むので、日本語などの多バイト文字が壊れる（#74）。
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        seq = match.group(1)
+        if len(seq) > 1:  # \xNN / \uNNNN / \UNNNNNNNN
+            code = int(seq[1:], 16)
+            return chr(code) if code <= 0x10FFFF else match.group(0)
+        return _ESCAPES.get(seq, match.group(0))
+
+    result = _ESCAPE_RE.sub(replace, text)
+    try:  # 😀 のようなサロゲートペアを 1 文字にまとめる
+        return result.encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeDecodeError:
+        return result
+
+
 def _unquote(s: str) -> str:
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"":
         inner = s[1:-1]
         if s[0] == "'":
             return inner.replace("''", "'")
-        return bytes(inner, "utf-8").decode("unicode_escape") if "\\" in inner else inner
+        return _unescape_double_quoted(inner) if "\\" in inner else inner
     return s
 
 
@@ -175,7 +203,7 @@ class _FlowParser:
             return self._mapping()
         if ch == "[":
             return self._sequence()
-        if ch in "'\"":
+        if ch and ch in "'\"":  # 値の無いところ（"" は in で常に True）で _quoted に入らない
             return self._quoted()
         return _scalar(self._plain(), key)
 
@@ -454,7 +482,9 @@ def parse_documents(text: str) -> list[UnityDocument]:
     def flush() -> None:
         nonlocal buffer
         if current is not None:
-            current.data = _parse_block(buffer) or {}
+            data = _parse_block(buffer)
+            # 本文がリストやスカラーの壊れたドキュメントは空として扱う（type_name / body は dict を前提にする）
+            current.data = data if isinstance(data, dict) else {}
             docs.append(current)
         buffer = []
 
