@@ -46,6 +46,8 @@ def effective_mode(norm: NormalizedMaterial, mode: str) -> str:
 class _Builder:
     def __init__(self, mat: bpy.types.Material):
         self.mat = mat
+        if mat.node_tree is None:  # Blender 4.x の materials.new() はノードを持たない（5.0 以降は常に持つ）
+            mat.use_nodes = True
         self.tree = mat.node_tree
         self.nodes = self.tree.nodes
         self.links = self.tree.links
