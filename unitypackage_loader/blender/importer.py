@@ -1089,7 +1089,7 @@ def _run_import(
                     norm = normalized[res.guid]
                     mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
                     if opts.store_props:
-                        mat_builder._store_props(bmat, norm)
+                        mat_builder.store_props(bmat, norm)
                 continue
             if bmat.name in replaced:
                 if res.guid:

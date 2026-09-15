@@ -107,7 +107,7 @@ def build_material(
     alpha_mode = "opaque" if opts.force_opaque else norm.alpha_mode
     _apply_settings(mat, norm, alpha_mode, opts)
     if opts.store_props:
-        _store_props(mat, norm)
+        store_props(mat, norm)
     if mode == MODE_NAMES_ONLY:
         return mode, warnings
 
@@ -390,7 +390,8 @@ def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mod
     mat.diffuse_color = (*norm.base_color[:3], 1.0)
 
 
-def _store_props(mat: bpy.types.Material, norm: NormalizedMaterial) -> None:
+def store_props(mat: bpy.types.Material, norm: NormalizedMaterial) -> None:
+    """Unity 側の情報をカスタムプロパティに残す（別のモードでの再構築と、インポーターが作ったマテリアルを残す場合の記録に使う）。"""
     mat["unity_material_guid"] = norm.source_guid
     mat["unity_material_path"] = norm.source_path
     mat["unity_shader_guid"] = norm.shader_guid or ""
