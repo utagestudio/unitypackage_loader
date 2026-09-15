@@ -141,6 +141,28 @@ def _from_prefab(
     return best, warning
 
 
+def fully_replaced_materials(
+    object_slots: dict[str, list[str]],
+    assignments: dict[tuple[str, int], str],
+    resolution: dict[str, "MaterialResolution"],
+) -> set[str]:
+    """prefab の割り当てで、使われているすべてのスロットが別の .mat に差し替わるマテリアルの名前。
+
+    こうしたマテリアルは組み立てても差し替えで捨てるだけなので、組み立てを省ける（#77）。
+    どのメッシュのスロットにも使われていないマテリアルは含めない。
+    """
+    all_replaced: dict[str, bool] = {}
+    for obj_name, slots in object_slots.items():
+        for index, name in enumerate(slots):
+            if not name:
+                continue
+            target = assignments.get((obj_name, index))
+            current = resolution.get(name)
+            replaced = target is not None and (current is None or current.guid != target)
+            all_replaced[name] = all_replaced.get(name, True) and replaced
+    return {name for name, replaced in all_replaced.items() if replaced}
+
+
 def slot_assignments(
     object_slots: dict[str, list[str]],
     prefab_table: dict[str, RendererMaterials] | None,
