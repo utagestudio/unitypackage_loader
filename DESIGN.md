@@ -353,9 +353,10 @@ unitypackage_loader/
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
 │   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は hierarchy.py）
-│   ├─ units.py                  # 読み込む単位（Prefabs / Models）の候補と既定値
+│   ├─ units.py                  # 読み込む単位（Scenes / Prefabs / Models）の候補と既定値
 │   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
 │   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
+│   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
@@ -367,10 +368,13 @@ unitypackage_loader/
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
 ├─ blender/                      # bpy 依存
-│   ├─ importer.py               # 全体オーケストレーション
+│   ├─ importer.py               # 全体の流れ（prepare_package、1 回のインポートの状態と手順 _ImportSession）
+│   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
-│   ├─ textures.py               # 画像読み込み・カラースペース
-│   └─ props.py                  # Scene / WindowManager プロパティ
+│   ├─ nodes.py                  # ノードの組み立ての共通関数
+│   ├─ toon_group.py             # UnityToon ノードグループ
+│   ├─ outline.py                # Solidify によるアウトライン
+│   └─ textures.py               # 画像読み込み・カラースペース
 └─ tests/
     ├─ test_unity_yaml.py        # pytest（bpy 不要）
     ├─ test_mapping.py

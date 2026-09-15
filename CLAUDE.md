@@ -43,7 +43,7 @@
 ```
 unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
-  blender/                bpy 依存（importer / materials / textures / toon_group / outline）
+  blender/                bpy 依存（importer / scene_objects / materials / nodes / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
