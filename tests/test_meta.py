@@ -172,6 +172,14 @@ class HelpersTests(unittest.TestCase):
         self.assertEqual(strip_numeric_suffix("Body.1"), "Body.1")
         self.assertEqual(strip_numeric_suffix("v1.0"), "v1.0")
         self.assertEqual(strip_numeric_suffix("Body"), "Body")
+        # Blender は同名が 1000 を超えると 4 桁以上の連番を付ける（#67）
+        self.assertEqual(strip_numeric_suffix("Pole.1003"), "Pole")
+        self.assertEqual(strip_numeric_suffix("Arm.L.1000000"), "Arm.L")
+        self.assertEqual(strip_numeric_suffix("Body.00\u0661"), "Body.00\u0661")  # ASCII 以外の数字は連番とみなさない
+
+    def test_resolve_material_with_long_suffix(self):
+        info = ModelImporterInfo(external_materials={"Pole": "a" * 32})
+        self.assertEqual(info.resolve_material("Pole.1003"), "a" * 32)
 
 
 if __name__ == "__main__":
