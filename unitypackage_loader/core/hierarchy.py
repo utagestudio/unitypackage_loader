@@ -286,6 +286,8 @@ class Hierarchy:
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
     unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）
     missing_sources: int = 0  # 元がパッケージに無い PrefabInstance
+    # MAX_NESTING で打ち切った PrefabInstance を含む（キャッシュした深さより浅い位置から使うときは展開し直す）
+    depth_truncated: bool = False
 
     def children(self) -> dict[int, list[int]]:
         result: dict[int, list[int]] = {}
@@ -308,7 +310,8 @@ class Expander:
         self._models = {g.lower(): name for g, name in model_names.items()}  # モデルの GUID → ルートの名前
         # モデルの GUID → 古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける）
         self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
-        self._cache: dict[str, Hierarchy | None] = {}
+        # GUID → (展開結果, 深さで打ち切ったときの展開時のスタックの長さ。打ち切りが無ければ None)
+        self._cache: dict[str, tuple[Hierarchy | None, int | None]] = {}
 
     def expand_asset(self, guid: str) -> Hierarchy | None:
         return self._asset(guid.lower(), ())
@@ -318,13 +321,23 @@ class Expander:
         return self._build(raw, ())
 
     def _asset(self, guid: str, stack: tuple[str, ...]) -> Hierarchy | None:
-        if guid in self._cache:
-            return self._cache[guid]
+        """prefab を展開する（結果はキャッシュする）。
+
+        深さの上限で中の PrefabInstance を打ち切った結果は、同じかそれより深い位置からだけ使い回し、浅い位置から
+        呼ばれたら展開し直す（打ち切らずに済むため）。展開し直しは GUID ごとに深さの数までに収まる。
+        循環参照（Unity では作れない不正なデータ）で外した結果は、そのまま使い回す。循環のたびに展開し直すと、
+        細工されたデータで回数が指数的に増えるため。
+        """
+        cached = self._cache.get(guid)
+        if cached is not None:
+            result, truncated_at = cached
+            if truncated_at is None or len(stack) >= truncated_at:
+                return result
         if guid in stack or len(stack) >= MAX_NESTING:
             return None
         raw = self._read(guid)
         result = self._build(raw, stack + (guid,)) if raw is not None else None
-        self._cache[guid] = result
+        self._cache[guid] = (result, len(stack) if result is not None and result.depth_truncated else None)
         return result
 
     def _model(self, guid: str) -> Hierarchy:
@@ -389,10 +402,13 @@ class Expander:
     def _insert(self, h: Hierarchy, instance: _RawInstance, resolve, stack) -> None:
         source = instance.source_guid
         is_model = source in self._models
+        if not is_model and source not in stack and len(stack) >= MAX_NESTING:
+            h.depth_truncated = True
         sub = self._model(source) if is_model else self._asset(source, stack)
         if sub is None:
             h.missing_sources += 1
             return
+        h.depth_truncated = h.depth_truncated or sub.depth_truncated
         iid = instance.file_id
         parent = resolve(instance.parent) if instance.parent else None
         added: dict[int, int] = {}  # 元の key → 差し込んだ key
