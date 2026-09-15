@@ -6,17 +6,14 @@
 
 from __future__ import annotations
 
-import json
-import math
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
-from ..core.arrange import arrange_offsets
 from ..core.hierarchy import (
     CLASS_CAMERA,
     CLASS_LIGHT,
@@ -28,10 +25,9 @@ from ..core.hierarchy import (
     summarize,
 )
 from ..core.hierarchy import components as scene_components
-from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
-from ..core.unity_yaml import UnityRef
+from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light, detect_pipeline
 from ..core.fbx_units import read_unit_scale
-from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
+from ..core.transform import unity_to_blender
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
@@ -53,6 +49,21 @@ from ..core.units import (
 from ..ui.preferences import get_prefs
 from . import materials as mat_builder
 from . import outline as outline_builder
+from .scene_objects import (
+    SceneTemplate,
+    defer_hide,
+    apply_node_transforms,
+    apply_offsets,
+    arrange_collections,
+    attach_to_empty,
+    duplicate_objects,
+    find_layer_collection,
+    json_text,
+    make_camera,
+    make_light,
+    move_collection_contents,
+    scene_empty,
+)
 from .textures import load_image
 
 _ROOT_PACKAGE = __package__.rsplit(".", 1)[0]  # bl_ext.<repo>.unitypackage_loader
@@ -468,16 +479,6 @@ def vrm_addon_available() -> bool:
     return operator_available("import_scene", "vrm")
 
 
-def _find_layer_collection(layer_coll, target):
-    if layer_coll.collection == target:
-        return layer_coll
-    for child in layer_coll.children:
-        found = _find_layer_collection(child, target)
-        if found is not None:
-            return found
-    return None
-
-
 def _sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
     """OBJ の .mtl、glTF の .bin など、モデルと同じフォルダに置くべきファイルの GUID。"""
     exts = _SIDECAR_EXTS.get(model.ext)
@@ -608,33 +609,6 @@ def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_Import
     return groups
 
 
-def _collection_bounds(collection: bpy.types.Collection):
-    """コレクション内のメッシュのワールド座標での外形。メッシュが無ければ None。"""
-    lo, hi = [float("inf")] * 3, [float("-inf")] * 3
-    for obj in collection.all_objects:
-        if obj.type != "MESH":
-            continue
-        for corner in obj.bound_box:
-            point = obj.matrix_world @ Vector(corner)
-            for axis in range(3):
-                lo[axis] = min(lo[axis], point[axis])
-                hi[axis] = max(hi[axis], point[axis])
-    return (tuple(lo), tuple(hi)) if lo[0] <= hi[0] else None
-
-
-def _arrange_collections(context, collections: list[bpy.types.Collection]) -> None:
-    """prefab ごとのコレクションを、外形が重ならないように並べる（親を持たないオブジェクトを動かす）。"""
-    context.view_layer.update()
-    offsets = arrange_offsets([_collection_bounds(c) for c in collections])
-    for coll, (dx, dy) in zip(collections, offsets):
-        if not (dx or dy):
-            continue
-        for obj in coll.all_objects:
-            if obj.parent is None:
-                obj.location.x += dx
-                obj.location.y += dy
-
-
 def _select_scenes(prepared: PreparedPackage, opts: ImportOptions) -> list[SceneSummary]:
     supported = prepared.supported_scenes
     if opts.scene_paths is not None:
@@ -643,250 +617,6 @@ def _select_scenes(prepared: PreparedPackage, opts: ImportOptions) -> list[Scene
     if opts.models == "FIRST":
         return supported[:1]
     return supported
-
-
-@dataclass
-class _SceneTemplate:
-    """シーンで最初に読み込んだモデルのオブジェクトと、原点にあったときの状態（複製と位置の補正に使う）。"""
-
-    objects: list[bpy.types.Object]
-    basis: dict[bpy.types.Object, Matrix]
-    hide_render: dict[bpy.types.Object, bool]
-
-    @classmethod
-    def capture(cls, objects: list[bpy.types.Object]) -> _SceneTemplate:
-        # matrix_world は depsgraph の評価が要るので持たない（数千回の読み込みでシーン全体を評価し直すと重い）
-        return cls(list(objects), {o: o.matrix_basis.copy() for o in objects}, {o: o.hide_render for o in objects})
-
-
-def _scene_empty(
-    hierarchy: Hierarchy, key: int, collection, empties: dict[int, bpy.types.Object], active: dict[int, bool], hidden: list
-):
-    """Node と、まだ作っていない祖先の Empty を作り、Node の Empty を返す（Unity の親子関係を再現する）。
-
-    非アクティブな Node の Empty は ``hidden`` に加える（読み込み中はビューレイヤーに無いので、後で ``hide_set`` する）。
-    """
-    path: list[int] = []
-    seen: set[int] = set()
-    current: int | None = key
-    while current is not None and current in hierarchy.nodes and current not in empties and current not in seen:
-        path.append(current)
-        seen.add(current)
-        current = hierarchy.nodes[current].parent
-    parent = empties.get(current) if current is not None else None
-    for node_key in reversed(path):
-        node = hierarchy.nodes[node_key]
-        empty = bpy.data.objects.new(node.name or "GameObject", None)
-        empty.empty_display_type = "PLAIN_AXES"
-        empty.empty_display_size = 0.1
-        collection.objects.link(empty)
-        empty.parent = parent
-        empty.matrix_basis = Matrix(unity_to_blender(node.local))
-        empty["unity_game_object"] = node.name
-        if not active.get(node_key, True):
-            _hide(empty, hidden)
-        empties[node_key] = empty
-        parent = empty
-    return empties.get(key, parent)
-
-
-def _json_text(body: dict) -> str:
-    """コンポーネントの中身をカスタムプロパティ用の JSON にする（参照は fileID / guid の辞書にする）。"""
-
-    def default(value):
-        if isinstance(value, UnityRef):
-            return {"fileID": value.file_id, "guid": value.guid, "type": value.type}
-        return str(value)
-
-    return json.dumps(body, ensure_ascii=False, default=default)
-
-
-def _make_light(name: str, values: BlenderLight) -> bpy.types.Object:
-    data = bpy.data.lights.new(name or "Light", values.type)
-    data.color = values.color
-    data.energy = values.energy
-    data.use_shadow = values.use_shadow
-    data.shadow_soft_size = values.shadow_soft_size
-    if values.use_temperature:
-        data.use_temperature = True
-        data.temperature = values.temperature
-    if values.type == "SUN":
-        data.angle = values.angle
-    if values.type in {"POINT", "SPOT"}:
-        data.use_soft_falloff = False  # 近くで弱める補正を切り、Unity と同じく点光源として扱う
-    if values.type == "SPOT":
-        data.spot_size = values.spot_size
-        data.spot_blend = values.spot_blend
-    if values.type == "AREA":
-        data.shape = values.shape
-        data.size = values.size
-        data.size_y = values.size_y
-    if values.use_custom_distance:
-        data.use_custom_distance = True
-        data.cutoff_distance = values.cutoff_distance
-    return bpy.data.objects.new(name or "Light", data)
-
-
-def _make_camera(name: str, values: BlenderCamera) -> bpy.types.Object:
-    data = bpy.data.cameras.new(name or "Camera")
-    data.type = values.type
-    data.sensor_fit = values.sensor_fit
-    data.sensor_width = values.sensor_width
-    data.sensor_height = values.sensor_height
-    data.lens = max(values.lens, 1.0)
-    data.ortho_scale = values.ortho_scale
-    data.clip_start = values.clip_start
-    data.clip_end = values.clip_end
-    data.shift_x = values.shift_x
-    data.shift_y = values.shift_y
-    return bpy.data.objects.new(name or "Camera", data)
-
-
-def _attach_to_empty(objects: list[bpy.types.Object], root, scale: float) -> None:
-    """モデルの最上位のオブジェクトを配置の Empty の子にする。.meta の globalScale はモデルのルートで掛ける。"""
-    if root is None:
-        return
-    members = set(objects)
-    inverse = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 and scale != 1 else Matrix.Identity(4)
-    for obj in objects:
-        if obj.parent is None or obj.parent not in members:
-            obj.parent = root
-            obj.matrix_parent_inverse = inverse
-
-
-def _duplicate_objects(template: _SceneTemplate, collection) -> list[bpy.types.Object]:
-    """テンプレートのオブジェクトを、データ（メッシュ・アーマチュア）を共有したまま複製する。"""
-    mapping = {}
-    for obj in template.objects:
-        copy = obj.copy()
-        collection.objects.link(copy)
-        mapping[obj] = copy
-    for original, copy in mapping.items():
-        copy.parent = mapping.get(original.parent)
-        copy.matrix_basis = template.basis[original]
-        copy.hide_render = template.hide_render[original]
-        for modifier in copy.modifiers:
-            if getattr(modifier, "object", None) in mapping:
-                modifier.object = mapping[modifier.object]
-        for constraint in copy.constraints:
-            if getattr(constraint, "target", None) in mapping:
-                constraint.target = mapping[constraint.target]
-    return list(mapping.values())
-
-
-def _by_object_name(table: dict, name: str):
-    """オブジェクト名で表を引く。完全一致 → 連番を外した形の順（元の名前が数字で終わる部品を連番と取り違えない）。"""
-    if name in table:
-        return table[name]
-    return table.get(strip_numeric_suffix(name))
-
-
-def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
-    """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
-
-    Unity のノード空間の行列 L と、原点に読み込んだ Blender のオブジェクトの行列 N の関係は N = C·L·A
-    （C は Unity → Blender の基底、A = diag(-f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）。
-    Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、Unity 6 が読んだノードの値と
-    突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はその値のまま使う。
-    当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
-    """
-    f = (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
-    basis_a = Matrix.Diagonal((-f, f, f, 1.0))
-    basis_a_inverse = Matrix.Diagonal((-1.0 / f, 1.0 / f, 1.0 / f, 1.0))
-    to_blender, to_unity = Matrix(UNITY_TO_BLENDER), Matrix(BLENDER_TO_UNITY)
-    members = set(objects)
-    skipped = 0
-    for original, obj in zip(template.objects, objects):
-        spec = _by_object_name(overrides, obj.name)
-        if spec is None:
-            continue
-        nested = obj.parent in members
-        deformed = obj.type == "ARMATURE" or any(m.type == "ARMATURE" for m in getattr(obj, "modifiers", []))
-        if nested or deformed:
-            skipped += 1
-            continue
-        location, rotation, scale = (to_unity @ template.basis[original] @ basis_a_inverse).decompose()
-        position = [location.x, location.y, location.z]
-        quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
-        scaling = [scale.x, scale.y, scale.z]
-        for values, key in ((position, "position"), (quaternion, "rotation"), (scaling, "scale")):
-            for index, value in enumerate(spec.get(key, [])):
-                if value is not None and index < len(values):
-                    values[index] = value
-        local = Matrix(trs(tuple(position), tuple(quaternion), tuple(scaling)))
-        obj.matrix_basis = to_blender @ local @ basis_a
-    return skipped
-
-
-def _hide(obj: bpy.types.Object, hidden: list) -> None:
-    """レンダリングからはすぐ外し、ビューポートの非表示は ``hidden`` に積んで読み込みの後で当てる。
-
-    読み込み中のコレクションはビューレイヤーから外していて、そこにあるオブジェクトには ``hide_set`` を使えない。
-    """
-    obj.hide_render = True
-    hidden.append(obj)
-
-
-def _move_collection_contents(source: bpy.types.Collection, target: bpy.types.Collection) -> None:
-    """``source`` のオブジェクトと子コレクションを ``target`` へ移す（先にリンクしてから外す）。"""
-    for obj in list(source.objects):
-        if obj.name not in target.objects:
-            target.objects.link(obj)
-        source.objects.unlink(obj)
-    for child in list(source.children):
-        if child.name not in target.children:
-            target.children.link(child)
-        source.children.unlink(child)
-
-
-def _world_matrix(obj: bpy.types.Object | None) -> Matrix | None:
-    """評価を待たずに、親をたどって ``matrix_world`` を求める（コンストレイントは見ない）。
-
-    読み込み中のコレクションはビューレイヤーから外していて評価されないため。ボーンなどオブジェクト以外を親にするものが
-    途中にあれば None。``obj`` が None なら単位行列。
-    """
-    matrix = Matrix.Identity(4)
-    count = 0
-    while obj is not None and count < 1000:
-        if obj.parent is None:
-            return obj.matrix_basis @ matrix
-        if obj.parent_type != "OBJECT":
-            return None
-        matrix = obj.matrix_parent_inverse @ obj.matrix_basis @ matrix
-        obj, count = obj.parent, count + 1
-    return matrix if obj is None else None
-
-
-def _apply_offsets(objects, root_world, offsets, scale: float) -> int:
-    """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
-
-    ``root_world`` は配置のルートの Unity での行列。置いた直後のオブジェクトの行列は「ルートの行列 · globalScale ·
-    原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
-    行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
-    """
-    def depth(obj) -> int:
-        count = 0
-        while obj.parent is not None and count < 1000:
-            obj, count = obj.parent, count + 1
-        return count
-
-    targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
-    if not targets:
-        return 0
-    scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
-    to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
-    worlds = {o: _world_matrix(o) for o in targets}  # 動かす前にまとめて求める
-    skipped = 0
-    for obj in sorted(targets, key=depth):
-        deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
-        parent_world = _world_matrix(obj.parent)  # 親を先に動かしているので、ここで求め直す
-        if deformed or obj.type == "ARMATURE" or worlds[obj] is None or parent_world is None:
-            skipped += 1
-            continue
-        world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ to_origin @ worlds[obj]
-        frame = parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
-        obj.matrix_basis = frame.inverted_safe() @ world
-    return skipped
 
 
 # ---------------------------------------------------------------------------
@@ -1199,7 +929,7 @@ def _run_import(
         known = summary.guid in imported_models
         try:
             objects = build_model(summary, prefab_table, staging, before)
-            _move_collection_contents(staging, target)
+            move_collection_contents(staging, target)
             return objects
         except Exception:
             _remove_created(before)
@@ -1226,7 +956,7 @@ def _run_import(
         hierarchy = prepared.scene_hierarchies[scene_summary.guid]
         active = effective_active(hierarchy)
         empties: dict[int, bpy.types.Object] = {}
-        templates: dict[tuple, _SceneTemplate] = {}
+        templates: dict[tuple, SceneTemplate] = {}
         skipped_offsets = 0
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
         skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
@@ -1243,7 +973,7 @@ def _run_import(
                 continue
             if summary.guid in failed_models:
                 continue  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
-            root = _scene_empty(hierarchy, placement.root, target, empties, active, hidden_objects)
+            root = scene_empty(hierarchy, placement.root, target, empties, active, hidden_objects)
             table = {
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
                 for name, r in placement.renderers.items()
@@ -1256,22 +986,22 @@ def _run_import(
                 except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
                     _record_failure(report, f"scene {pathname}: could not import {summary.entry.pathname}: {exc}")
                     continue
-                template = templates[key] = _SceneTemplate.capture(objects)
+                template = templates[key] = SceneTemplate.capture(objects)
             else:
-                objects = _duplicate_objects(template, target)
+                objects = duplicate_objects(template, target)
                 report.objects.extend(o.name for o in objects)
             scale = summary.info.global_scale
-            _attach_to_empty(objects, root, scale)
+            attach_to_empty(objects, root, scale)
             if placement.node_transforms:
                 if summary.guid not in unit_scales:
                     unit_scales[summary.guid] = read_unit_scale(paths[summary.guid]) if summary.entry.ext == ".fbx" else None
-                skipped_nodes += _apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
+                skipped_nodes += apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
             if placement.offsets:
-                skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale)
+                skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
             hide, unused = parts_to_hide(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
             for obj in objects:
                 if obj.name in hide:
-                    _hide(obj, hidden_objects)
+                    defer_hide(obj, hidden_objects)
             hidden_unused += unused
 
         # --- ライト・カメラ ---
@@ -1284,19 +1014,19 @@ def _run_import(
                 # 同じ GameObject にモデルの配置の Empty があれば、その子にする
                 parent, local = empties[component.node], Matrix.Identity(4)
             else:
-                parent = _scene_empty(hierarchy, node.parent, target, empties, active, hidden_objects) if node.parent is not None else None
+                parent = scene_empty(hierarchy, node.parent, target, empties, active, hidden_objects) if node.parent is not None else None
                 local = Matrix(unity_to_blender(node.local))
             if component.class_id == CLASS_LIGHT:
                 values = convert_light(component.body, prepared.pipeline)
-                obj = _make_light(component.name, values)
-                obj["unity_light"] = _json_text(component.body)
+                obj = make_light(component.name, values)
+                obj["unity_light"] = json_text(component.body)
                 obj["unity_render_pipeline"] = prepared.pipeline
                 baked_lights += values.baked_only
                 light_notes.update(values.notes)
                 report.lights += 1
             else:
-                obj = _make_camera(component.name, convert_camera(component.body))
-                obj["unity_camera"] = _json_text(component.body)
+                obj = make_camera(component.name, convert_camera(component.body))
+                obj["unity_camera"] = json_text(component.body)
                 report.cameras += 1
                 if scene.camera is None and component.active:
                     scene.camera = obj
@@ -1305,7 +1035,7 @@ def _run_import(
             location, rotation, _ = (local @ Matrix(LIGHT_CAMERA_BASIS)).decompose()
             obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
             if not component.active:
-                _hide(obj, hidden_objects)
+                defer_hide(obj, hidden_objects)
         for message in scene_warnings(
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
             hidden_unused=hidden_unused, skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets,
@@ -1318,8 +1048,8 @@ def _run_import(
     # インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのものが増えるほど 1 回が重くなる
     # （Japanese Street の Day_Showcase では 1 回 70 ms。3000 オブジェクトで 180 ms、ビューレイヤーから外すと 5 ms）。
     # パッケージのコレクションは読み込みが終わるまでビューレイヤーから外し、モデルは空の作業用コレクションに読み込んでから移す（#75）
-    package_layer = _find_layer_collection(view_layer.layer_collection, collection)
-    staging_layer = _find_layer_collection(view_layer.layer_collection, staging)
+    package_layer = find_layer_collection(view_layer.layer_collection, collection)
+    staging_layer = find_layer_collection(view_layer.layer_collection, staging)
     if staging_layer is not None:
         view_layer.active_layer_collection = staging_layer
     if package_layer is not None:
@@ -1364,7 +1094,7 @@ def _run_import(
         if not _is_removed(obj):
             obj.hide_set(True)
     if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
-        _arrange_collections(context, prefab_collections)
+        arrange_collections(context, prefab_collections)
 
     collection["unity_package"] = package_path.name
     step(1.0, "Done")
