@@ -190,6 +190,46 @@ def parse_material(text: str | bytes, guid: str = "", pathname: str = "") -> Uni
     return mat
 
 
+GRAY: Color = (0.8, 0.8, 0.8, 1.0)
+
+
+@dataclass
+class ToonShadow:
+    """Toon ノードグループ（UnityToon）の影。
+
+    明るさが ``border`` を下回るところで、ベースカラーに ``color`` を掛けた色を ``strength`` の割合で混ぜる。
+    ``blur`` は境界のぼかし幅。
+    """
+
+    color: Color = GRAY
+    strength: float = 1.0
+    border: float = 0.5
+    blur: float = 0.1
+
+
+@dataclass
+class ToonMatCap:
+    """Toon ノードグループの MatCap。``tex`` は画像の GUID、``mode`` は MATCAP_NORMAL / ADD / SCREEN / MULTIPLY。"""
+
+    tex: str
+    color: Color = WHITE
+    strength: float = 1.0
+    mode: int = 0  # MATCAP_NORMAL
+
+
+@dataclass
+class ToonRim:
+    """Toon ノードグループのリム。視線に対して横を向くほど強くなり、``border`` から ``blur`` の幅で立ち上がる。"""
+
+    color: Color = WHITE
+    strength: float = 1.0
+    border: float = 0.5
+    blur: float = 0.1
+
+
+_TOON_TYPES = {"shadow": ToonShadow, "matcap": ToonMatCap, "rim": ToonRim}
+
+
 @dataclass
 class NormalizedMaterial:
     """Blender ノード生成に必要な情報だけを持つ、シェーダー非依存の表現。"""
@@ -215,7 +255,11 @@ class NormalizedMaterial:
     cull_backface: bool = True
     uv_scale: tuple[float, float] = (1.0, 1.0)
     uv_offset: tuple[float, float] = (0.0, 0.0)
-    extras: dict[str, Any] = field(default_factory=dict)
+    # Toon ノードグループに渡す値（トゥーン系のプロファイルが換算して入れる。Toon の組み立てはこれだけを読む）
+    shadow: ToonShadow | None = None
+    matcap: ToonMatCap | None = None
+    rim: ToonRim | None = None
+    extras: dict[str, Any] = field(default_factory=dict)  # 組み立てには使わない参考値（カスタムプロパティに保存する）
     warnings: list[str] = field(default_factory=list)
     source_guid: str = ""
     source_path: str = ""
@@ -255,10 +299,15 @@ class NormalizedMaterial:
                     scale=tuple(value.get("scale", (1.0, 1.0))),
                     offset=tuple(value.get("offset", (0.0, 0.0))),
                 )
+            elif key in _TOON_TYPES:
+                kwargs[key] = _toon_value(_TOON_TYPES[key], value)
             elif key in ("base_color", "emission_color", "uv_scale", "uv_offset"):
                 kwargs[key] = tuple(value)
             else:
                 kwargs[key] = value
+        if not any(key in data for key in _TOON_TYPES):
+            # 1.7.4 までに保存した unity_normalized は型付きの値を持たないので、当時と同じ換算で extras から補う
+            kwargs["shadow"], kwargs["matcap"], kwargs["rim"] = toon_values_from_extras(kwargs.get("extras") or {})
         kwargs.setdefault("name", "")
         return cls(**kwargs)
 
@@ -278,6 +327,8 @@ class NormalizedMaterial:
                     walk(v)
 
         walk(self.extras)
+        if self.matcap is not None and self.matcap.tex not in found:
+            found.append(self.matcap.tex)
         return found
 
 
@@ -299,3 +350,87 @@ def matcap_blend_mode(matcap: dict[str, Any]) -> int:
     if mode is None or not MATCAP_NORMAL <= mode <= MATCAP_MULTIPLY:
         mode = MATCAP_ADD if matcap.get("additive") else MATCAP_NORMAL
     return mode
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def toon_color(value: Any, default: Color) -> Color:
+    """色（3 か 4 要素のリスト・タプル）を RGBA のタプルにする。読めなければ ``default``。"""
+    if isinstance(value, (list, tuple)) and len(value) >= 3:
+        try:
+            rgba = [float(v) for v in value[:4]]
+        except (TypeError, ValueError):
+            return default
+        while len(rgba) < 4:
+            rgba.append(1.0)
+        return tuple(rgba)
+    return default
+
+
+def _toon_value(cls, value: Any):
+    """保存した JSON の dict を ToonShadow などに戻す。形が合わなければ None。"""
+    if not isinstance(value, dict):
+        return None
+    names = {f.name for f in fields(cls)}
+    kwargs = {k: tuple(v) if k == "color" and isinstance(v, list) else v for k, v in value.items() if k in names}
+    try:
+        return cls(**kwargs)
+    except TypeError:  # 必須の tex が無いなど
+        return None
+
+
+def toon_values_from_extras(extras: dict[str, Any]) -> tuple[ToonShadow | None, ToonMatCap | None, ToonRim | None]:
+    """extras の ``shadow`` / ``shade`` / ``matcap`` / ``rim`` から Toon ノードグループの値を作る。
+
+    1.7.4 までの Toon の組み立て（blender/materials.py）が extras を直接読んでいたときと同じ換算。
+    lilToon と MToon のプロファイルがこれで値を埋めるほか、型付きの値を持たない古い ``unity_normalized`` を
+    組み直すときにも使う（当時と同じ見た目になる）。
+    """
+    shadow = None
+    source = extras.get("shadow") or {}
+    shade = extras.get("shade") or {}
+    if isinstance(source, dict) and source:
+        shadow = ToonShadow(
+            color=toon_color(source.get("color"), GRAY),
+            strength=_float(source.get("strength", 1.0), 1.0),
+            border=_float(source.get("border", 0.5), 0.5),
+            blur=_float(source.get("blur", 0.1), 0.1),
+        )
+    elif isinstance(shade, dict) and shade:  # MToon: 影色は直接色、toony が高いほど境界が硬い
+        shadow = ToonShadow(
+            color=toon_color(shade.get("color"), GRAY),
+            strength=1.0,
+            border=clamp01(0.5 - 0.5 * _float(shade.get("shift", 0.0), 0.0)),
+            blur=max(0.02, 1.0 - _float(shade.get("toony", 0.9), 0.9)),
+        )
+
+    matcap = None
+    source = extras.get("matcap") or {}
+    if isinstance(source, dict) and source.get("tex"):
+        color = toon_color(source.get("color"), WHITE)
+        matcap = ToonMatCap(
+            tex=str(source["tex"]),
+            color=color,
+            strength=clamp01(_float(source.get("blend", 1.0), 1.0) * color[3]),
+            mode=matcap_blend_mode(source),
+        )
+
+    rim = None
+    source = extras.get("rim") or {}
+    if isinstance(source, dict) and source:
+        color = toon_color(source.get("color"), WHITE)
+        rim = ToonRim(
+            color=color,
+            strength=color[3] if any(c > 0 for c in color[:3]) else 0.0,
+            border=_float(source.get("border", 0.5), 0.5),
+        )
+    return shadow, matcap, rim

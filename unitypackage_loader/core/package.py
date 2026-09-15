@@ -11,6 +11,7 @@ tar.gz はランダムアクセスできないため、
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tarfile
@@ -58,6 +59,7 @@ class AssetEntry:
     pathname: str = ""
     has_asset: bool = False
     size: int = 0
+    mtime: int = 0  # tar メンバーの更新時刻（展開済みファイルが同じものかの判定に使う）
     meta_text: str | None = None
     _cache: bytes | None = field(default=None, repr=False)
 
@@ -86,6 +88,44 @@ class AssetEntry:
         if ext in SCENE_EXTS:
             return "scene"
         return "other"
+
+
+# 展開先に置く記録。展開したファイルの相対パス → 書き出した元の tar メンバーの GUID・サイズ・更新時刻（#72）
+EXTRACT_RECORD_NAME = ".unitypackage_importer.json"
+_RECORD_MAX_SIZE = 32 << 20
+
+
+def _identity(entry: "AssetEntry") -> dict[str, object]:
+    return {"guid": entry.guid, "size": entry.size, "mtime": entry.mtime}
+
+
+def _load_record(dest_root: Path) -> dict[str, object]:
+    """展開先の記録を読む。無い・壊れている・symlink なら空（どのファイルも使い回さない）。"""
+    path = dest_root / EXTRACT_RECORD_NAME
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > _RECORD_MAX_SIZE:
+            return {}
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    files = data.get("files") if isinstance(data, dict) else None
+    return files if isinstance(files, dict) else {}
+
+
+def _save_record(dest_root: Path, files: dict[str, object]) -> None:
+    """記録を書く。symlink を通しては書かない。書けなくても展開は済んでいるので、次回に書き直すだけにする。"""
+    path = dest_root / EXTRACT_RECORD_NAME
+    temp = path.with_name(path.name + ".tmp")
+    _reject_symlinks(dest_root, path)
+    _reject_symlinks(dest_root, temp)
+    data = json.dumps({"version": 1, "files": files}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        with _open_for_write(temp) as f:
+            f.write(data)
+        os.replace(temp, path)
+    except OSError:
+        pass
 
 
 def _split_member(name: str) -> tuple[str, str] | None:
@@ -213,6 +253,7 @@ class UnityPackage:
                     elif part == "asset":
                         entry.has_asset = True
                         entry.size = member.size
+                        entry.mtime = int(member.mtime)
                         if member.size <= _CACHE_MAX_SIZE:
                             entry._cache = tar.extractfile(member).read()
                     if progress is not None:
@@ -308,10 +349,13 @@ class UnityPackage:
         overwrite: bool = False,
         progress: ProgressFn | None = None,
         max_total_size: int = 0,
+        written: set[str] | None = None,
     ) -> dict[str, Path]:
         """指定 GUID の ``asset`` を ``dest_root/<pathname>`` に書き出し、GUID → パスを返す。
 
-        既に同じサイズのファイルがあれば ``overwrite=False`` のとき書き出しをスキップする。
+        ``overwrite=False`` なら、既にあるファイルのうち、展開先の記録（``EXTRACT_RECORD_NAME``）で元の tar メンバーの
+        GUID・サイズ・更新時刻が一致するものは書き出さない。サイズだけでは、同じ名前・同じサイズの別のファイル
+        （同じアセットの新しい版など）と区別できないため（#72）。実際に書き出した GUID は ``written`` に加える。
         書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せていても実際に書く量）が
         ``max_total_size``（0 は無制限）を超えるか、展開先の空き容量に収まらなければ何も書かずに ``PackageError``。
         """
@@ -323,13 +367,20 @@ class UnityPackage:
             if entry is not None and entry.has_asset and entry.pathname:
                 wanted[entry.guid] = entry
 
+        record = _load_record(dest_root)
         result: dict[str, Path] = {}
         pending: dict[str, Path] = {}
         for guid, entry in wanted.items():
-            target = dest_root / safe_relative_path(entry.pathname)
+            relative = safe_relative_path(entry.pathname)
+            target = dest_root / relative
             _reject_symlinks(dest_root, target)
             result[guid] = target
-            if not overwrite and target.is_file() and target.stat().st_size == entry.size:
+            if (
+                not overwrite
+                and target.is_file()
+                and target.stat().st_size == entry.size
+                and record.get(str(relative)) == _identity(entry)
+            ):
                 continue
             pending[guid] = target
 
@@ -362,8 +413,13 @@ class UnityPackage:
                     while chunk := src.read(1 << 20):
                         dst.write(chunk)
                 done += 1
+                entry = wanted[split[0]]
+                record[str(safe_relative_path(entry.pathname))] = _identity(entry)
+                if written is not None:
+                    written.add(entry.guid)
                 if progress is not None:
                     progress(done / (done + len(pending)), target.name)
                 if not pending:
                     break
+        _save_record(dest_root, record)
         return result

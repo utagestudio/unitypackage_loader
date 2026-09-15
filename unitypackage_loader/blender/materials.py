@@ -8,7 +8,7 @@ from typing import Any
 
 import bpy
 
-from ..core.material import NormalizedMaterial, TexRef, matcap_blend_mode
+from ..core.material import GRAY, WHITE, NormalizedMaterial, TexRef, toon_color
 from ..core.meta import TextureImporterInfo
 
 MODE_PRINCIPLED = "PRINCIPLED"
@@ -319,24 +319,18 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
     normal_out = _normal_output(b, norm, mapping_out, images, tex_infos, warnings, opts, 1)
     b.link(normal_out, group.inputs["Normal"])
 
-    extras = norm.extras
-    shadow = extras.get("shadow") or {}
-    shade = extras.get("shade") or {}
-    if shadow:
-        group.inputs["Shadow Color"].default_value = _rgba(shadow.get("color"), (0.8, 0.8, 0.8, 1.0))
-        group.inputs["Shadow Strength"].default_value = float(shadow.get("strength", 1.0))
-        group.inputs["Shadow Border"].default_value = float(shadow.get("border", 0.5))
-        group.inputs["Shadow Blur"].default_value = float(shadow.get("blur", 0.1))
-    elif shade:  # MToon: 影色は直接色、toony が高いほど境界が硬い
-        group.inputs["Shadow Color"].default_value = _rgba(shade.get("color"), (0.8, 0.8, 0.8, 1.0))
-        group.inputs["Shadow Strength"].default_value = 1.0
-        group.inputs["Shadow Border"].default_value = max(0.0, min(1.0, 0.5 - 0.5 * float(shade.get("shift", 0.0))))
-        group.inputs["Shadow Blur"].default_value = max(0.02, 1.0 - float(shade.get("toony", 0.9)))
+    # 影・MatCap・リムは、プロファイルが換算した型付きの値だけを読む（extras のキーの名前には依らない。#73）
+    shadow = norm.shadow
+    if shadow is not None:
+        group.inputs["Shadow Color"].default_value = toon_color(shadow.color, GRAY)
+        group.inputs["Shadow Strength"].default_value = float(shadow.strength)
+        group.inputs["Shadow Border"].default_value = float(shadow.border)
+        group.inputs["Shadow Blur"].default_value = float(shadow.blur)
     else:
         group.inputs["Shadow Strength"].default_value = 0.0
 
-    matcap = extras.get("matcap") or {}
-    matcap_img = images.get(matcap.get("tex")) if matcap.get("tex") else None
+    matcap = norm.matcap
+    matcap_img = images.get(matcap.tex) if matcap is not None else None
     if matcap_img is not None:
         geo_n = b.add("ShaderNodeVectorTransform", 0, label="MatCap UV")
         geo_n.vector_type = "NORMAL"
@@ -348,11 +342,11 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         uv.inputs[1].default_value = (0.5, 0.5, 0.0)
         uv.inputs[2].default_value = (0.5, 0.5, 0.0)
         b.link(geo_n.outputs["Vector"], uv.inputs[0])
-        tex = b.image(matcap_img, None, tex_infos.get(matcap.get("tex")), 1, "MatCap")
+        tex = b.image(matcap_img, None, tex_infos.get(matcap.tex), 1, "MatCap")
         tex.extension = "EXTEND"
         b.link(uv.outputs["Vector"], tex.inputs["Vector"])
         mc_out = tex.outputs["Color"]
-        mc_color = _rgba(matcap.get("color"), (1.0, 1.0, 1.0, 1.0))
+        mc_color = toon_color(matcap.color, WHITE)
         if any(abs(c - 1.0) > 1e-4 for c in mc_color[:3]):
             tint = b.add("ShaderNodeMix", 2, label="MatCap Color")
             tint.data_type = "RGBA"
@@ -362,18 +356,18 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
             b.link(mc_out, _socket(tint.inputs, "A_Color"))
             mc_out = _socket(tint.outputs, "Result_Color")
         b.link(mc_out, group.inputs["MatCap"])
-        strength = float(matcap.get("blend", 1.0)) * mc_color[3]
-        group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, strength))
-        group.inputs["MatCap Mode"].default_value = float(matcap_blend_mode(matcap))
-    elif matcap.get("tex"):
+        group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, float(matcap.strength)))
+        group.inputs["MatCap Mode"].default_value = float(matcap.mode)
+    elif matcap is not None:
         warnings.append("matcap texture could not be loaded")
 
-    rim = extras.get("rim") or {}
-    if rim:
-        rim_color = _rgba(rim.get("color"), (1.0, 1.0, 1.0, 1.0))
+    rim = norm.rim
+    if rim is not None:
+        rim_color = toon_color(rim.color, WHITE)
         group.inputs["Rim Color"].default_value = (*rim_color[:3], 1.0)
-        group.inputs["Rim Strength"].default_value = rim_color[3] if any(c > 0 for c in rim_color[:3]) else 0.0
-        group.inputs["Rim Border"].default_value = float(rim.get("border", 0.5))
+        group.inputs["Rim Strength"].default_value = float(rim.strength)
+        group.inputs["Rim Border"].default_value = float(rim.border)
+        group.inputs["Rim Blur"].default_value = float(rim.blur)
 
     if opts.use_emission and norm.has_emission:
         group.inputs["Emission Strength"].default_value = norm.emission_strength
@@ -394,15 +388,6 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
             b.link(e_out, group.inputs["Emission"])
         else:
             group.inputs["Emission"].default_value = (*norm.emission_color[:3], 1.0)
-
-
-def _rgba(value, default):
-    if isinstance(value, (list, tuple)) and len(value) >= 3:
-        rgba = [float(v) for v in value[:4]]
-        while len(rgba) < 4:
-            rgba.append(1.0)
-        return tuple(rgba)
-    return default
 
 
 def _apply_settings(mat: bpy.types.Material, norm: NormalizedMaterial, alpha_mode: str, opts: MaterialBuildOptions) -> None:

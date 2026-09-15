@@ -1,4 +1,5 @@
 import io
+import json
 import shutil
 import tarfile
 import tempfile
@@ -113,6 +114,58 @@ class SyntheticPackageTests(unittest.TestCase):
         before = paths[GUID_TEX].stat().st_mtime_ns
         self.pkg.extract([GUID_TEX], dest)
         self.assertEqual(paths[GUID_TEX].stat().st_mtime_ns, before)
+
+    def test_extract_rewrites_same_size_file_from_another_package(self):
+        # 同じ名前・同じサイズでも、別のパッケージ（同じアセットの新しい版など）のファイルは書き直す（#72）
+        dest = Path(self.tmp.name) / "out"
+        self.pkg.extract([GUID_TEX], dest)
+        other = Path(self.tmp.name) / "other" / "example.unitypackage"
+        other.parent.mkdir()
+        with tarfile.open(other, "w:gz") as tar:
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Example/Textures/Base.PNG")
+            data = b"\x89PNG-FAKE"  # 同じ長さで中身が違う
+            info = tarfile.TarInfo(f"{GUID_TEX}/asset")
+            info.size, info.mtime = len(data), 1_700_000_000
+            tar.addfile(info, io.BytesIO(data))
+        written: set[str] = set()
+        paths = UnityPackage(other).extract([GUID_TEX], dest, written=written)
+        self.assertEqual(paths[GUID_TEX].read_bytes(), b"\x89PNG-FAKE")
+        self.assertEqual(written, {GUID_TEX})
+        written.clear()
+        UnityPackage(other).extract([GUID_TEX], dest, written=written)  # 同じパッケージの 2 回目は書かない
+        self.assertEqual(written, set())
+
+    def test_extract_rewrites_file_without_record(self):
+        # 記録の無い（1.7.4 までに展開した）ファイルは、同じサイズでも 1 回書き直す
+        dest = Path(self.tmp.name) / "out"
+        target = dest / "Assets/Example/Textures/Base.PNG"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"stale-png")  # \x89PNG-fake と同じ 9 バイト
+        written: set[str] = set()
+        self.pkg.extract([GUID_TEX], dest, written=written)
+        self.assertEqual(target.read_bytes(), b"\x89PNG-fake")
+        self.assertEqual(written, {GUID_TEX})
+
+    def test_extract_ignores_broken_record(self):
+        dest = Path(self.tmp.name) / "out"
+        self.pkg.extract([GUID_TEX], dest)
+        record = dest / package_module.EXTRACT_RECORD_NAME
+        record.write_text("{not json", "utf-8")
+        written: set[str] = set()
+        self.pkg.extract([GUID_TEX], dest, written=written)
+        self.assertEqual(written, {GUID_TEX})
+        files = json.loads(record.read_text("utf-8"))["files"]
+        self.assertEqual(files["Assets/Example/Textures/Base.PNG"], {"guid": GUID_TEX, "size": 9, "mtime": 0})
+
+    def test_extract_refuses_symlinked_record(self):
+        dest = Path(self.tmp.name) / "out_record_link"
+        dest.mkdir()
+        outside = Path(self.tmp.name) / "outside.json"
+        outside.write_text("original")
+        (dest / package_module.EXTRACT_RECORD_NAME).symlink_to(outside)
+        with self.assertRaises(PackageError):
+            self.pkg.extract([GUID_TEX], dest)
+        self.assertEqual(outside.read_text(), "original")
 
     def test_extract_refuses_symlinked_directory(self):
         outside = Path(self.tmp.name) / "outside"

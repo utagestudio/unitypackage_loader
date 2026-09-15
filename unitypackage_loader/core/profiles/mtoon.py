@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..material import BLACK, NormalizedMaterial, UnityMaterial
+from ..material import BLACK, NormalizedMaterial, UnityMaterial, toon_values_from_extras
 from .base import CULL_BACK, ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, texture_transform
 
 # MToon 0.x の _BlendMode
@@ -78,4 +78,5 @@ class MToonProfile(ShaderProfile):
                 "width": mat.f("_OutlineWidth", 0.0),
                 "mode": int(mat.f("_OutlineWidthMode", 0)),
             }
+        n.shadow, n.matcap, n.rim = toon_values_from_extras(n.extras)  # 1.7.4 までと同じ換算（#73）
         return n

@@ -60,7 +60,7 @@
 | `enable_addons` | factory 設定の後に有効化する add-on のモジュール名。未導入ならテスト全体をスキップする（VRM add-on への委譲を検証する場合に使う） |
 | `objects.count` | レポート上の新規オブジェクト数（アーマチュア込み） |
 | `materials.mapped` | .mat に対応付けできたマテリアル数 |
-| `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared`） |
+| `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared` / `replaced` / `prefab-split`）。`shared` は同じ回に組み立て済みの同じ .mat のマテリアルを使った行 |
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
 | `result` | オペレーターの結果（既定は `FINISHED`。何も読み込めずに失敗する場合は `CANCELLED`） |

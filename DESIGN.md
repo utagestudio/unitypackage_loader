@@ -48,14 +48,14 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 **prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。
 
-**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（レポートの method は `shared`。`replaced` と同じく件数からは除く）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。
+**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。
 
 **読み込む単位 Scenes**（§3.3、Issue #48）: `core/hierarchy.py` で .unity を展開し、モデルの配置を求めて読み込む。
 
 - 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの key は prefab と同じく「PrefabInstance の fileID XOR 元の key」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
 - 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは、新しい形式では fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。Unity 2018.2 以前の形式の .meta は `fileIDToRecycleName`（fileID → 名前）を持つので、それで名前を引けた上書きは当てる（下記「古い形式のモデルの中への上書き」）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab や、FBX から切り離してシーンに置いた小物）は、Renderer ごとにモデルのルートを決め、同じルート・同じモデルの Renderer をまとめる（下記「Renderer をまとめるモデルのルート」）。
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
-- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は Prefabs と同じく共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
+- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
 - 使われていない部品（Issue #58）: 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、表に無いメッシュのオブジェクト（prefab が使っていない LOD、FBX にだけある別のノードなど）を非表示にする（削除はしない。件数を警告に出す）。FBX を直接置いた配置は対象にしない。Renderer の名前は GameObject 名ではなくメッシュ参照（MeshFilter / SkinnedMeshRenderer の `m_Mesh` の fileID）から決める。展開後に GameObject の名前を変えていると、名前の照合では使っている部品まで隠してしまうため。モデルの .meta の表（`fileIDToRecycleName`、古い番号を引き継いだ `internalIDToNameTable`）で名前を引き、表の無い新しい形式では fileID = xxHash64("Type:Mesh-><名前>0")（`core/unity_ids.py`。Unity 6 の prefab と Japanese Street の 100 か所で一致）を Blender のオブジェクト名で計算して照合する。
 - Renderer をまとめるモデルのルート（Issue #60）: 以前は Transform を直接持つアセットでの最上位の祖先に固定していたため、シーンの共通の親（部屋など）の下に同じ小物を複製して並べると、名前が同じ Renderer が 1 つだけ残り、しかも親の原点に置かれていた。モデルの .meta の表（`fileIDToRecycleName` / `internalIDToNameTable`）にある、ルート以外の GameObject 名を FBX のノード名として、次のように決める（`core/hierarchy.py` の `placements`）。
   - 1 メッシュの FBX（表の GameObject はルートだけで、メッシュも 1 つ）: Renderer の GameObject 自身。
@@ -93,7 +93,9 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 **Prefab Variant / ネストされた prefab**: PrefabInstance の `m_SourcePrefab` がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のうち `m_Materials.Array.data[N]` と `m_Materials.Array.size` を重ねる（`resolve_renderers`）。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、件数を警告に出す（Issue #31）。
 
-**スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。
+**スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。すべてのスロットが別の .mat に差し替わると分かっている FBX マテリアルは、組み立てずに差し替えに回す（`core/mapping.py` の `fully_replaced_materials`。Issue #77）。
+
+**マテリアルの共有**（Issue #77）: 同じ .mat は、1 回の読み込みの中で 1 つの Blender マテリアルを共有する。別々のモデルが同じ .mat を使う場合（Models 単位で複数のモデル、シーンで違うモデル）、1 つのモデルの複数のマテリアルが同じ .mat に解決される場合、同じモデルの読み直し、prefab のスロット分割のどれでも同じ。共有したマテリアルのレポートの method は `shared` で、`replaced` と同じく件数からは除く。共有するマテリアルの名前は、なるべく .mat の名前にする（先に FBX 側の別の名前で組んでいたら、.mat と同じ名前のマテリアルを組み、`ID.user_remap` で使用箇所を付け替えて先のものを消す。読み込む順番で名前が変わらないように）。Reuse Existing Materials が ON なら、.blend に既にある同名のマテリアルを先に使う（こちらは `reused`）。同梱 .blend の KEEP と VRM add-on への委譲では、インポーターが作ったマテリアルをそのまま使うので共有しない。
 
 **サブメッシュ順とスロット順**: `m_Materials` の並びは Unity のサブメッシュ順で、Unity の FBX インポーターはポリゴン列で最初に使われた順にサブメッシュを作り、ポリゴンの無いマテリアルはサブメッシュにしない。一方 Blender のスロットは FBX 内のマテリアル順なので、両者は一致しないことがある。スロット番号のまま突き合わせると別パーツの .mat に差し替わる（VRChat 向けアバターで、パーツ間のマテリアルが入れ替わって別パーツのテクスチャが半透明の層のように見えた。Issue #22）。そこでメッシュのポリゴンから「最初に使われた順のスロット番号列」を作り（`core/mapping.py` の `submesh_slot_order`）、`m_Materials[i]` をその i 番目のスロットに対応させる。フォールバック B とスロット単位の分割の両方がこの対応を使う。
 
@@ -219,7 +221,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 | Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現 |
 | Pack into .blend | Bool = OFF | |
 | Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
-| Overwrite extracted files | Bool = OFF | 既に展開済みならスキップ |
+| Overwrite extracted files | Bool = OFF | OFF なら、展開先の記録（`.unitypackage_importer.json`）で元の tar メンバーの GUID・サイズ・更新時刻が一致する展開済みファイルだけを使い回す（サイズだけでは同じ名前・同じサイズの別ファイルと区別できない。#72）。書き直した画像は、読み込み済みなら読み直す |
 
 ### 3.2 マテリアルモード別の生成ノード
 
@@ -246,7 +248,8 @@ _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿�
 [TexImage base] × _Color ─▶ Base Color ─┐
 [Normal Map | Geometry.Normal] ─▶ Normal ─┤ UnityToon ─▶ Output
 [MatCap tex via view-space normal UV] ──▶ MatCap ─┘
-  Shadow Color/Strength/Border/Blur, MatCap Strength/Mode, Rim Color/Strength/Border, Emission は extras から入力値として設定
+  Shadow Color/Strength/Border/Blur, MatCap Strength/Mode, Rim Color/Strength/Border/Blur は NormalizedMaterial の shadow / matcap / rim、
+  Emission は emission_* から入力値として設定（extras は読まない）
 ```
 グループ内部: Diffuse BSDF → Shader to RGB → RGB to BW でライティング量を取り、Map Range（border ± blur/2）で影係数に。
 Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻す。MatCap は 4 種のブレンドを Compare で選択。
@@ -486,7 +489,10 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
     metallic: float; roughness: float; metallic_tex: TexRef | None
     cull_backface: bool
     uv_scale: tuple2; uv_offset: tuple2
-    extras: dict                         # カスタムプロパティ行き
+    shadow: ToonShadow | None            # Toon ノードの影（color / strength / border / blur）
+    matcap: ToonMatCap | None            # Toon ノードの MatCap（tex / color / strength / mode）
+    rim: ToonRim | None                  # Toon ノードのリム（color / strength / border / blur）
+    extras: dict                         # 組み立てには使わない参考値。カスタムプロパティ行き
     warnings: list[str]
 ```
 
@@ -513,7 +519,7 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 | `_TransparentMode` (0 Normal / 1 OnePass / 2 TwoPass)、`_SrcBlend/_DstBlend`、`m_CustomRenderQueue`、シェーダー名の `Cutout`/`Transparent` | alpha_mode。判定: DstBlend==10(OneMinusSrcAlpha) or queue≥3000 → blend、queue 2450〜2999 or `_Cutoff`>0.001 and `_AlphaMaskMode`>0 → cutout、それ以外 opaque |
 | `_Cutoff` | alpha_cutoff |
 | `_MainTex_ST` | uv_scale / uv_offset |
-| `_ShadowColor` `_Shadow2ndColor` `_ShadowStrength` `_OutlineColor` `_OutlineWidth` `_MatCapTex` `_MatCap2ndTex` `_RimColor` `_AlphaMask` | extras（Phase 3 のトゥーンノードグループ用に温存） |
+| `_ShadowColor` `_Shadow2ndColor` `_ShadowStrength` `_OutlineColor` `_OutlineWidth` `_MatCapTex` `_MatCap2ndTex` `_RimColor` `_AlphaMask` | extras。影・MatCap・リムは extras から shadow / matcap / rim にも換算する（`toon_values_from_extras`。MToon も同じ関数） |
 
 サンプルでの観測: 顔用の Transparent マテリアルはシェーダー名が Transparent 系で `_DstBlend: 10`, queue 2450 → `blend` と判定。衣装マテリアルは `_AlphaToMask: 1` → cutout 相当。
 
@@ -542,11 +548,23 @@ VRChat SDK 同梱の Quest 向けシェーダー。機能が少なく、Standard
 |---|---|---|---|
 | `toon_lit` | Toon Lit | unlit | `_MainTex` のみ |
 | `standard_lite` | Standard Lite | pbr | `_Color` `_BumpMap` `_Metallic` `_Glossiness` `_MetallicGlossMap` `_OcclusionMap`。emission は `_EMISSION` キーワードが有効なときだけ。不透明のみ |
-| `toon_standard` | Toon Standard / (Outline) | toon | `_Color` `_Culling`、`USE_NORMAL_MAPS` / `USE_SPECULAR`（`_MetallicStrength` `_GlossStrength`）/ `USE_OCCLUSION_MAP` / `USE_MATCAP` / `USE_DETAIL_MAPS` / `USE_HUE_SHIFT` / `USE_COLOR_MASK` の各キーワードで機能を ON。emission は常に有効で `_EmissionStrength` を乗数に。Ramp・リム・MatCap・アウトライン等は extras。不透明のみ |
-| `matcap_lit` | MatCap Lit | pbr | `_MainTex`、`_MatCap` は乗算として extras |
+| `toon_standard` | Toon Standard / (Outline) | toon | `_Color` `_Culling`、`USE_NORMAL_MAPS` / `USE_SPECULAR`（`_MetallicStrength` `_GlossStrength`）/ `USE_OCCLUSION_MAP` / `USE_MATCAP` / `USE_DETAIL_MAPS` / `USE_HUE_SHIFT` / `USE_COLOR_MASK` の各キーワードで機能を ON。emission は常に有効で `_EmissionStrength` を乗数に。Ramp・リム・MatCap・アウトライン等は extras。不透明のみ。Toon ノードへは意味のはっきりした値だけを換算する（下記） |
+| `matcap_lit` | MatCap Lit | pbr | `_MainTex`、`_MatCap` は乗算として extras と matcap（Multiply。Toon モードで組むときだけ使う） |
 | `diffuse` / `bumped_diffuse` / `bumped_specular` | Diffuse / Lightmapped / Bumped Diffuse / Bumped Mapped Specular | pbr | `_MainTex`（+ `_BumpMap`、`_Shininess` → roughness） |
 | `particle` | Particles/Additive, Alpha Blended, Multiply | unlit | `_MainTex`。半透明・両面。Additive / Multiply はアルファブレンドで近似し警告 |
 | `ui` | Worlds/Supersampled UI, Sprites/* | unlit / pbr | `_MainTex` `_Color`。半透明・両面 |
+
+**Toon ノードへの換算（#73）**
+
+Toon の組み立ては `NormalizedMaterial.shadow` / `matcap` / `rim` だけを読む。プロファイルごとに extras のキーの名前が違っても、値が黙って無視されないようにするため。`tests/test_toon_values.py` が、トゥーン系のプロファイルがこれらを埋めていることを確かめる。
+
+| プロファイル | 影 | MatCap | リム |
+|---|---|---|---|
+| lilToon / MToon | 1.7.4 までの組み立てと同じ換算（`toon_values_from_extras`） | 同左 | 同左 |
+| VRChat Mobile Toon Standard | 既定の影。ramp テクスチャ・`_ShadowBoost`・`_ShadowAlbedo` は再現できないので警告 | `_MatcapStrength` → 強さ、`_MatcapType` 0 → Add、それ以外 → Normal。マスクは警告 | `_RimIntensity` → 強さ、1 − `_RimRange` → 境界、1 − `_RimSharpness` → ぼかし。`_RimAlbedoTint` は警告 |
+| Poiyomi | `_ShadowStrength` → 強さだけ。影色・ライティングモード・オフセットは警告 | なし | なし |
+
+Toon Standard と Poiyomi は手元に使用例が無く、Unity での見た目と突き合わせていない。近似の警告は `shader approximation:` で始め、レポートにはシェーダー単位で 1 回だけ出す。1.7.4 までに保存した `unity_normalized`（shadow / matcap / rim のキーが無い）を組み直すときは、`toon_values_from_extras` で当時と同じ値を補う。
 
 ### 4.6 `core/mapping.py`
 
@@ -651,7 +669,7 @@ def run(ctx, filepath, opts) -> Report:
 |---|---|---|
 | **1 (MVP)** | Extension 雛形、tar 索引、Unity YAML パーサー、externalObjects マッピング、lilToon + generic プロファイル、Principled / Unlit 生成、テクスチャ展開、Info バー報告 | `_local/` のサンプルが 1 操作でテクスチャ付きで読める |
 | **2** | モデル選択ダイアログ、N パネルレポート、Standard/URP/HDRP・MToon・Poiyomi プロファイル、prefab 経由マッピング、`.obj`/`.gltf`/`.dae`/`.blend` 同梱対応、未参照画像の読み込み、Preferences | 実装済み。合成パッケージ（`tests/make_synthetic_package.py`）と手元のサンプルで検証。他の実パッケージでの検証は入手次第 |
-| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Emission を extras から再現）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | 実装済み。手元のサンプルと合成パッケージで検証 |
+| **3** | トゥーン用ノードグループ（Shadow Color / MatCap / Rim / Emission を再現。1.7.5 から型付きの shadow / matcap / rim を読む）、Solidify によるアウトライン、カスタムプロパティからの再構築オペレーター、複数パッケージの一括インポート | 実装済み。手元のサンプルと合成パッケージで検証 |
 
 ---
 
@@ -660,7 +678,7 @@ def run(ctx, filepath, opts) -> Report:
 - **検証用データはリポジトリに含めない。** unitypackage・展開物・参考 .blend・実パッケージ用の期待値 JSON は全て `_local/` 配下に置く。コミットするテスト用データは合成データだけ。アセット名などをドキュメントやコミットに書くのはかまわない（2026-09-14 に方針を変更）。
 
 - **VRM は再実装しない**。VRM add-on が MToon・Humanoid・スプリングボーンを再現するので、入っていればそちらに委譲する。add-on 無しの環境向けの glTF フォールバックは、既存の glTF 経路と `.mat` 再構築の組み合わせに留める。
-- **Unity のライティング再現はしない**。lilToon の影色・MatCap・リムは Phase 3 まではカスタムプロパティに保存するだけ。
+- **Unity のライティング再現はしない**。影色・MatCap・リムは Toon ノードグループで近い見た目にするだけで、ramp などシェーダー固有の計算は再現しない。
 - FBX の座標系・スケールは Blender 標準インポーターに委ねる。Unity の `globalScale` / `useFileScale` は参考値としてレポートに出すのみ。
 - テクスチャの `maxTextureSize`（Unity 側の縮小設定）は無視し、元解像度で読み込む。
 - 同一テクスチャが複数マテリアルから参照される場合は 1 つの Image を共有する。

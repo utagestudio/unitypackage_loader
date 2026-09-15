@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..material import BLACK, NormalizedMaterial, UnityMaterial
+from ..material import BLACK, NormalizedMaterial, ToonShadow, UnityMaterial, clamp01
 from .base import ShaderInfo
 from .standard import StandardProfile
 
@@ -46,6 +46,12 @@ class PoiyomiProfile(StandardProfile):
             "shadow_strength": mat.f("_ShadowStrength", 1.0),
             "shadow_offset": mat.f("_ShadowOffset", 0.0),
         }
+        # 影は強さだけを換算する。影色・ライティングモード・オフセットは Poiyomi の設定の組み合わせで意味が変わるので使わない（#73）
+        n.shadow = ToonShadow(strength=clamp01(mat.f("_ShadowStrength", 1.0)))
+        n.warnings.append(
+            "shader approximation: Poiyomi shadow color, lighting mode and shadow offset are not reproduced; "
+            "only the shadow strength is used"
+        )
         if mat.flag("_EnableOutlines"):
             n.extras["outline"] = {"color": mat.color("_LineColor"), "width": mat.f("_LineWidth", 0.0)}
         return n

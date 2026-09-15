@@ -141,7 +141,8 @@ class ToonStandardTests(unittest.TestCase):
         self.assertEqual(n.extras["matcap"], {"tex": TEX_N, "mask": None, "additive": False, "strength": 0.7})
         self.assertEqual(n.extras["outline"]["color"], (0.1, 0.0, 0.0, 1.0))
         self.assertAlmostEqual(n.extras["outline"]["width"], 0.1)
-        self.assertEqual(n.warnings, [])
+        # Toon Standard の ramp など、Toon ノードで置き換えられない値の注意だけが出る（#73）
+        self.assertEqual([w for w in n.warnings if not w.startswith("shader approximation:")], [])
 
     def test_features_off_without_keywords(self):
         n = normalize_material(parse_material(TOON_STANDARD_FEATURES_OFF))
