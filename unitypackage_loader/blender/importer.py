@@ -31,7 +31,6 @@ from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, BlenderCamera, BlenderLight, convert_camera, convert_light, detect_pipeline
 from ..core.unity_yaml import UnityRef
 from ..core.fbx_units import read_unit_scale
-from ..core.unity_ids import mesh_file_id
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
@@ -41,6 +40,7 @@ from ..core.prefab import RendererMaterials, merge_prefab_tables, tables_from_hi
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
+from ..core.scene_import import parts_to_hide, scene_warnings
 from ..core.units import (
     UNIT_PREFABS,
     UNIT_SCENES,
@@ -1268,24 +1268,11 @@ def _run_import(
                 skipped_nodes += _apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
             if placement.offsets:
                 skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale)
-            hidden = {name for name, r in placement.renderers.items() if not r.visible}
-            # 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけ。
-            # FBX にしかない部品（prefab が使っていない LOD や別のノード）は隠す（#58）。FBX 由来の名前に「.002」が
-            # 付いていることもあるので、表の名前は連番を外した形でも照合する
-            from_renderers = placement.root in hierarchy.nodes and hierarchy.nodes[placement.root].model_guid is None
-            used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
-            # 表で名前を引けないモデル（新しい形式）は、Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
-            mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
+            hide, unused = parts_to_hide(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
             for obj in objects:
-                name = strip_numeric_suffix(obj.name)
-                unused = (
-                    from_renderers and obj.type == "MESH" and obj.name not in used and name not in used
-                    and mesh_file_id(obj.name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
-                )
-                if not placement.active or name in hidden or unused:
+                if obj.name in hide:
                     _hide(obj, hidden_objects)
-                if unused and placement.active:
-                    hidden_unused += 1
+            hidden_unused += unused
 
         # --- ライト・カメラ ---
         baked_lights = 0
@@ -1319,43 +1306,11 @@ def _run_import(
             obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
             if not component.active:
                 _hide(obj, hidden_objects)
-        if baked_lights:
-            report.warn(
-                f"scene {pathname}: {baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
-                "they were imported as real-time lights"
-            )
-        for note in sorted(light_notes):
-            report.warn(f"scene {pathname}: {note}")
-
-        contents = scene_summary.contents
-        if contents is None:
-            return
-        if contents.unresolved_overrides:
-            report.warn(
-                f"scene {pathname}: {contents.unresolved_overrides} override(s) on objects inside a model "
-                "(position, material or visibility) are not read yet"
-            )
-        if contents.missing_sources:
-            report.warn(f"scene {pathname}: {contents.missing_sources} prefab instance(s) refer to assets that are not in the package")
-        if contents.other_renderers:
-            report.warn(
-                f"scene {pathname}: {contents.other_renderers} renderer(s) use meshes outside the package "
-                "(such as Unity's built-in primitives) and were skipped"
-            )
-        if hidden_unused:
-            report.warn(
-                f"scene {pathname}: {hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
-                "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
-            )
-        if skipped_nodes:
-            report.warn(
-                f"scene {pathname}: {skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
-                "were not applied"
-            )
-        if skipped_offsets:
-            report.warn(
-                f"scene {pathname}: {skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
-            )
+        for message in scene_warnings(
+            pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
+            hidden_unused=hidden_unused, skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets,
+        ):
+            report.warn(message)
 
     prefab_collections: list[bpy.types.Collection] = []
     total = sum(len(group.models) for group in groups) + len(scenes)
