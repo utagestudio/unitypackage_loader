@@ -175,6 +175,26 @@ class ParseDocumentsTests(unittest.TestCase):
         self.assertEqual(body, {"a": 1, "b": {"c": "x"}})
 
 
+class EscapeTests(unittest.TestCase):
+    """ダブルクォートの文字列のエスケープ（#74）。"""
+
+    def test_escape_keeps_multibyte_text(self):
+        self.assertEqual(parse_text('m_Name: "マテリアル\\tA"\n'), {"m_Name": "マテリアル\tA"})
+
+    def test_yaml_escapes(self):
+        body = parse_text('a: "q\\"b\\\\c\\/d\\ne\\x41\\u3042\\U0001F600"\n')
+        self.assertEqual(body["a"], 'q"b\\c/d\neAあ😀')
+
+    def test_surrogate_pair_is_joined(self):
+        self.assertEqual(parse_text('a: "\\uD83D\\uDE00"\n')["a"], "😀")
+
+    def test_unknown_or_incomplete_escape_is_kept(self):
+        self.assertEqual(parse_text('a: "x\\qy\\x4"\n')["a"], "x\\qy\\x4")
+
+    def test_flow_mapping_value(self):
+        self.assertEqual(parse_text('a: {name: "日本\\"語\\t"}\n')["a"], {"name": '日本"語\t'})
+
+
 class ParseTextTests(unittest.TestCase):
     def test_meta_external_objects(self):
         meta = parse_text(META_YAML)
