@@ -54,7 +54,7 @@ def _build(tree: bpy.types.ShaderNodeTree) -> None:
         tree.interface.remove(item)
 
     for name, socket_type, default, vmin, vmax in _INPUTS:
-        sock = tree.interface.newsocket(name=name, in_out="INPUT", socket_type=socket_type)
+        sock = tree.interface.new_socket(name=name, in_out="INPUT", socket_type=socket_type)
         if default is not None:
             sock.default_value = default
         if vmin is not None:
@@ -63,7 +63,7 @@ def _build(tree: bpy.types.ShaderNodeTree) -> None:
             sock.max_value = vmax
         if name == "Normal":
             sock.hide_value = True
-    tree.interface.newsocket(name="Shader", in_out="OUTPUT", socket_type="NodeSocketShader")
+    tree.interface.new_socket(name="Shader", in_out="OUTPUT", socket_type="NodeSocketShader")
 
     nodes, links = tree.nodes, tree.links
     col = 0

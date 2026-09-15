@@ -163,6 +163,8 @@ def main() -> int:
             excluded.append(layer.name)
         pending.extend(layer.children)
     c.eq("excluded layer collections", excluded, [])
+    # マテリアルのノードの組み立ては、失敗しても警告にして続ける。期待値に書いていなくても失敗は見逃さない
+    c.eq("node build failures", [w for w in report.warnings if "node build failed" in w], [])
 
     objs = exp.get("objects", {})
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
