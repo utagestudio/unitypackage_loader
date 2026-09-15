@@ -401,7 +401,8 @@ def _sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
 
 
 def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
-    use_new = hasattr(bpy.ops.wm, "fbx_import") and opts.fbx_importer in ("AUTO", "NEW")
+    # wm.fbx_import は Blender 4.5 で追加された（最小版は 4.5）。bpy.ops の hasattr は常に True なので判定には使えない
+    use_new = opts.fbx_importer in ("AUTO", "NEW")
     if use_new:
         kwargs = dict(
             filepath=str(path),

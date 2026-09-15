@@ -37,7 +37,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
-            ("AUTO", "Auto", "Use the new FBX importer when available"),
+            ("AUTO", "Auto", "Use the new FBX importer"),
             ("NEW", "New (C++)", "bpy.ops.wm.fbx_import"),
             ("LEGACY", "Legacy (Python)", "bpy.ops.import_scene.fbx"),
         ),
