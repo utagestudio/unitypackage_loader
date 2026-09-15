@@ -5,12 +5,17 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
-from unitypackage_loader.core.prefab import RendererMaterials, merge_prefab_tables, parse_prefab, tables_by_model
+from unitypackage_loader.core.hierarchy import Expander, parse_asset
+from unitypackage_loader.core.prefab import RendererMaterials, merge_prefab_tables, tables_from_hierarchy
 
 MAT_A = "1" * 32
 MAT_B = "2" * 32
+MAT_C = "5" * 32
 MODEL_A = "9" * 32
 MODEL_B = "8" * 32
+BASE = "7" * 32
+VARIANT = "6" * 32
+MODELS = {MODEL_A: "ModelA", MODEL_B: "ModelB"}
 
 PREFAB = f"""\
 %YAML 1.1
@@ -20,9 +25,17 @@ GameObject:
   m_Name: Root
   m_Component:
   - component: {{fileID: 101}}
+--- !u!4 &101
+Transform:
+  m_GameObject: {{fileID: 100}}
+  m_Father: {{fileID: 0}}
 --- !u!1 &200
 GameObject:
   m_Name: Body
+--- !u!4 &202
+Transform:
+  m_GameObject: {{fileID: 200}}
+  m_Father: {{fileID: 101}}
 --- !u!137 &201
 SkinnedMeshRenderer:
   m_GameObject: {{fileID: 200}}
@@ -33,6 +46,10 @@ SkinnedMeshRenderer:
 --- !u!1 &300
 GameObject:
   m_Name: Prop
+--- !u!4 &303
+Transform:
+  m_GameObject: {{fileID: 300}}
+  m_Father: {{fileID: 101}}
 --- !u!33 &302
 MeshFilter:
   m_GameObject: {{fileID: 300}}
@@ -46,6 +63,10 @@ MeshRenderer:
 --- !u!1 &600
 GameObject:
   m_Name: Body
+--- !u!4 &603
+Transform:
+  m_GameObject: {{fileID: 600}}
+  m_Father: {{fileID: 101}}
 --- !u!33 &602
 MeshFilter:
   m_GameObject: {{fileID: 600}}
@@ -58,6 +79,10 @@ MeshRenderer:
 --- !u!1 &700
 GameObject:
   m_Name: NoMesh
+--- !u!4 &702
+Transform:
+  m_GameObject: {{fileID: 700}}
+  m_Father: {{fileID: 101}}
 --- !u!23 &701
 MeshRenderer:
   m_GameObject: {{fileID: 700}}
@@ -74,31 +99,44 @@ SkinnedMeshRenderer:
 """
 
 
+def reader(assets: dict[str, str]):
+    def read(guid: str):
+        text = assets.get(guid)
+        return parse_asset(text) if text is not None else None
+
+    return read
+
+
+def expand(guid: str, assets: dict[str, str], models=MODELS):
+    return Expander(reader(assets), models).expand_asset(guid)
+
+
+def tables_of(guid: str, assets: dict[str, str], models=MODELS) -> dict[str, dict[str, RendererMaterials]]:
+    return tables_from_hierarchy(expand(guid, assets, models), models)
+
+
 def table_of(text: str = PREFAB, model: str = MODEL_A) -> dict[str, RendererMaterials]:
-    return tables_by_model(parse_prefab(text).renderers.values(), [MODEL_A, MODEL_B])[model]
+    return tables_of(BASE, {BASE: text})[model]
 
 
-class ParsePrefabTests(unittest.TestCase):
+class PrefabTableTests(unittest.TestCase):
     def test_renderers_with_mesh_reference(self):
-        renderers = parse_prefab(PREFAB).renderers
-        self.assertEqual(set(renderers), {201, 301, 601, 701})  # stripped は読まない
-        self.assertEqual(renderers[201].materials, [MAT_A, MAT_B])
-        self.assertEqual((renderers[201].renderer_class, renderers[201].mesh_guid), (137, MODEL_A))
-        self.assertEqual(renderers[301].materials, [MAT_B, None])
-        self.assertEqual((renderers[301].renderer_class, renderers[301].mesh_guid), (23, MODEL_A))  # MeshFilter から
-        self.assertIsNone(renderers[701].mesh_guid)
+        table = table_of()
+        self.assertEqual(set(table), {"Body", "Prop"})  # メッシュ参照の無い NoMesh と stripped は使わない
+        body, prop = table["Body"], table["Prop"]
+        self.assertEqual((body.materials, body.renderer_class, body.mesh_guid, body.mesh_file_id), ([MAT_A, MAT_B], 137, MODEL_A, 4300000))
+        self.assertEqual((prop.materials, prop.renderer_class, prop.mesh_file_id), ([MAT_B, None], 23, 4300002))  # MeshFilter から
 
     def test_tables_split_by_model(self):
-        tables = tables_by_model(parse_prefab(PREFAB).renderers.values(), [MODEL_A, MODEL_B])
+        tables = tables_of(BASE, {BASE: PREFAB})
         self.assertEqual(set(tables), {MODEL_A, MODEL_B})
-        self.assertEqual(set(tables[MODEL_A]), {"Body", "Prop"})  # メッシュ参照の無い NoMesh は使わない
         # 別モデルの同名 GameObject は、それぞれのモデルの表に入る
         self.assertEqual(tables[MODEL_A]["Body"].materials, [MAT_A, MAT_B])
         self.assertEqual(tables[MODEL_B]["Body"].materials, [MAT_B])
 
     def test_tables_skip_meshes_outside_package(self):
-        self.assertEqual(set(tables_by_model(parse_prefab(PREFAB).renderers.values(), [MODEL_B])), {MODEL_B})
-        self.assertEqual(tables_by_model(parse_prefab(PREFAB).renderers.values(), []), {})
+        self.assertEqual(set(tables_of(BASE, {BASE: PREFAB}, {MODEL_B: "ModelB"})), {MODEL_B})
+        self.assertEqual(tables_of(BASE, {BASE: PREFAB}, {}), {})
 
     def test_merge_keeps_first(self):
         merged = merge_prefab_tables([table_of(), table_of(PREFAB.replace(MAT_A, "3" * 32))])
@@ -185,11 +223,6 @@ class SlotAssignmentTests(unittest.TestCase):
         self.assertEqual(result, {("Body", 2): MAT_A, ("Body", 0): MAT_B})
 
 
-BASE = "7" * 32
-VARIANT = "6" * 32
-MAT_C = "5" * 32
-
-
 def variant_yaml(instance_id: int, source: str, modifications: list[tuple[int, str, str, str | None]]) -> str:
     """(対象 fileID, propertyPath, value, objectReference の GUID) を並べた PrefabInstance だけの prefab。"""
     lines = [
@@ -217,75 +250,89 @@ def variant_yaml(instance_id: int, source: str, modifications: list[tuple[int, s
 
 class PrefabVariantTests(unittest.TestCase):
     def test_variant_overrides_base_materials(self):
-        from unitypackage_loader.core.prefab import resolve_renderers
-
         variant = variant_yaml(5000, BASE, [
             (201, "m_Materials.Array.data[1]", "", MAT_C),
-            (201, "m_Name", "Renamed", None),  # マテリアル以外の上書きは無視する
             (301, "m_Materials.Array.data[0]", "", None),  # 参照を外す上書き
         ])
-        documents = {BASE: parse_prefab(PREFAB), VARIANT: parse_prefab(variant)}
-        renderers = resolve_renderers(VARIANT, documents)
-        body = renderers[5000 ^ 201]
+        expander = Expander(reader({BASE: PREFAB, VARIANT: variant}), MODELS)
+        tables = tables_from_hierarchy(expander.expand_asset(VARIANT), MODELS)
+        body = tables[MODEL_A]["Body"]
         self.assertEqual((body.game_object, body.materials, body.mesh_guid), ("Body", [MAT_A, MAT_C], MODEL_A))
-        self.assertEqual(renderers[5000 ^ 301].materials, [None, None])
-        self.assertEqual(renderers[5000 ^ 601].materials, [MAT_B])  # 上書きの無い Renderer はそのまま
-        # 元 prefab 自体の表は変わらない
-        self.assertEqual(resolve_renderers(BASE, documents)[201].materials, [MAT_A, MAT_B])
-        table = tables_by_model(renderers.values(), [MODEL_A])[MODEL_A]
-        self.assertEqual(table["Body"].materials, [MAT_A, MAT_C])
+        self.assertEqual(tables[MODEL_A]["Prop"].materials, [None, None])
+        self.assertEqual(tables[MODEL_B]["Body"].materials, [MAT_B])  # 上書きの無い Renderer はそのまま
+        # 展開結果をキャッシュしている元 prefab 自体の表は変わらない
+        self.assertEqual(tables_from_hierarchy(expander.expand_asset(BASE), MODELS)[MODEL_A]["Body"].materials, [MAT_A, MAT_B])
+
+    def test_renamed_game_object_keeps_mesh_reference(self):
+        variant = variant_yaml(5000, BASE, [(200, "m_Name", "Renamed", None)])
+        table = tables_of(VARIANT, {BASE: PREFAB, VARIANT: variant})[MODEL_A]
+        self.assertEqual(set(table), {"Renamed", "Prop"})
+        self.assertEqual(table["Renamed"].mesh_file_id, 4300000)  # 名前で引けないとき mapping がハッシュで照合する
 
     def test_variant_of_variant_uses_combined_file_ids(self):
-        from unitypackage_loader.core.prefab import resolve_renderers
-
         outer = "4" * 32
-        documents = {
-            BASE: parse_prefab(PREFAB),
-            VARIANT: parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])),
+        assets = {
+            BASE: PREFAB,
+            VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)]),
             # Variant の Variant は、中間の Variant の中での fileID（5000 XOR 201）を対象にする
-            outer: parse_prefab(variant_yaml(9000, VARIANT, [(5000 ^ 201, "m_Materials.Array.data[1]", "", MAT_A)])),
+            outer: variant_yaml(9000, VARIANT, [(5000 ^ 201, "m_Materials.Array.data[1]", "", MAT_A)]),
         }
-        renderers = resolve_renderers(outer, documents)
-        self.assertEqual(renderers[9000 ^ 5000 ^ 201].materials, [MAT_C, MAT_A])
+        self.assertEqual(tables_of(outer, assets)[MODEL_A]["Body"].materials, [MAT_C, MAT_A])
 
     def test_array_size_override(self):
-        from unitypackage_loader.core.prefab import resolve_renderers
-
+        # Unity は propertyPath の順に書き出すので、data[N] が size より先に来る
         variant = variant_yaml(5000, BASE, [
-            (201, "m_Materials.Array.size", "1", None),
             (201, "m_Materials.Array.data[1]", "", MAT_C),  # 縮めた長さの外は使わない
-            (601, "m_Materials.Array.size", "2", None),
+            (201, "m_Materials.Array.size", "1", None),
             (601, "m_Materials.Array.data[1]", "", MAT_A),
+            (601, "m_Materials.Array.size", "2", None),
         ])
-        renderers = resolve_renderers(VARIANT, {BASE: parse_prefab(PREFAB), VARIANT: parse_prefab(variant)})
-        self.assertEqual(renderers[5000 ^ 201].materials, [MAT_A])
-        self.assertEqual(renderers[5000 ^ 601].materials, [MAT_B, MAT_A])
+        tables = tables_of(VARIANT, {BASE: PREFAB, VARIANT: variant})
+        self.assertEqual(tables[MODEL_A]["Body"].materials, [MAT_A])
+        self.assertEqual(tables[MODEL_B]["Body"].materials, [MAT_B, MAT_A])
 
     def test_huge_slot_index_is_ignored(self):
-        variant = parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[99999999]", "", MAT_C)]))
-        self.assertEqual(variant.instances[0].material_overrides, {})
+        variant = variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[99999999]", "", MAT_C)])
+        self.assertEqual(tables_of(VARIANT, {BASE: PREFAB, VARIANT: variant})[MODEL_A]["Body"].materials, [MAT_A, MAT_B])
 
     def test_cyclic_instances_terminate(self):
-        from unitypackage_loader.core.prefab import resolve_renderers
-
-        documents = {
-            BASE: parse_prefab(variant_yaml(5000, VARIANT, [])),
-            VARIANT: parse_prefab(variant_yaml(6000, BASE, [])),
-        }
-        self.assertEqual(resolve_renderers(BASE, documents), {})
+        assets = {BASE: variant_yaml(5000, VARIANT, []), VARIANT: variant_yaml(6000, BASE, [])}
+        self.assertEqual(tables_of(BASE, assets), {})
 
     def test_overrides_on_model_objects_are_counted(self):
-        from unitypackage_loader.core.prefab import unresolved_material_overrides
-
-        # 元がモデル（documents に無い GUID）なので、対象の Renderer を特定できない
-        on_model = parse_prefab(variant_yaml(5000, MODEL_A, [
+        # 元がモデルなので、中のオブジェクトの fileID を名前に結び付けられない（名前の上書きは数えない）
+        on_model = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
             (123456789, "m_Materials.Array.data[0]", "", MAT_C),
             (123456789, "m_Name", "Renamed", None),
-        ]))
-        documents = {VARIANT: on_model, BASE: parse_prefab(PREFAB)}
-        self.assertEqual(unresolved_material_overrides(VARIANT, documents), 1)
-        resolvable = parse_prefab(variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)]))
-        self.assertEqual(unresolved_material_overrides(VARIANT, {VARIANT: resolvable, BASE: documents[BASE]}), 0)
+        ])})
+        self.assertEqual((on_model.unresolved_overrides, on_model.unresolved_material_overrides), (1, 1))
+        self.assertEqual(tables_from_hierarchy(on_model, MODELS), {})  # FBX を置いただけの prefab はモデルを使うものとして数えない
+        moved = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_LocalPosition.x", "1", None)])})
+        self.assertEqual((moved.unresolved_overrides, moved.unresolved_material_overrides), (1, 0))
+        resolvable = expand(VARIANT, {BASE: PREFAB, VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])})
+        self.assertEqual(resolvable.unresolved_overrides, 0)
+
+
+class MergeByMeshTests(unittest.TestCase):
+    def test_earlier_table_claims_the_mesh(self):
+        renamed = {"Renamed": RendererMaterials("Renamed", [MAT_C], mesh_file_id=5)}
+        base = {"Body": RendererMaterials("Body", [MAT_A], mesh_file_id=5), "Prop": RendererMaterials("Prop", [MAT_B], mesh_file_id=6)}
+        self.assertEqual(set(merge_prefab_tables([renamed, base])), {"Renamed", "Prop"})
+
+    def test_rows_sharing_a_mesh_in_one_table_are_kept(self):
+        wheels = {"WheelL": RendererMaterials("WheelL", [MAT_A], mesh_file_id=7), "WheelR": RendererMaterials("WheelR", [MAT_B], mesh_file_id=7)}
+        self.assertEqual(set(merge_prefab_tables([wheels, dict(wheels)])), {"WheelL", "WheelR"})
+
+
+class RenamedGameObjectMappingTests(unittest.TestCase):
+    def test_slot_assignments_fall_back_to_mesh_file_id(self):
+        from unitypackage_loader.core.mapping import slot_assignments
+        from unitypackage_loader.core.unity_ids import mesh_file_id
+
+        mats = {MAT_A: parse_material(LILTOON_OPAQUE, guid=MAT_A)}
+        table = {"Renamed": RendererMaterials("Renamed", [MAT_A], mesh_guid=MODEL_A, mesh_file_id=mesh_file_id("Body"))}
+        self.assertEqual(slot_assignments({"Body.001": ["x"]}, table, mats), {("Body.001", 0): MAT_A})
+        self.assertEqual(slot_assignments({"Other": ["x"]}, table, mats), {})
 
 
 if __name__ == "__main__":

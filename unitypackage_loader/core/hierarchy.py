@@ -295,6 +295,7 @@ class Hierarchy:
     components: dict[int, int] = field(default_factory=dict)  # ライト・カメラの key → Node の key
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
+    unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）
     missing_sources: int = 0  # 元がパッケージに無い PrefabInstance
 
     def children(self) -> dict[int, list[int]]:
@@ -426,6 +427,7 @@ class Expander:
             h.components[remap(iid, component)] = remap(iid, key)
         h.counts.update(sub.counts)
         h.unresolved_overrides += sub.unresolved_overrides
+        h.unresolved_material_overrides += sub.unresolved_material_overrides
         h.missing_sources += sub.missing_sources
 
         def target_key(file_id: int, guid: str | None) -> int | None:
@@ -468,6 +470,8 @@ class Expander:
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
                 continue
             h.unresolved_overrides += 1
+            if _MATERIAL_PATH.fullmatch(path) or path == "m_Materials.Array.size":
+                h.unresolved_material_overrides += 1
 
 
 _CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」

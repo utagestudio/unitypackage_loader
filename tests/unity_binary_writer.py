@@ -294,12 +294,13 @@ def material(
 def prefab_with_renderers(
     renderers: list[tuple[str, str, list[str | None]]], *, version: int = 17, big_endian: bool = False
 ) -> bytes:
-    """Unity 5.x の prefab（Prefab オブジェクト + GameObject / MeshFilter / MeshRenderer）。
+    """Unity 5.x の prefab（Prefab オブジェクト + GameObject / Transform / MeshFilter / MeshRenderer）。
 
     ``renderers`` は ``(GameObject 名, メッシュを持つモデルの GUID, m_Materials に並べる .mat の GUID)``。
     """
     ext = _Externals()
     go_tree = cls("GameObject", "Base", string("m_Name"))
+    transform_tree = cls("Transform", "Base", pptr("GameObject", "m_GameObject"), pptr("Transform", "m_Father"))
     filter_tree = cls("MeshFilter", "Base", pptr("GameObject", "m_GameObject"), pptr("Mesh", "m_Mesh"))
     renderer_tree = cls("MeshRenderer", "Base", pptr("GameObject", "m_GameObject"),
                         vector("m_Materials", pptr("Material", "data")))
@@ -308,6 +309,7 @@ def prefab_with_renderers(
     for i, (go_name, model_guid, mats) in enumerate(renderers):
         go = 100 + 10 * i
         objects.append((go, CLASS_GAME_OBJECT, go_tree, {"m_Name": go_name}))
+        objects.append((go + 3, 4, transform_tree, {"m_GameObject": (0, go), "m_Father": (0, 0)}))  # 4 = Transform
         objects.append((go + 1, CLASS_MESH_FILTER, filter_tree,
                         {"m_GameObject": (0, go), "m_Mesh": (ext.index(model_guid, 3), 4300000)}))
         objects.append((go + 2, CLASS_MESH_RENDERER, renderer_tree, {
