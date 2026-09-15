@@ -197,7 +197,6 @@ class PreparedPackage:
 
 
 def build_shader_table(extra_path: str = "") -> ShaderTable:
-    table = default_table()
     if extra_path:
         path = Path(bpy.path.abspath(extra_path))
         if path.is_file():
@@ -206,7 +205,7 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
             merged.by_guid.update(extra.by_guid)
             merged.by_builtin_id.update(extra.by_builtin_id)
             return merged
-    return table
+    return default_table()
 
 
 def _log_exception(message: str) -> None:
@@ -480,7 +479,7 @@ def _sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
     ]
 
 
-def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
+def _import_fbx(path: Path, opts: ImportOptions) -> None:
     # wm.fbx_import は Blender 4.5 で追加された（最小版は 4.5）。bpy.ops の hasattr は常に True なので判定には使えない
     use_new = opts.fbx_importer in ("AUTO", "NEW")
     if use_new:
@@ -508,7 +507,7 @@ def _import_fbx(context, path: Path, opts: ImportOptions) -> None:
         raise RuntimeError(f"FBX import failed for {path.name}: {result}")
 
 
-def _import_blend(context, path: Path, collection: bpy.types.Collection) -> None:
+def _import_blend(path: Path, collection: bpy.types.Collection) -> None:
     """同梱 .blend の全オブジェクトを append してコレクションに入れる。"""
     with bpy.data.libraries.load(str(path), link=False) as (data_from, data_to):
         data_to.objects = list(data_from.objects)
@@ -521,11 +520,11 @@ def _delegate_to_vrm_addon(model: AssetEntry, opts: ImportOptions) -> bool:
     return model.ext == ".vrm" and opts.use_vrm_addon and vrm_addon_available()
 
 
-def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, collection, report: ImportReport) -> bool:
+def _import_model(path: Path, model: AssetEntry, opts: ImportOptions, collection, report: ImportReport) -> bool:
     """モデルを読み込む。マテリアルを外部インポーターに任せた（こちらで組み直さない）場合は True。"""
     ext = model.ext
     if ext == ".fbx":
-        _import_fbx(context, path, opts)
+        _import_fbx(path, opts)
         return False
     if ext == ".obj":
         result = bpy.ops.wm.obj_import(filepath=str(path), global_scale=opts.global_scale)
@@ -547,7 +546,7 @@ def _import_model(context, path: Path, model: AssetEntry, opts: ImportOptions, c
     elif ext == ".dae":
         result = bpy.ops.wm.collada_import(filepath=str(path))
     elif ext == ".blend":
-        _import_blend(context, path, collection)
+        _import_blend(path, collection)
         return False
     else:
         raise RuntimeError(f"unsupported model format: {model.pathname}")
@@ -1044,7 +1043,7 @@ def _run_import(
         imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
-        delegated = _import_model(context, paths[model.guid], model, opts, target, report)
+        delegated = _import_model(paths[model.guid], model, opts, target, report)
         new = _new_since(before)
         _adopt_into_collection(new, scene, target)
         if delegated:

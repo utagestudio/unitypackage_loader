@@ -68,13 +68,12 @@ class _Builder:
     def link(self, out_socket, in_socket) -> None:
         self.links.new(out_socket, in_socket)
 
-    def image(self, image: bpy.types.Image | None, ref: TexRef | None, info: TextureImporterInfo | None, col: int, label: str):
+    def image(self, image: bpy.types.Image | None, info: TextureImporterInfo | None, col: int, label: str):
+        """画像テクスチャのノード。色空間は画像側の設定に従う。"""
         node = self.add("ShaderNodeTexImage", col, label=label)
         node.image = image
         if info is not None and info.clamps:
             node.extension = "EXTEND"
-        if image is not None and image.colorspace_settings.name == "Non-Color":
-            pass  # 画像側の設定に従う
         return node
 
 
@@ -134,7 +133,7 @@ def build_material(
     base_img = _image_for(norm.base_color_tex, images, warnings, "base color")
     base_node = None
     if norm.base_color_tex is not None:
-        base_node = b.image(base_img, norm.base_color_tex, tex_infos.get(norm.base_color_tex.guid), 1, "Base Color")
+        base_node = b.image(base_img, tex_infos.get(norm.base_color_tex.guid), 1, "Base Color")
         if mapping_out is not None:
             b.link(mapping_out, base_node.inputs["Vector"])
 
@@ -205,7 +204,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if norm.metallic_tex is not None:
         img = _image_for(norm.metallic_tex, images, warnings, "metallic")
-        node = b.image(img, norm.metallic_tex, tex_infos.get(norm.metallic_tex.guid), 1, "Metallic (R) / Smoothness (A)")
+        node = b.image(img, tex_infos.get(norm.metallic_tex.guid), 1, "Metallic (R) / Smoothness (A)")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         sep = b.add("ShaderNodeSeparateColor", 2, label="Metallic R")
@@ -219,7 +218,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if opts.use_normal_maps and norm.normal_tex is not None:
         img = _image_for(norm.normal_tex, images, warnings, "normal")
-        node = b.image(img, norm.normal_tex, tex_infos.get(norm.normal_tex.guid), 1, "Normal")
+        node = b.image(img, tex_infos.get(norm.normal_tex.guid), 1, "Normal")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         nm = b.add("ShaderNodeNormalMap", 2)
@@ -231,7 +230,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
         bsdf.inputs["Emission Strength"].default_value = norm.emission_strength
         if norm.emission_tex is not None:
             img = _image_for(norm.emission_tex, images, warnings, "emission")
-            node = b.image(img, norm.emission_tex, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
+            node = b.image(img, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
             if mapping_out is not None:
                 b.link(mapping_out, node.inputs["Vector"])
             e_out = node.outputs["Color"]
@@ -251,7 +250,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
 
     if norm.occlusion_tex is not None:
         img = _image_for(norm.occlusion_tex, images, warnings, "occlusion")
-        b.image(img, norm.occlusion_tex, tex_infos.get(norm.occlusion_tex.guid), 1, "Occlusion (unused)")
+        b.image(img, tex_infos.get(norm.occlusion_tex.guid), 1, "Occlusion (unused)")
 
 
 def _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings, opts):
@@ -281,14 +280,14 @@ def _build_unlit(b, norm, out, color_out, alpha_out, images, tex_infos, warnings
         if ref is not None and opts.use_normal_maps:
             img = images.get(ref.guid)
             if img is not None:
-                b.image(img, ref, tex_infos.get(ref.guid), 1, label)
+                b.image(img, tex_infos.get(ref.guid), 1, label)
 
 
 def _normal_output(b, norm, mapping_out, images, tex_infos, warnings, opts, col: int):
     """ノーマルマップがあれば Normal Map ノード、無ければ Geometry の Normal を返す。"""
     if opts.use_normal_maps and norm.normal_tex is not None:
         img = _image_for(norm.normal_tex, images, warnings, "normal")
-        node = b.image(img, norm.normal_tex, tex_infos.get(norm.normal_tex.guid), col, "Normal")
+        node = b.image(img, tex_infos.get(norm.normal_tex.guid), col, "Normal")
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         nm = b.add("ShaderNodeNormalMap", col + 1)
@@ -342,7 +341,7 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         uv.inputs[1].default_value = (0.5, 0.5, 0.0)
         uv.inputs[2].default_value = (0.5, 0.5, 0.0)
         b.link(geo_n.outputs["Vector"], uv.inputs[0])
-        tex = b.image(matcap_img, None, tex_infos.get(matcap.tex), 1, "MatCap")
+        tex = b.image(matcap_img, tex_infos.get(matcap.tex), 1, "MatCap")
         tex.extension = "EXTEND"
         b.link(uv.outputs["Vector"], tex.inputs["Vector"])
         mc_out = tex.outputs["Color"]
@@ -373,7 +372,7 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
         group.inputs["Emission Strength"].default_value = norm.emission_strength
         if norm.emission_tex is not None:
             img = _image_for(norm.emission_tex, images, warnings, "emission")
-            node = b.image(img, norm.emission_tex, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
+            node = b.image(img, tex_infos.get(norm.emission_tex.guid), 1, "Emission")
             if mapping_out is not None:
                 b.link(mapping_out, node.inputs["Vector"])
             e_out = node.outputs["Color"]

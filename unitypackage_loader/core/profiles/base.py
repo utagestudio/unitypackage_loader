@@ -7,7 +7,7 @@ from typing import Any
 
 from ..material import BLACK, WHITE, AlphaMode, Lighting, NormalizedMaterial, TexRef, UnityMaterial
 
-__all__ = ["ShaderInfo", "ShaderTable", "ShaderProfile", "select_profile", "normalize_material", "PROFILES"]
+__all__ = ["ShaderInfo", "ShaderTable", "ShaderProfile", "select_profile", "normalize_material"]
 
 _TABLE_PATH = Path(__file__).with_name("shader_guids.json")
 
@@ -154,20 +154,33 @@ class ShaderProfile:
         return norm
 
 
+_profiles: tuple[tuple[ShaderProfile, ...], ShaderProfile] | None = None
+
+
+def _profile_list() -> tuple[tuple[ShaderProfile, ...], ShaderProfile]:
+    """(指紋判定の順に並べたプロファイル, generic)。プロファイルは状態を持たないので 1 回だけ作る。"""
+    global _profiles
+    if _profiles is None:
+        # 各プロファイルのモジュールがこのモジュールを import するので、ここで初めて import する
+        from . import liltoon, mtoon, poiyomi, standard, vrchat_mobile
+
+        # 指紋判定の順序: VRChat Mobile は Standard の残骸プロパティを持つことが多いので Standard より先に置く
+        ordered = (
+            liltoon.LilToonProfile(),
+            mtoon.MToonProfile(),
+            poiyomi.PoiyomiProfile(),
+            vrchat_mobile.VRChatMobileProfile(),
+            standard.StandardProfile(),
+        )
+        _profiles = (ordered, standard.GenericProfile())
+    return _profiles
+
+
 def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tuple[ShaderProfile, ShaderInfo | None]:
     """GUID 表 → プロパティ指紋 → generic の順にプロファイルを決める。"""
-    from . import liltoon, mtoon, poiyomi, standard, vrchat_mobile  # 循環 import 回避
-
     table = table or default_table()
     info = table.lookup(mat)
-    # 指紋判定の順序: VRChat Mobile は Standard の残骸プロパティを持つことが多いので Standard より先に置く
-    profiles: list[ShaderProfile] = [
-        liltoon.LilToonProfile(),
-        mtoon.MToonProfile(),
-        poiyomi.PoiyomiProfile(),
-        vrchat_mobile.VRChatMobileProfile(),
-        standard.StandardProfile(),
-    ]
+    profiles, generic = _profile_list()
     if info is not None:
         for profile in profiles:
             if profile.family == info.family or info.family in getattr(profile, "aliases", ()):
@@ -175,10 +188,7 @@ def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tupl
     for profile in profiles:
         if profile.matches(mat):
             return profile, info
-    return standard.GenericProfile(), info
-
-
-PROFILES = select_profile  # 後方互換のための別名
+    return generic, info
 
 
 def normalize_material(mat: UnityMaterial, table: ShaderTable | None = None) -> NormalizedMaterial:
