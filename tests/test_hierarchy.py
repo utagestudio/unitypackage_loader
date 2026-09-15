@@ -527,6 +527,17 @@ class ComponentTest(unittest.TestCase):
         self.assertEqual((camera.name, camera.class_id, camera.body["field of view"]), ("Main Camera", 20, 40))
 
 
+    def test_override_on_removed_game_object_is_ignored(self):
+        # Unity は GameObject を消しても、その部品への古い上書きを m_Modifications に残すことがある（#68）
+        scene = HEADER + instance(
+            10, "d" * 32, 0, [mod(3, "d" * 32, "m_Intensity", 2.5)],
+            removed_game_objects=f"    - {{fileID: 1, guid: {'d' * 32}, type: 3}}\n",
+        )
+        exp = Expander(lambda g: parse_asset(self.LAMP) if g == "d" * 32 else None, {})
+        hierarchy = exp.expand_raw(parse_asset(scene))
+        self.assertEqual(components(hierarchy), [])
+        self.assertEqual(hierarchy.components, {})
+
 class RobustnessTest(unittest.TestCase):
     def test_self_referencing_prefab_stops(self):
         h = expander().expand_asset(LOOP)
