@@ -10,6 +10,7 @@ import bpy
 
 from ..core.material import GRAY, WHITE, NormalizedMaterial, TexRef, toon_color
 from ..core.meta import TextureImporterInfo
+from .nodes import socket
 
 MODE_PRINCIPLED = "PRINCIPLED"
 MODE_TOON = "TOON"
@@ -77,13 +78,6 @@ class _Builder:
         return node
 
 
-def _socket(sockets, identifier: str):
-    for s in sockets:
-        if s.identifier == identifier:
-            return s
-    return sockets[identifier]
-
-
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): _json_ready(v) for k, v in value.items()}
@@ -143,10 +137,10 @@ def build_material(
         mix = b.add("ShaderNodeMix", 2, label="Tint (_Color)")
         mix.data_type = "RGBA"
         mix.blend_type = "MULTIPLY"
-        _socket(mix.inputs, "Factor_Float").default_value = 1.0
-        _socket(mix.inputs, "B_Color").default_value = (*rgb, 1.0)
-        b.link(color_out, _socket(mix.inputs, "A_Color"))
-        color_out = _socket(mix.outputs, "Result_Color")
+        socket(mix.inputs, "Factor_Float").default_value = 1.0
+        socket(mix.inputs, "B_Color").default_value = (*rgb, 1.0)
+        b.link(color_out, socket(mix.inputs, "A_Color"))
+        color_out = socket(mix.outputs, "Result_Color")
 
     # --- アルファ ---
     alpha_out = None
@@ -238,10 +232,10 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
                 mix = b.add("ShaderNodeMix", 2, label="Emission × _EmissionColor")
                 mix.data_type = "RGBA"
                 mix.blend_type = "MULTIPLY"
-                _socket(mix.inputs, "Factor_Float").default_value = 1.0
-                _socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
-                b.link(e_out, _socket(mix.inputs, "A_Color"))
-                e_out = _socket(mix.outputs, "Result_Color")
+                socket(mix.inputs, "Factor_Float").default_value = 1.0
+                socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
+                b.link(e_out, socket(mix.inputs, "A_Color"))
+                e_out = socket(mix.outputs, "Result_Color")
             b.link(e_out, bsdf.inputs["Emission Color"])
         else:
             bsdf.inputs["Emission Color"].default_value = (*norm.emission_color[:3], 1.0)
@@ -350,10 +344,10 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
             tint = b.add("ShaderNodeMix", 2, label="MatCap Color")
             tint.data_type = "RGBA"
             tint.blend_type = "MULTIPLY"
-            _socket(tint.inputs, "Factor_Float").default_value = 1.0
-            _socket(tint.inputs, "B_Color").default_value = mc_color
-            b.link(mc_out, _socket(tint.inputs, "A_Color"))
-            mc_out = _socket(tint.outputs, "Result_Color")
+            socket(tint.inputs, "Factor_Float").default_value = 1.0
+            socket(tint.inputs, "B_Color").default_value = mc_color
+            b.link(mc_out, socket(tint.inputs, "A_Color"))
+            mc_out = socket(tint.outputs, "Result_Color")
         b.link(mc_out, group.inputs["MatCap"])
         group.inputs["MatCap Strength"].default_value = max(0.0, min(1.0, float(matcap.strength)))
         group.inputs["MatCap Mode"].default_value = float(matcap.mode)
@@ -380,10 +374,10 @@ def _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_inf
                 mix = b.add("ShaderNodeMix", 2, label="Emission × _EmissionColor")
                 mix.data_type = "RGBA"
                 mix.blend_type = "MULTIPLY"
-                _socket(mix.inputs, "Factor_Float").default_value = 1.0
-                _socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
-                b.link(e_out, _socket(mix.inputs, "A_Color"))
-                e_out = _socket(mix.outputs, "Result_Color")
+                socket(mix.inputs, "Factor_Float").default_value = 1.0
+                socket(mix.inputs, "B_Color").default_value = (*norm.emission_color[:3], 1.0)
+                b.link(e_out, socket(mix.inputs, "A_Color"))
+                e_out = socket(mix.outputs, "Result_Color")
             b.link(e_out, group.inputs["Emission"])
         else:
             group.inputs["Emission"].default_value = (*norm.emission_color[:3], 1.0)

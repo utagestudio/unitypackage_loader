@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
-from ..core.package import PackageError
+from ..core.package import PackageError, human_size
 from ..core.report import sanitize_display
 from ..core.units import (
     NO_MESH_REASON,
@@ -51,14 +51,6 @@ def _release_prepared() -> None:
     """
     if _pending is not None:
         _pending.prepared = None
-
-
-def _human_size(size: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
 
 
 def _short_reason(reason: str) -> str:
@@ -224,7 +216,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             item.kind = UNIT_MODELS
             item.guid = m.guid
             item.pathname = sanitize_display(m.entry.pathname)
-            item.size_text = _human_size(m.entry.size)
+            item.size_text = human_size(m.entry.size)
             if m.supported:
                 item.detail_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
             else:

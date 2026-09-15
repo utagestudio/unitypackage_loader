@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from .unity_yaml import to_float
 
 PIPELINE_BUILTIN = "BUILTIN"
 PIPELINE_URP = "URP"
@@ -45,14 +46,6 @@ def detect_pipeline(families: Iterable[str]) -> str:
     return PIPELINE_BUILTIN
 
 
-def _number(value: object, default: float) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return number if math.isfinite(number) else default
-
-
 def _srgb_to_linear(c: float) -> float:
     c = min(max(c, 0.0), 1e6)
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
@@ -61,7 +54,7 @@ def _srgb_to_linear(c: float) -> float:
 def _color(value: object) -> tuple[float, float, float]:
     if not isinstance(value, dict):
         return (1.0, 1.0, 1.0)
-    return tuple(_srgb_to_linear(_number(value.get(k), 1.0)) for k in "rgb")  # type: ignore[return-value]
+    return tuple(_srgb_to_linear(to_float(value.get(k), 1.0)) for k in "rgb")  # type: ignore[return-value]
 
 
 @dataclass
@@ -87,21 +80,21 @@ class BlenderLight:
 
 def convert_light(body: dict, pipeline: str) -> BlenderLight:
     """Light コンポーネントの中身（上書き済み）を Blender のライトの値にする。"""
-    light_type = int(_number(body.get("m_Type"), LIGHT_POINT))
-    intensity = max(_number(body.get("m_Intensity"), 1.0), 0.0)
-    light_range = max(_number(body.get("m_Range"), 10.0), 0.0)
+    light_type = int(to_float(body.get("m_Type"), LIGHT_POINT))
+    intensity = max(to_float(body.get("m_Intensity"), 1.0), 0.0)
+    light_range = max(to_float(body.get("m_Range"), 10.0), 0.0)
     shadows = body.get("m_Shadows") if isinstance(body.get("m_Shadows"), dict) else {}
-    shadow_type = int(_number(shadows.get("m_Type"), 0))
-    lightmapping = int(_number(body.get("m_Lightmapping"), 4))
+    shadow_type = int(to_float(shadows.get("m_Type"), 0))
+    lightmapping = int(to_float(body.get("m_Lightmapping"), 4))
     linear = intensity if pipeline != PIPELINE_BUILTIN else intensity ** _GAMMA
 
     result = BlenderLight("POINT", _color(body.get("m_Color")), 0.0, use_shadow=shadow_type != 0)
-    if _number(body.get("m_UseColorTemperature"), 0) != 0:
+    if to_float(body.get("m_UseColorTemperature"), 0) != 0:
         result.use_temperature = True
-        result.temperature = min(max(_number(body.get("m_ColorTemperature"), 6570.0), 800.0), 20000.0)
+        result.temperature = min(max(to_float(body.get("m_ColorTemperature"), 6570.0), 800.0), 20000.0)
     result.baked_only = lightmapping == LIGHTMAP_BAKED or light_type in (LIGHT_RECTANGLE, LIGHT_DISC)
     # ベイクのソフトシャドウの大きさ（リアルタイムでは Unity のライトは点・平行光源なので、ハードシャドウに近づける）
-    result.shadow_soft_size = _number(body.get("m_ShadowRadius"), 0.0) if lightmapping == LIGHTMAP_BAKED else 0.0
+    result.shadow_soft_size = to_float(body.get("m_ShadowRadius"), 0.0) if lightmapping == LIGHTMAP_BAKED else 0.0
 
     if light_type == LIGHT_DIRECTIONAL:
         result.type = "SUN"
@@ -110,15 +103,15 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
             result.energy = intensity / 683.0  # lux → W/m²（未計測の近似）
             result.notes.append("HDRP light intensity converted from lux without measurement")
         if lightmapping == LIGHTMAP_BAKED:
-            result.angle = math.radians(min(max(_number(body.get("m_ShadowAngle"), 0.0), 0.0), 180.0))
+            result.angle = math.radians(min(max(to_float(body.get("m_ShadowAngle"), 0.0), 0.0), 180.0))
         return result
 
     if light_type in (LIGHT_RECTANGLE, LIGHT_DISC):
         area = body.get("m_AreaSize") if isinstance(body.get("m_AreaSize"), dict) else {}
         result.type = "AREA"
         result.shape = "RECTANGLE" if light_type == LIGHT_RECTANGLE else "DISK"
-        result.size = max(_number(area.get("x"), 1.0), 1e-4)
-        result.size_y = max(_number(area.get("y"), 1.0), 1e-4)
+        result.size = max(to_float(area.get("x"), 1.0), 1e-4)
+        result.size_y = max(to_float(area.get("y"), 1.0), 1e-4)
         surface = result.size * result.size_y if light_type == LIGHT_RECTANGLE else math.pi * (result.size / 2) ** 2
         # 面のすぐ近くで、白い拡散面の画素が強さ（線形）になるように合わせる（Blender の面光源は近くで 画素 ≈ P / (面積 · π)。実測）
         result.energy = linear * surface * math.pi
@@ -138,8 +131,8 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
         result.use_custom_distance = True
         result.cutoff_distance = light_range
     if light_type == LIGHT_SPOT:
-        outer = min(max(_number(body.get("m_SpotAngle"), 30.0), 1.0), 179.0)
-        inner = min(max(_number(body.get("m_InnerSpotAngle"), outer * 0.727), 0.0), outer)
+        outer = min(max(to_float(body.get("m_SpotAngle"), 30.0), 1.0), 179.0)
+        inner = min(max(to_float(body.get("m_InnerSpotAngle"), outer * 0.727), 0.0), outer)
         result.spot_size = math.radians(outer)
         result.spot_blend = min(max(1.0 - inner / outer, 0.0), 1.0)
     return result
@@ -165,24 +158,24 @@ _GATE_FIT = {0: "VERTICAL", 1: "HORIZONTAL"}
 
 def convert_camera(body: dict) -> BlenderCamera:
     """Camera コンポーネントの中身（上書き済み）を Blender のカメラの値にする。"""
-    near = max(_number(body.get("near clip plane"), 0.3), 1e-4)
-    far = max(_number(body.get("far clip plane"), 1000.0), near * 1.001)
-    if _number(body.get("orthographic"), 0) != 0:
-        size = max(_number(body.get("orthographic size"), 5.0), 1e-4)
+    near = max(to_float(body.get("near clip plane"), 0.3), 1e-4)
+    far = max(to_float(body.get("far clip plane"), 1000.0), near * 1.001)
+    if to_float(body.get("orthographic"), 0) != 0:
+        size = max(to_float(body.get("orthographic size"), 5.0), 1e-4)
         return BlenderCamera("ORTHO", sensor_fit="VERTICAL", ortho_scale=2 * size, clip_start=near, clip_end=far)
     camera = BlenderCamera("PERSP", clip_start=near, clip_end=far)
-    if int(_number(body.get("m_projectionMatrixMode"), 1)) == 2:  # Physical Camera
+    if int(to_float(body.get("m_projectionMatrixMode"), 1)) == 2:  # Physical Camera
         sensor = body.get("m_SensorSize") if isinstance(body.get("m_SensorSize"), dict) else {}
         shift = body.get("m_LensShift") if isinstance(body.get("m_LensShift"), dict) else {}
-        camera.lens = max(_number(body.get("m_FocalLength"), 50.0), 0.1)
-        camera.sensor_width = max(_number(sensor.get("x"), 36.0), 0.1)
-        camera.sensor_height = max(_number(sensor.get("y"), 24.0), 0.1)
-        camera.sensor_fit = _GATE_FIT.get(int(_number(body.get("m_GateFitMode"), 2)), "AUTO")
-        camera.shift_x = _number(shift.get("x"), 0.0)
-        camera.shift_y = _number(shift.get("y"), 0.0)
+        camera.lens = max(to_float(body.get("m_FocalLength"), 50.0), 0.1)
+        camera.sensor_width = max(to_float(sensor.get("x"), 36.0), 0.1)
+        camera.sensor_height = max(to_float(sensor.get("y"), 24.0), 0.1)
+        camera.sensor_fit = _GATE_FIT.get(int(to_float(body.get("m_GateFitMode"), 2)), "AUTO")
+        camera.shift_x = to_float(shift.get("x"), 0.0)
+        camera.shift_y = to_float(shift.get("y"), 0.0)
         return camera
     # Unity の field of view は縦の画角
-    fov = math.radians(min(max(_number(body.get("field of view"), 60.0), 0.1), 179.0))
+    fov = math.radians(min(max(to_float(body.get("field of view"), 60.0), 0.1), 179.0))
     camera.sensor_fit = "VERTICAL"
     camera.lens = (camera.sensor_height / 2) / math.tan(fov / 2)
     return camera

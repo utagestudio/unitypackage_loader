@@ -37,7 +37,7 @@ from dataclasses import dataclass, field, replace
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
-from .unity_yaml import UnityRef
+from .unity_yaml import UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
 CLASS_TRANSFORM = 4
@@ -139,30 +139,18 @@ class RawAsset:
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
-def _guid(ref: object) -> str | None:
-    return ref.guid.lower() if isinstance(ref, UnityRef) and ref.guid else None
-
-
 def _file_id(ref: object) -> int:
     return ref.file_id if isinstance(ref, UnityRef) else 0
-
-
-def _number(value: object, default: float) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return number if math.isfinite(number) else default
 
 
 def _vector(value: object, default: tuple[float, ...], keys: str) -> list[float]:
     if not isinstance(value, dict):
         return list(default)
-    return [_number(value.get(k), d) for k, d in zip(keys, default)]
+    return [to_float(value.get(k), d) for k, d in zip(keys, default)]
 
 
 def _targets(items: object) -> list[tuple[int, str | None]]:
-    return [(r.file_id, _guid(r)) for r in (items if isinstance(items, list) else []) if isinstance(r, UnityRef)]
+    return [(r.file_id, ref_guid(r)) for r in (items if isinstance(items, list) else []) if isinstance(r, UnityRef)]
 
 
 def parse_asset(data: str | bytes) -> RawAsset:
@@ -183,7 +171,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
         if doc.class_id == CLASS_GAME_OBJECT:
             name = body.get("m_Name")
             raw.names[doc.file_id] = name if isinstance(name, str) else str(name or "")
-            raw.active[doc.file_id] = _number(body.get("m_IsActive"), 1.0) != 0
+            raw.active[doc.file_id] = to_float(body.get("m_IsActive"), 1.0) != 0
         elif doc.class_id in _TRANSFORM_CLASSES:
             raw.transforms[doc.file_id] = _RawTransform(
                 doc.file_id,
@@ -195,7 +183,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 doc.class_id == CLASS_RECT_TRANSFORM,
             )
         elif doc.class_id == CLASS_MESH_FILTER:
-            mesh = _guid(body.get("m_Mesh"))
+            mesh = ref_guid(body.get("m_Mesh"))
             if mesh:
                 meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in _RENDERER_CLASSES:
@@ -204,7 +192,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_PREFAB_INSTANCE:
             # 2018.2 以前は m_ParentPrefab。prefab アセット自身の記録（m_IsPrefabParent: 1）は元の GUID を持たないので飛ばす
-            source = _guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
+            source = ref_guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
             modification = body.get("m_Modification")
             modification = modification if isinstance(modification, dict) else {}
             if not source:
@@ -216,7 +204,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                     continue
                 target, path = item.get("target"), item.get("propertyPath")
                 if isinstance(target, UnityRef) and isinstance(path, str):
-                    mods.append((target.file_id, _guid(target), path, item.get("value"), item.get("objectReference")))
+                    mods.append((target.file_id, ref_guid(target), path, item.get("value"), item.get("objectReference")))
             raw.instances.append(
                 _RawInstance(
                     doc.file_id,
@@ -231,12 +219,12 @@ def parse_asset(data: str | bytes) -> RawAsset:
         body = doc.body
         go = _file_id(body.get("m_GameObject"))
         mats = body.get("m_Materials")
-        materials = [ref.guid if isinstance(ref, UnityRef) and ref.guid else None for ref in (mats if isinstance(mats, list) else [])]
+        materials = [ref_guid(ref) for ref in (mats if isinstance(mats, list) else [])]
         if doc.class_id == CLASS_SKINNED_MESH_RENDERER:
-            mesh, mesh_id = _guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+            mesh, mesh_id = ref_guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
         else:
             mesh, mesh_id = meshes.get(go, (None, 0))
-        enabled = _number(body.get("m_Enabled"), 1.0) != 0
+        enabled = to_float(body.get("m_Enabled"), 1.0) != 0
         raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
     return raw
 
@@ -505,7 +493,7 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
         values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
         index = _AXES[match.group(2)]
         if index < size:
-            number = _number(value, float("nan"))
+            number = to_float(value, float("nan"))
             values[index] = None if math.isnan(number) else number
         return True
     material = _MATERIAL_PATH.fullmatch(path)
@@ -516,7 +504,7 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
         slots = root.model_materials.setdefault(name, [])
         if index >= len(slots):
             slots.extend([None] * (index + 1 - len(slots)))
-        slots[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+        slots[index] = ref_guid(reference)
         return True
     return False
 
@@ -539,14 +527,14 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         values = getattr(node, _TRS_FIELDS[match.group(1)])
         index = _AXES[match.group(2)]
         if index < len(values):
-            values[index] = _number(value, values[index])
+            values[index] = to_float(value, values[index])
         return True
     if path in ("m_IsActive", "m_Name"):
         node_key = h.game_objects.get(key)
         if node_key is None or node_key not in added:
             return False
         if path == "m_IsActive":
-            h.nodes[node_key].active = _number(value, 1.0) != 0
+            h.nodes[node_key].active = to_float(value, 1.0) != 0
         else:
             h.nodes[node_key].name = "" if value is None else str(value)
         return True
@@ -562,12 +550,12 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
     if path == "m_Enabled":
         if renderer is None:
             return False
-        renderer.enabled = _number(value, 1.0) != 0
+        renderer.enabled = to_float(value, 1.0) != 0
         return True
     if path == "m_Materials.Array.size":
         if renderer is None:
             return False
-        size = int(_number(value, len(renderer.materials)))
+        size = int(to_float(value, len(renderer.materials)))
         if 0 <= size <= MAX_SLOTS:
             renderer.materials = (renderer.materials + [None] * size)[:size]
         return True
@@ -579,7 +567,7 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
         if index < MAX_SLOTS:
             if index >= len(renderer.materials):
                 renderer.materials.extend([None] * (index + 1 - len(renderer.materials)))
-            renderer.materials[index] = reference.guid if isinstance(reference, UnityRef) and reference.guid else None
+            renderer.materials[index] = ref_guid(reference)
         return True
     return False
 
@@ -628,7 +616,7 @@ def components(h: Hierarchy, class_ids: Iterable[int] = _COMPONENT_CLASSES) -> l
         for key, (class_id, body) in node.components.items():
             if class_id not in wanted:
                 continue
-            enabled = _number(body.get("m_Enabled"), 1.0) != 0
+            enabled = to_float(body.get("m_Enabled"), 1.0) != 0
             result.append(PlacedComponent(key, node_key, node.name, class_id, body, worlds[node_key], active[node_key] and enabled))
     return result
 

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
 from .unity_binary import load_documents
-from .unity_yaml import UnityRef
+from .unity_yaml import UnityRef, ref_guid
 
 __all__ = ["TexRef", "UnityMaterial", "NormalizedMaterial", "parse_material", "MaterialParseError"]
 
@@ -170,9 +170,10 @@ def parse_material(text: str | bytes, guid: str = "", pathname: str = "") -> Uni
             continue
         mat.texture_slots.add(name)
         ref = value.get("m_Texture")
-        if isinstance(ref, UnityRef) and ref.guid:
+        guid = ref_guid(ref)
+        if guid:
             mat.textures[name] = TexRef(
-                guid=ref.guid,
+                guid=guid,
                 file_id=ref.file_id,
                 scale=_as_vec2(value.get("m_Scale"), (1.0, 1.0)),
                 offset=_as_vec2(value.get("m_Offset"), (0.0, 0.0)),
