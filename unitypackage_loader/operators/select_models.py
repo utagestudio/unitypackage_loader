@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import traceback
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
@@ -29,12 +30,15 @@ from ..core.units import (
 )
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
+if TYPE_CHECKING:
+    from ..blender.importer import ImportOptions, PreparedPackage
+
 
 @dataclass
 class _Pending:
     filepath: str
-    opts: object  # ImportOptions
-    prepared: object | None  # PreparedPackage。execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
+    opts: ImportOptions
+    prepared: PreparedPackage | None  # execute の後は手放す（全 .mat / .prefab / .unity のバイト列とシーンの階層を持つため）
 
 
 _pending: _Pending | None = None

@@ -34,6 +34,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from typing import NamedTuple
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
@@ -794,14 +795,33 @@ def _is_foreign(node: Node, model_guid: str, models: set[str]) -> bool:
 _IDENTITY_NODE = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
 
 
+ModelNames = Mapping[str, str] | Iterable[str]  # モデルの GUID → ルートの名前（名前を使わなければ GUID の並びでもよい）
+
+
+def _model_names(models: ModelNames) -> dict[str, str | None]:
+    """モデルの GUID（小文字）→ ルートの名前。GUID の並びを渡されたら名前は None。"""
+    if isinstance(models, Mapping):
+        return {g.lower(): n for g, n in models.items()}
+    return {g.lower(): None for g in models}
+
+
+class _RendererRow(NamedTuple):
+    """``placements`` の 1 回目で決める、Renderer 1 つの名前とルートの候補。"""
+
+    key: int  # Renderer を持つ Node
+    name: str
+    candidate: int  # まとめる先の候補
+    own: int  # 候補を使わないときのルート
+
+
 def placements(
-    h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None
+    h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
     ``model_guids`` にモデルの GUID → ルートの名前の辞書を渡すと、下の「候補の名前がモデルの名前と同じか」に使う。
 
-    ``mesh_names``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
+    ``name_tables``（モデルの GUID → .meta の表の fileID → 名前）があれば、Renderer の名前にはメッシュ参照から引いた
     メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
     変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
 
@@ -815,9 +835,9 @@ def placements(
     FBX の中のノードをルートにした配置は、``node_transforms`` でそのノードを単位行列にする。Unity の GameObject の
     行列がノードの元の変換を含んでいるので、Blender のオブジェクトの元の変換を掛けないようにするため。
     """
-    models = {g.lower() for g in model_guids}
-    root_names = {g.lower(): n for g, n in model_guids.items()} if isinstance(model_guids, Mapping) else {}
-    tables = {g.lower(): table for g, table in (mesh_names or {}).items()}
+    root_names = _model_names(model_guids)
+    models = set(root_names)
+    tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
     # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
     for node in h.nodes.values():
@@ -832,8 +852,8 @@ def placements(
     children = h.children()
 
     # 1 回目: Renderer ごとに名前とルートの候補を決める。モデルの PrefabInstance はそのまま配置にする
-    items: list[ModelPlacement | tuple[int, str, int, int]] = []
-    groups: dict[tuple[int, str], list[tuple[int, str, int, int]]] = {}
+    items: list[ModelPlacement | _RendererRow] = []
+    groups: dict[tuple[int, str], list[_RendererRow]] = {}
     for key, node in h.nodes.items():
         if node.model_guid is not None:
             placement = ModelPlacement(node.model_guid, key, worlds[key], active[key])
@@ -852,7 +872,7 @@ def placements(
         if not (names and name in names) and mesh_name and mesh_name != _ROOT_NODE_NAME:
             name = mesh_name
         candidate, own = _root_candidates(h, key, renderer.mesh_guid, tables.get(renderer.mesh_guid, {}), names)
-        item = (key, name, candidate, own)
+        item = _RendererRow(key, name, candidate, own)
         groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
         items.append(item)
 
@@ -925,9 +945,11 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: Iterable[str], mesh_names: dict[str, dict[int, str]] | None = None) -> SceneContents:
-    models = {g.lower() for g in model_guids}
-    found = placements(h, model_guids if isinstance(model_guids, Mapping) else models, mesh_names)
+def summarize(h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None) -> SceneContents:
+    """シーンの概要。引数は ``placements`` と同じ。"""
+    names = _model_names(model_guids)
+    models = set(names)
+    found = placements(h, names, name_tables)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )
