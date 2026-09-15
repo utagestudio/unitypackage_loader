@@ -435,11 +435,15 @@ class Expander:
                 file_id = _LEGACY_MODEL_IDS.get(file_id, file_id)
             return remap(iid, file_id)
 
+        added_keys = set(added.values())
+        children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
         for file_id, guid in instance.removed_game_objects:
             key = target_key(file_id, guid)
             node_key = h.game_objects.get(key) if key is not None else None
-            if node_key is not None and node_key in added.values():
-                _remove_subtree(h, node_key)
+            if node_key is not None and node_key in added_keys:
+                if children is None:
+                    children = h.children()
+                _remove_subtree(h, node_key, children)
             elif is_model:
                 h.unresolved_overrides += 1
         for file_id, guid in instance.removed_components:
@@ -453,8 +457,7 @@ class Expander:
             elif is_model:
                 h.unresolved_overrides += 1
 
-        added_keys = set(added.values())
-        root_key = remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
+        root_key =remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
         table = self._recycle.get(source, {}) if is_model else {}
         for file_id, guid, path, value, reference in instance.modifications:
             key = target_key(file_id, guid)
@@ -642,8 +645,10 @@ def _assign_scopes(h: Hierarchy, own: set[int]) -> None:
         node.scope_matrix = chain([h.nodes[k].local for k in reversed(path[:-1])])
 
 
-def _remove_subtree(h: Hierarchy, key: int) -> None:
-    children = h.children()
+def _remove_subtree(h: Hierarchy, key: int, children: dict[int, list[int]] | None = None) -> None:
+    """``key`` の Node と子孫を消す。``children`` は ``h.children()`` の結果（続けて消すときに作り直さないよう渡せる）。"""
+    if children is None:
+        children = h.children()
     stack = [key]
     while stack:
         current = stack.pop()

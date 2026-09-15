@@ -55,7 +55,8 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの key は prefab と同じく「PrefabInstance の fileID XOR 元の key」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
 - 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらず定数 -8679921383154817045）を配置のルートにする。中のオブジェクトへの上書きは、新しい形式では fileID を名前に結び付けられないので数えて警告に出す（Issue #31）。Unity 2018.2 以前の形式の .meta は `fileIDToRecycleName`（fileID → 名前）を持つので、それで名前を引けた上書きは当てる（下記「古い形式のモデルの中への上書き」）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab や、FBX から切り離してシーンに置いた小物）は、Renderer ごとにモデルのルートを決め、同じルート・同じモデルの Renderer をまとめる（下記「Renderer をまとめるモデルのルート」）。
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
-- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトの `matrix_world` を置き直す（親から順に。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_set` と `hide_render` で隠す。
+- 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが上書きで動いていれば、そのノードから逆算したルートの行列でオブジェクトを置き直す（親から順に。ワールド行列は評価を待たずに親をたどって計算する。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_render` をその場で立て、`hide_set` は読み込みがすべて終わってからまとめて当てる（下記の理由で、読み込み中はビューレイヤーに無いため）。
+- 読み込み中のビューレイヤー: インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのオブジェクトが増えるほど 1 回が重くなる（3000 オブジェクトで 1 回 180 ms。Japanese Street の Day_Showcase の読み込み 16 秒の大半）。パッケージのコレクションは読み込みが終わるまで `exclude` し、モデルは空の作業用コレクション「<パッケージ名> (importing)」に読み込んでから配置先へ移す。終わったら（失敗しても）除外を戻して作業用コレクションを消す。これで Day_Showcase は 1.7 秒になった（Issue #75）。
 - 使われていない部品（Issue #58）: 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、表に無いメッシュのオブジェクト（prefab が使っていない LOD、FBX にだけある別のノードなど）を非表示にする（削除はしない。件数を警告に出す）。FBX を直接置いた配置は対象にしない。Renderer の名前は GameObject 名ではなくメッシュ参照（MeshFilter / SkinnedMeshRenderer の `m_Mesh` の fileID）から決める。展開後に GameObject の名前を変えていると、名前の照合では使っている部品まで隠してしまうため。モデルの .meta の表（`fileIDToRecycleName`、古い番号を引き継いだ `internalIDToNameTable`）で名前を引き、表の無い新しい形式では fileID = xxHash64("Type:Mesh-><名前>0")（`core/unity_ids.py`。Unity 6 の prefab と Japanese Street の 100 か所で一致）を Blender のオブジェクト名で計算して照合する。
 - Renderer をまとめるモデルのルート（Issue #60）: 以前は Transform を直接持つアセットでの最上位の祖先に固定していたため、シーンの共通の親（部屋など）の下に同じ小物を複製して並べると、名前が同じ Renderer が 1 つだけ残り、しかも親の原点に置かれていた。モデルの .meta の表（`fileIDToRecycleName` / `internalIDToNameTable`）にある、ルート以外の GameObject 名を FBX のノード名として、次のように決める（`core/hierarchy.py` の `placements`）。
   - 1 メッシュの FBX（表の GameObject はルートだけで、メッシュも 1 つ）: Renderer の GameObject 自身。
@@ -171,7 +172,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
  ファイルブラウザ（右側にオプション）      ← §3.1   オプションのポップアップ（invoke_props_dialog）
         │  [Import]                                    │  [Import]
         ▼                                              ▼
- パッケージ走査（索引作成、シーン・prefab・モデルの候補列挙）
+ パッケージ走査（索引作成、prefab・モデルの候補列挙。シーンの展開は Scenes を開くか読み込むときまで遅らせる）
         │
         ├─ 読み込める候補が 1 つ以下、または Selection dialog が All / First → そのまま続行（Models 単位）
         └─ それ以外 → 選択ダイアログ（読み込む単位と候補を選ぶ）    ← §3.3
@@ -290,6 +291,9 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 - 候補は推測で外さない。読み込めない候補（Renderer がパッケージ内のモデルを使っていない prefab、使うモデルがすべて読み込めない prefab、非対応形式や同梱 .blend OFF のモデル、パッケージ内のモデルを置いていないシーン、読めないシーン）は灰色にして理由を出す（`core/units.py`）。候補が 1 つも無い単位はタブに出さない。
 - 既定の単位は、前回選んだ単位（Preferences の `last_import_unit`）に読み込める候補があればそれ、無ければ Prefabs → Models → Scenes の順。
+- シーンの展開（数 MB の .unity の解析と prefab の展開）は重いので、ダイアログを開いた時点では行わない。タブの件数はパッケージ内のシーン数で出し、
+  Scenes が既定になりうるとき（前回が Scenes か、ほかに読み込めるものが無い）はダイアログを開くときに、それ以外は Scenes タブに切り替えたときに展開して
+  行を加える（`PreparedPackage.ensure_scenes`。Japanese Street で `prepare_package` が 13.6 秒から 10.2 秒になった。Issue #75）。
 - **並べ方**（Prefabs で 2 つ以上選んだとき有効）: `Side by Side` は prefab ごとのコレクションのワールド座標の外形を求め、1 つ目を動かさずに +X へ並べる。5 つ以上は ceil(√n) 列の格子に折り返し、次の行を +Y に置く。行の中では手前側（Y の最小）を揃える。間隔は最大の幅・奥行きの 25%（最小 0.1 m）（`core/arrange.py`）。動かすのは親を持たないオブジェクト。`Stack at Origin` は動かさない。行を出し入れするとダイアログの高さと Import ボタンの位置が変わるので、Prefabs では常に表示し、選択が 1 つ以下なら淡色にする。
 - 読み込む単位 Prefabs では prefab 内の配置（子オブジェクトの位置など）は再現せず、prefab のモデルはすべてそのコレクションの原点に置く。配置を再現するのは Scenes だけ。
 - 一覧は `UIList` + `CollectionProperty`（WindowManager 側。All / None ボタンから書き換えるため）。表示中の単位への絞り込みは `filter_items` で行う（名前での絞り込みも併用）。単位の enum は候補数入りのラベルを動的 items で出すので、文字列をモジュールで保持する。パッケージ由来の pathname は表示用に `sanitize_display` を通し、選択結果は GUID で持つ。
@@ -378,7 +382,7 @@ unitypackage_loader/
 
 ```
 .unitypackage
-  │ (1) 索引作成: 1 パス目 — pathname と asset.meta だけ読む
+  │ (1) 索引作成: 1 パス目 — pathname と asset.meta、.mat / .prefab / .unity の実体だけ読む
   ▼
 PackageIndex { guid → AssetEntry(pathname, meta_text, has_asset, size) }
   │ (2) 分類: models / materials / textures / other
@@ -387,7 +391,7 @@ PackageIndex { guid → AssetEntry(pathname, meta_text, has_asset, size) }
   │ (5) プロファイル判定 → NormalizedMaterial
   │ (6) 必要なメンバーだけ展開: 2 パス目 — model, 参照 texture を extract_dir へ
   ▼
-  (7) bpy.ops.import_scene.fbx  — 前後の bpy.data 差分で新規 Object / Material を捕捉
+  (7) bpy.ops.import_scene.fbx  — 前後の bpy.data 差分で新規 Object / Material を捕捉（作業用コレクションに読み込んで配置先へ移す）
   (8) 新規 Material ごとに NormalizedMaterial を引き、ノード生成
   (9) 画像読み込み（check_existing、カラースペース、alpha_mode）
  (10) レポート
@@ -414,6 +418,9 @@ class UnityPackage:
 ```
 
 - `tarfile.open(path, "r:gz")` をストリームで 1 回走査。`pathname` と `asset.meta` は即読み。`asset` はサイズだけ記録。
+  ただし `.mat` / `.prefab` / `.unity` の実体（64 MiB まで）はメモリに残し、`read_asset` で走査し直さない。tar では `asset` が `pathname` より
+  先に来るのが普通なので、種類の分からない `asset` はいったん読んで保持し、同じ GUID の `pathname` で拡張子が分かった時点で残すか捨てるかを決める
+  （保持は常に 1 件）。`pathname` が離れた位置にあるパッケージでは 2 MiB 以下だけを残す（Issue #75）。
 - 2 パス目は必要 GUID 集合に絞って `extractfile`。数 GB のパッケージでも展開量は必要分だけ。
 - `pathname` の 1 行目のみ使用（2 行目に `00` が入る形式がある）。
 - パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる

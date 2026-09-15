@@ -128,6 +128,7 @@ class ModelSummary:
     resolved_count: int  # そのうちパッケージ内の .mat に対応付けできた数
     supported: bool
     skip_reason: str = ""  # supported が False の理由
+    info: ModelImporterInfo = field(default_factory=ModelImporterInfo)  # .meta の設定（読み込みのたびに解析し直さない。#75）
 
     @property
     def guid(self) -> str:
@@ -147,9 +148,28 @@ class PreparedPackage:
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
-    scenes: list[SceneSummary] = field(default_factory=list)  # 読み込む単位 Scenes の候補（pathname 順）
-    scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層
+    scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
+    scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
+    _scenes: list[SceneSummary] | None = field(default=None, repr=False)
+
+    def ensure_scenes(self) -> list[SceneSummary]:
+        """シーンを展開して、読み込む単位 Scenes の候補（pathname 順）を返す。展開は初めて呼ばれたときの 1 回だけ。
+
+        大きなシーンの解析は重いので、Models / Prefabs だけを読む場合には展開しない（#75）。展開中の警告は ``warnings`` に加える。
+        """
+        if self._scenes is None:
+            unsupported = {m.guid: m.skip_reason for m in self.models if not m.supported}
+            self._scenes, self.scene_hierarchies = _prepare_scenes(self.pkg, self.models, self.warnings.append, unsupported)
+        return self._scenes
+
+    @property
+    def scenes(self) -> list[SceneSummary]:
+        return self.ensure_scenes()
+
+    @property
+    def scenes_expanded(self) -> bool:
+        return self._scenes is not None
 
     @property
     def supported_models(self) -> list[ModelSummary]:
@@ -164,9 +184,12 @@ class PreparedPackage:
         return [s for s in self.scenes if s.supported]
 
     @property
-    def choice_count(self) -> int:
-        """ダイアログで選べる（読み込める）候補の総数。"""
-        return choice_count(self.prefabs, len(self.supported_models), self.scenes)
+    def has_choices(self) -> bool:
+        """読み込める候補が 2 つ以上あるか（ダイアログを出すか）。シーンを数えなくても決まるなら、シーンは展開しない。"""
+        others = choice_count(self.prefabs, len(self.supported_models))
+        if others > 1 or not self.scene_entries:
+            return others > 1
+        return choice_count(self.prefabs, len(self.supported_models), self.scenes) > 1
 
     def table_for(self, model_guid: str) -> dict[str, RendererMaterials]:
         """Models 単位でモデルに当てはめる表。そのモデルを使う prefab をパス順に先勝ちで統合したもの。"""
@@ -254,7 +277,7 @@ def prepare_package(
             skip_reason = BLEND_DISABLED_REASON
         elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
             skip_reason = COLLADA_UNAVAILABLE_REASON
-        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason))
+        models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason, info))
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
@@ -294,10 +317,9 @@ def prepare_package(
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
-    scenes, hierarchies = _prepare_scenes(pkg, models, warnings.append, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, scenes=scenes, scene_hierarchies=hierarchies,
+        prefabs=prefabs, scene_entries=pkg.scenes(),
         pipeline=detect_pipeline(n.family for n in normalized.values()),
     )
 
@@ -323,7 +345,7 @@ def _prepare_scenes(
             return None
 
     # 古い形式の .meta の fileIDToRecycleName で、モデルの中への上書きを名前に結び付ける（#53）
-    recycle = {m.guid: _model_info(m.entry, warn).recycle_names for m in models}
+    recycle = {m.guid: m.info.recycle_names for m in models}
     expander = Expander(read, model_names, recycle)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
@@ -625,8 +647,13 @@ class _SceneTemplate:
         return cls(list(objects), {o: o.matrix_basis.copy() for o in objects}, {o: o.hide_render for o in objects})
 
 
-def _scene_empty(hierarchy: Hierarchy, key: int, collection, empties: dict[int, bpy.types.Object], active: dict[int, bool]):
-    """Node と、まだ作っていない祖先の Empty を作り、Node の Empty を返す（Unity の親子関係を再現する）。"""
+def _scene_empty(
+    hierarchy: Hierarchy, key: int, collection, empties: dict[int, bpy.types.Object], active: dict[int, bool], hidden: list
+):
+    """Node と、まだ作っていない祖先の Empty を作り、Node の Empty を返す（Unity の親子関係を再現する）。
+
+    非アクティブな Node の Empty は ``hidden`` に加える（読み込み中はビューレイヤーに無いので、後で ``hide_set`` する）。
+    """
     path: list[int] = []
     seen: set[int] = set()
     current: int | None = key
@@ -645,8 +672,7 @@ def _scene_empty(hierarchy: Hierarchy, key: int, collection, empties: dict[int, 
         empty.matrix_basis = Matrix(unity_to_blender(node.local))
         empty["unity_game_object"] = node.name
         if not active.get(node_key, True):
-            empty.hide_set(True)
-            empty.hide_render = True
+            _hide(empty, hidden)
         empties[node_key] = empty
         parent = empty
     return empties.get(key, parent)
@@ -780,11 +806,51 @@ def _apply_node_transforms(template: _SceneTemplate, objects, overrides, unit_sc
     return skipped
 
 
-def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> int:
+def _hide(obj: bpy.types.Object, hidden: list) -> None:
+    """レンダリングからはすぐ外し、ビューポートの非表示は ``hidden`` に積んで読み込みの後で当てる。
+
+    読み込み中のコレクションはビューレイヤーから外していて、そこにあるオブジェクトには ``hide_set`` を使えない。
+    """
+    obj.hide_render = True
+    hidden.append(obj)
+
+
+def _move_collection_contents(source: bpy.types.Collection, target: bpy.types.Collection) -> None:
+    """``source`` のオブジェクトと子コレクションを ``target`` へ移す（先にリンクしてから外す）。"""
+    for obj in list(source.objects):
+        if obj.name not in target.objects:
+            target.objects.link(obj)
+        source.objects.unlink(obj)
+    for child in list(source.children):
+        if child.name not in target.children:
+            target.children.link(child)
+        source.children.unlink(child)
+
+
+def _world_matrix(obj: bpy.types.Object | None) -> Matrix | None:
+    """評価を待たずに、親をたどって ``matrix_world`` を求める（コンストレイントは見ない）。
+
+    読み込み中のコレクションはビューレイヤーから外していて評価されないため。ボーンなどオブジェクト以外を親にするものが
+    途中にあれば None。``obj`` が None なら単位行列。
+    """
+    matrix = Matrix.Identity(4)
+    count = 0
+    while obj is not None and count < 1000:
+        if obj.parent is None:
+            return obj.matrix_basis @ matrix
+        if obj.parent_type != "OBJECT":
+            return None
+        matrix = obj.matrix_parent_inverse @ obj.matrix_basis @ matrix
+        obj, count = obj.parent, count + 1
+    return matrix if obj is None else None
+
+
+def _apply_offsets(objects, root_world, offsets, scale: float) -> int:
     """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
 
     ``root_world`` は配置のルートの Unity での行列。置いた直後のオブジェクトの行列は「ルートの行列 · globalScale ·
     原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
+    行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
     """
     def depth(obj) -> int:
         count = 0
@@ -795,18 +861,19 @@ def _apply_offsets(objects, root_world, offsets, scale: float, view_layer) -> in
     targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
     if not targets:
         return 0
-    view_layer.update()
     scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
     to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
-    origins = {o: to_origin @ o.matrix_world for o in targets}  # 動かす前にまとめて求める
+    worlds = {o: _world_matrix(o) for o in targets}  # 動かす前にまとめて求める
     skipped = 0
     for obj in sorted(targets, key=depth):
         deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
-        if deformed or obj.type == "ARMATURE":
+        parent_world = _world_matrix(obj.parent)  # 親を先に動かしているので、ここで求め直す
+        if deformed or obj.type == "ARMATURE" or worlds[obj] is None or parent_world is None:
             skipped += 1
             continue
-        view_layer.update()
-        obj.matrix_world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ origins[obj]
+        world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ to_origin @ worlds[obj]
+        frame = parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
+        obj.matrix_basis = frame.inverted_safe() @ world
     return skipped
 
 
@@ -871,6 +938,8 @@ def _run_import(
             filepath, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
         )
     pkg = prepared.pkg
+    if opts.unit == UNIT_SCENES:
+        prepared.ensure_scenes()  # 展開中の警告もレポートに載せるため、警告を写す前に展開する
     for w in prepared.warnings:
         report.warn(w)
     for m in prepared.models:
@@ -946,6 +1015,9 @@ def _run_import(
     scene = context.scene
     collection = bpy.data.collections.new(package_path.stem)
     scene.collection.children.link(collection)
+    staging = bpy.data.collections.new(f"{package_path.stem} (importing)")  # 読み込み中だけ使う作業用のコレクション
+    scene.collection.children.link(staging)
+    hidden_objects: list[bpy.types.Object] = []  # 読み込みの後で hide_set するもの
     view_layer = context.view_layer
     prev_active = view_layer.active_layer_collection
 
@@ -967,7 +1039,7 @@ def _run_import(
     def build_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before) -> list[bpy.types.Object]:
         """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
         model = summary.entry
-        model_info = _model_info(model, report.warn)
+        model_info = summary.info
         imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if opts.reuse_existing else {}
@@ -1105,13 +1177,18 @@ def _run_import(
         return new["objects"]
 
     def import_model(summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
-        """モデルを 1 回読み込む。途中で失敗したら、そのモデルで作ったものとレポートの行を消してから例外を送る（#70）。"""
+        """モデルを 1 回読み込む。途中で失敗したら、そのモデルで作ったものとレポートの行を消してから例外を送る（#70）。
+
+        読み込みは作業用のコレクションで行い、終わったら ``target`` へ移す（#75）。
+        """
         before = _snapshot()
         rows = (report.models, report.objects, report.materials, report.images)
         counts = [len(items) for items in rows]
         known = summary.guid in imported_models
         try:
-            return build_model(summary, prefab_table, target, before)
+            objects = build_model(summary, prefab_table, staging, before)
+            _move_collection_contents(staging, target)
+            return objects
         except Exception:
             _remove_created(before)
             for items, count in zip(rows, counts):
@@ -1133,16 +1210,12 @@ def _run_import(
         target["unity_scene"] = pathname
         target["unity_scene_guid"] = scene_summary.guid
         report.scenes.append(pathname)
-        layer_coll = _find_layer_collection(view_layer.layer_collection, target)
-        if layer_coll is not None:
-            view_layer.active_layer_collection = layer_coll
 
         hierarchy = prepared.scene_hierarchies[scene_summary.guid]
         active = effective_active(hierarchy)
         empties: dict[int, bpy.types.Object] = {}
         templates: dict[tuple, _SceneTemplate] = {}
         skipped_offsets = 0
-        scales: dict[str, float] = {}  # モデルの GUID → .meta の globalScale（配置ごとに .meta を読み直さない）
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
         skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
         hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
@@ -1158,7 +1231,7 @@ def _run_import(
                 continue
             if summary.guid in failed_models:
                 continue  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
-            root = _scene_empty(hierarchy, placement.root, target, empties, active)
+            root = _scene_empty(hierarchy, placement.root, target, empties, active, hidden_objects)
             table = {
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
                 for name, r in placement.renderers.items()
@@ -1175,16 +1248,14 @@ def _run_import(
             else:
                 objects = _duplicate_objects(template, target)
                 report.objects.extend(o.name for o in objects)
-            if summary.guid not in scales:
-                scales[summary.guid] = _model_info(summary.entry, report.warn).global_scale
-            scale = scales[summary.guid]
+            scale = summary.info.global_scale
             _attach_to_empty(objects, root, scale)
             if placement.node_transforms:
                 if summary.guid not in unit_scales:
                     unit_scales[summary.guid] = read_unit_scale(paths[summary.guid]) if summary.entry.ext == ".fbx" else None
                 skipped_nodes += _apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
             if placement.offsets:
-                skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale, view_layer)
+                skipped_offsets += _apply_offsets(objects, placement.world, placement.offsets, scale)
             hidden = {name for name, r in placement.renderers.items() if not r.visible}
             # 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけ。
             # FBX にしかない部品（prefab が使っていない LOD や別のノード）は隠す（#58）。FBX 由来の名前に「.002」が
@@ -1200,8 +1271,7 @@ def _run_import(
                     and mesh_file_id(obj.name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
                 )
                 if not placement.active or name in hidden or unused:
-                    obj.hide_set(True)
-                    obj.hide_render = True
+                    _hide(obj, hidden_objects)
                 if unused and placement.active:
                     hidden_unused += 1
 
@@ -1215,7 +1285,7 @@ def _run_import(
                 # 同じ GameObject にモデルの配置の Empty があれば、その子にする
                 parent, local = empties[component.node], Matrix.Identity(4)
             else:
-                parent = _scene_empty(hierarchy, node.parent, target, empties, active) if node.parent is not None else None
+                parent = _scene_empty(hierarchy, node.parent, target, empties, active, hidden_objects) if node.parent is not None else None
                 local = Matrix(unity_to_blender(node.local))
             if component.class_id == CLASS_LIGHT:
                 values = convert_light(component.body, prepared.pipeline)
@@ -1236,8 +1306,7 @@ def _run_import(
             location, rotation, _ = (local @ Matrix(LIGHT_CAMERA_BASIS)).decompose()
             obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
             if not component.active:
-                obj.hide_set(True)
-                obj.hide_render = True
+                _hide(obj, hidden_objects)
         if baked_lights:
             report.warn(
                 f"scene {pathname}: {baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
@@ -1279,6 +1348,15 @@ def _run_import(
     prefab_collections: list[bpy.types.Collection] = []
     total = sum(len(group.models) for group in groups) + len(scenes)
     done = 0
+    # インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのものが増えるほど 1 回が重くなる
+    # （Japanese Street の Day_Showcase では 1 回 70 ms。3000 オブジェクトで 180 ms、ビューレイヤーから外すと 5 ms）。
+    # パッケージのコレクションは読み込みが終わるまでビューレイヤーから外し、モデルは空の作業用コレクションに読み込んでから移す（#75）
+    package_layer = _find_layer_collection(view_layer.layer_collection, collection)
+    staging_layer = _find_layer_collection(view_layer.layer_collection, staging)
+    if staging_layer is not None:
+        view_layer.active_layer_collection = staging_layer
+    if package_layer is not None:
+        package_layer.exclude = True
     try:
         for group in groups:
             target = collection
@@ -1294,9 +1372,6 @@ def _run_import(
                     skipped = model_by_guid.get(guid)
                     if skipped is not None and not skipped.supported:
                         report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-            layer_coll = _find_layer_collection(view_layer.layer_collection, target)
-            if layer_coll is not None:
-                view_layer.active_layer_collection = layer_coll
             for summary, prefab_table in group.models:
                 step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                 done += 1
@@ -1312,11 +1387,17 @@ def _run_import(
             except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
                 _record_failure(report, f"could not import scene {scene_summary.pathname}: {exc}")
             done += 1
-        if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
-            _arrange_collections(context, prefab_collections)
     finally:
+        if package_layer is not None:
+            package_layer.exclude = False
+        bpy.data.collections.remove(staging)
         if prev_active is not None:
             view_layer.active_layer_collection = prev_active
+    for obj in hidden_objects:
+        if not _is_removed(obj):
+            obj.hide_set(True)
+    if opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
+        _arrange_collections(context, prefab_collections)
 
     collection["unity_package"] = package_path.name
     step(1.0, "Done")

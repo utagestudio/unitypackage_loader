@@ -246,7 +246,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                         path, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
                     )
                     ask = opts.models == "ASK" and not bpy.app.background
-                    if ask and prepared.choice_count > 1:
+                    if ask and prepared.has_choices:
                         select_models.set_pending(path, opts, prepared)
                         return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
                     report = run_import(

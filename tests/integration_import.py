@@ -153,6 +153,16 @@ def main() -> int:
     if exp.get("leaves_nothing"):
         for name in _DATA_KINDS:
             c.eq(f"{name} left behind", len(getattr(bpy.data, name)), counts_before[name])
+    # 読み込み中だけビューレイヤーから外すパッケージのコレクションと、作業用のコレクション（#75）は、成否によらず元に戻っている
+    c.eq("staging collections left", [x.name for x in bpy.data.collections if x.name.endswith("(importing)")], [])
+    excluded: list[str] = []
+    pending = list(bpy.context.view_layer.layer_collection.children)
+    while pending:
+        layer = pending.pop()
+        if layer.exclude:
+            excluded.append(layer.name)
+        pending.extend(layer.children)
+    c.eq("excluded layer collections", excluded, [])
 
     objs = exp.get("objects", {})
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
