@@ -326,7 +326,7 @@ def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = Non
 
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
-    out = Path(argv[0]) if argv else Path(__file__).resolve().parent.parent / "_local" / "synthetic_multi.unitypackage"
+    out = Path(argv[0]) if argv else Path(__file__).resolve().parent.parent / "_local" / "unitypackages" / "synthetic_multi.unitypackage"
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="synthetic_pkg_"))
 

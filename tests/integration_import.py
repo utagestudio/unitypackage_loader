@@ -4,7 +4,7 @@
 
     blender -b --python tests/integration_import.py -- [package.unitypackage] [expectations.json]
 
-引数を省略すると ``_local/`` 直下の最初の .unitypackage と ``_local/expectations.json`` を使う。
+引数を省略すると ``_local/unitypackages/`` の最初の .unitypackage と ``_local/expectations.json`` を使う。
 期待値ファイルの書式は ``tests/expectations.schema.md`` を参照。検証用データはリポジトリに
 含めないため、どちらも gitignore 対象。
 """
@@ -22,8 +22,26 @@ from mathutils import Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_DIR = REPO_ROOT / "_local"
+PACKAGES_DIR = LOCAL_DIR / "unitypackages"  # 検証用 .unitypackage の置き場
 # 失敗したときに片付けられているかを数えるデータの種類
 _DATA_KINDS = ("objects", "collections", "meshes", "materials", "images", "armatures", "actions", "lights", "cameras")
+
+
+def _local_packages() -> list[Path]:
+    """検証用の .unitypackage。``_local/unitypackages/`` を先に、続けて ``_local/`` 直下を探す。"""
+    found: list[Path] = []
+    for directory in (PACKAGES_DIR, LOCAL_DIR):
+        if directory.is_dir():
+            found += sorted(directory.glob("*.unitypackage"))
+    return found
+
+
+def _find_package(name: str) -> Path | None:
+    """ファイル名から検証用パッケージを探す。見つからなければ ``None``。"""
+    for candidate in (PACKAGES_DIR / name, LOCAL_DIR / name):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _args() -> tuple[Path, Path]:
@@ -34,10 +52,12 @@ def _args() -> tuple[Path, Path]:
     if argv:
         package = Path(argv[0])
     else:
-        # 期待値ファイルの "package" キー（_local/ 内のファイル名）→ 無ければ _local/ の最初のパッケージ
+        # 期待値ファイルの "package" キー（ファイル名）→ 無ければ最初のパッケージ
         named = json.loads(expectations.read_text("utf-8")).get("package")
-        package = LOCAL_DIR / named if named else next(iter(sorted(LOCAL_DIR.glob("*.unitypackage"))), None)
-    if package is None or not package.is_file():
+        package = _find_package(named) if named else next(iter(_local_packages()), None)
+        if package is None:
+            raise SystemExit(f"package not found in {PACKAGES_DIR}: {named or '*.unitypackage'}")
+    if not package.is_file():
         raise SystemExit(f"package not found: {package}")
     return package, expectations
 

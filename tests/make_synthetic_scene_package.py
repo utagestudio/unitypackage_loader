@@ -164,7 +164,8 @@ def stripped_transform(file_id, source_file_id, source_guid, instance_id):
 
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
-    out = Path(argv[0]) if argv else REPO_ROOT / "_local" / "synthetic_scene.unitypackage"
+    out = Path(argv[0]) if argv else REPO_ROOT / "_local" / "unitypackages" / "synthetic_scene.unitypackage"
+    out.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="synthetic_scene_"))
     entries: dict[str, tuple[str, bytes | None, str | None]] = {}
 

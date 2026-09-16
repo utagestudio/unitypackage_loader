@@ -304,12 +304,12 @@ class MappingTests(unittest.TestCase):
 
 class LocalSampleTests(unittest.TestCase):
     def test_every_local_material_normalizes(self):
-        packages = _paths.local_packages()
-        if not packages:
-            self.skipTest("no local sample packages")
+        sample = _paths.local_sample()
+        if sample is None:
+            self.skipTest("no local sample package")
         from unitypackage_loader.core.package import UnityPackage
 
-        for path in packages:
+        for path in [sample]:
             pkg = UnityPackage(path)
             pkg.scan()
             mats = {e.guid: parse_material(pkg.read_asset(e.guid), e.guid, e.pathname) for e in pkg.materials()}

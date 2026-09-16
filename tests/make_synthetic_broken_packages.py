@@ -4,7 +4,7 @@
 
     python3 tests/make_synthetic_broken_packages.py [synthetic_multi.unitypackage] [出力フォルダ]
 
-引数を省略すると ``_local/synthetic_multi.unitypackage`` を元にして ``_local/`` に書き出す。
+引数を省略すると ``_local/unitypackages/synthetic_multi.unitypackage`` を元にして同じ場所に書き出す。
 
 - ``synthetic_broken_model.unitypackage``: ``synthetic_multi`` の ``Sphere.fbx`` の中身を壊したもの。
   そのモデルだけをエラーとして外し、残りを読み込むことを確かめる
@@ -60,8 +60,8 @@ def make_broken_all(out: Path) -> None:
 
 def main() -> None:
     argv = sys.argv[1:]
-    source = Path(argv[0]) if argv else REPO_ROOT / "_local" / "synthetic_multi.unitypackage"
-    out_dir = Path(argv[1]) if len(argv) > 1 else REPO_ROOT / "_local"
+    source = Path(argv[0]) if argv else REPO_ROOT / "_local" / "unitypackages" / "synthetic_multi.unitypackage"
+    out_dir = Path(argv[1]) if len(argv) > 1 else REPO_ROOT / "_local" / "unitypackages"
     out_dir.mkdir(parents=True, exist_ok=True)
     make_broken_model(source, out_dir / "synthetic_broken_model.unitypackage")
     make_broken_all(out_dir / "synthetic_broken_all.unitypackage")

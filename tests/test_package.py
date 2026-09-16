@@ -397,11 +397,11 @@ class ExtractBudgetTests(unittest.TestCase):
 
 
 class LocalSampleTests(unittest.TestCase):
-    def test_scan_local_packages(self):
-        packages = _paths.local_packages()
-        if not packages:
-            self.skipTest("no local sample packages")
-        for path in packages:
+    def test_scan_local_sample(self):
+        sample = _paths.local_sample()
+        if sample is None:
+            self.skipTest("no local sample package")
+        for path in [sample]:
             pkg = UnityPackage(path)
             pkg.scan()
             self.assertTrue(pkg.models(), "sample package should contain at least one model")

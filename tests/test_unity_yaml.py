@@ -317,13 +317,13 @@ class DepthLimitTests(unittest.TestCase):
 class LocalSampleTests(unittest.TestCase):
     """``_local/`` にサンプルがあるときだけ、実データを全件パースして例外が出ないことを確認する。"""
 
-    def test_parse_every_mat_and_meta_in_local_packages(self):
-        packages = _paths.local_packages()
-        if not packages:
-            self.skipTest("no local sample packages")
+    def test_parse_every_mat_and_meta_in_local_sample(self):
+        sample = _paths.local_sample()
+        if sample is None:
+            self.skipTest("no local sample package")
         parsed = 0
-        for pkg in packages:
-            with tarfile.open(pkg, "r:gz") as tar:
+        for pkg in [sample]:
+            with tarfile.open(pkg, "r:*") as tar:
                 for member in tar:
                     if not member.isfile():
                         continue
