@@ -7,7 +7,8 @@
     blender --factory-startup --python tools/shoot_screenshots.py -- <package> <outdir> [shot]
 
 ``shot`` は ``main``（hero / nodes / modes）、``dialog``（インポートのポップアップ）、
-``select``（読み込むものを選ぶダイアログの Scenes タブ）、``menu``（File > Import メニュー）の
+``select``（読み込むものを選ぶダイアログ。``--unit=MODELS`` などでタブを選べる。既定は Scenes）、
+``menu``（File > Import メニュー）の
 いずれか。省略時は ``main``。ポップアップ・ダイアログ・メニューはモーダルで閉じられないため、
 撮ったらそのまま Blender を終了する。別々に起動すること。
 
@@ -253,14 +254,14 @@ def open_import_dialog(package: Path) -> None:
         bpy.ops.import_scene.unitypackage("INVOKE_DEFAULT", filepath=str(package))
 
 
-def open_select_dialog(package: Path, extract_path: str) -> None:
-    """読み込むものを選ぶダイアログを、Scenes のタブを開いた状態で出す。
+def open_select_dialog(package: Path, extract_path: str, unit: str = "SCENES") -> None:
+    """読み込むものを選ぶダイアログを、指定した単位のタブを開いた状態で出す。
 
     リポジトリ直接登録では Preferences が取れず前回の単位を覚えていないため、既定の単位を差し替える。
     """
     from unitypackage_loader.operators import select_models
 
-    select_models.default_unit = lambda *args, **kwargs: "SCENES"
+    select_models.default_unit = lambda *args, **kwargs: unit
     bpy.ops.import_scene.unitypackage(
         "EXEC_DEFAULT", filepath=str(package), models="ASK", extract_mode="CUSTOM", extract_path=extract_path
     )
@@ -284,6 +285,12 @@ def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     if len(argv) < 2:
         raise SystemExit(__doc__)
+    opts = {}
+    for arg in argv:
+        if arg.startswith("--"):
+            key, _, value = arg[2:].partition("=")
+            opts[key] = value or "1"
+    argv = [a for a in argv if not a.startswith("--")]
     package, out_dir = Path(argv[0]), Path(argv[1])
     shot = argv[2] if len(argv) > 2 else "main"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -327,7 +334,8 @@ def main() -> None:
     elif shot == "dialog":
         steps = [lambda: open_import_dialog(package), lambda: shoot(out_dir, "dialog")]
     elif shot == "select":
-        steps = [lambda: open_select_dialog(package, extract_path), lambda: shoot(out_dir, "select")]
+        unit = opts.get("unit", "SCENES").upper()
+        steps = [lambda: open_select_dialog(package, extract_path, unit), lambda: shoot(out_dir, "select")]
     elif shot == "menu":
         steps = [open_import_menu, lambda: shoot(out_dir, "menu")]
     else:
