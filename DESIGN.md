@@ -669,7 +669,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
-- `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/sample.unitypackage` をインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
+- `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/unitypackages/` のサンプルをインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - CI（`.github/workflows/tests.yml`。PR と main / release ブランチへの push）: 単体テストを Python 3.11 / 3.13（Blender 4.5 / 5.2 に同梱の版）で回す。合成パッケージ（`tests/make_synthetic_*.py`）を Blender 5.2 で 1 回だけ生成し、統合テストを Blender 4.5 LTS と 5.2 LTS で回す（4.5 は 5.2 で保存した .blend を読める）。実在アセットを使うテストは CI では回さない。
 - 見た目の確認は、`_local/` に置いた参考 .blend と並べて比較する手動項目とする。
 

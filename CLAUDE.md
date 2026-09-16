@@ -58,7 +58,7 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
 - **コミットは作業の小さな単位ごと**に行う。メッセージは日本語、先頭に `feat:` `fix:` `docs:` `test:` `refactor:` `chore:` `ci:` を付け、
   本文に変更内容と理由を書く。各コミット時点で Extension が読み込める状態を保つ。
 - **検証用アセットのデータはリポジトリに含めない。** unitypackage、展開したファイル、そこから取り出したモデル・テクスチャ、
-  実パッケージ用の期待値（`_local/expectations.json`）は `_local/` に置く（購入アセットは再配布できない）。
+  実パッケージ用の期待値（`_local/expectations.json`）は `_local/`、パッケージ本体は `_local/unitypackages/` に置く（購入アセットは再配布できない）。
   コミットしてよいフィクスチャは手書き・生成の合成データ（`tests/make_synthetic_*.py` の生成物と `tests/expectations_synthetic*.json`）だけ。
   アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
   （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
@@ -93,15 +93,15 @@ python3 -m unittest discover -s tests -t .
 
 # 合成パッケージの生成と統合テスト（実在アセット不要）
 blender -b --factory-startup --python tests/make_synthetic_package.py
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic.json
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs.json        # 読み込む単位 Prefabs（並べる）
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
-blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/synthetic_scene.unitypackage）
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
-python3 tests/make_synthetic_broken_packages.py _local/synthetic_multi.unitypackage _local                                                           # 読み込みに失敗するモデルを含む合成パッケージ
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_broken_model.unitypackage tests/expectations_synthetic_broken_model.json  # 1 つ失敗しても残りを読む
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_broken_all.unitypackage tests/expectations_synthetic_broken_all.json      # 全部失敗したら何も残さない
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs.json        # 読み込む単位 Prefabs（並べる）
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
+blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/unitypackages/ に出る）
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
+python3 tests/make_synthetic_broken_packages.py                                                           # 読み込みに失敗するモデルを含む合成パッケージ
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_model.unitypackage tests/expectations_synthetic_broken_model.json  # 1 つ失敗しても残りを読む
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_all.unitypackage tests/expectations_synthetic_broken_all.json      # 全部失敗したら何も残さない
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py
@@ -135,7 +135,7 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
   スクリーンショット（`_local/shots/`）から、ツールバーと操作パネルを避けて 16:9 で切り出したもの。
   `tools/shoot_screenshots.py` の `dialog` / `select` / `menu` は、設定のポップアップ・選択ダイアログ・File > Import メニューを撮れる（現在のページでは未使用）。モード比較（`shot-modes.webp`）は
   サイドバーで切り替えた 2 体を手で撮ったスクリーンショットから切り出す。スクリプトで撮る場合も手で撮る場合も、他アドオンが写り込まないよう
-  `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/` に置き、追跡ファイルには名前を書かない。
+  `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/unitypackages/` に置き、追跡ファイルには名前を書かない。
 
 ```sh
 blender --factory-startup <空の .blend> --python tools/shoot_screenshots.py -- <package> <outdir> main    # hero / nodes / modes（現在のページでは未使用）

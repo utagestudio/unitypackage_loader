@@ -177,16 +177,16 @@ python3 -m unittest discover -s tests -t .
 
 # Generate a synthetic package (no real assets required) and run the integration test with it
 blender -b --factory-startup --python tests/make_synthetic_package.py
-blender -b --factory-startup --python tests/integration_import.py -- _local/synthetic_multi.unitypackage tests/expectations_synthetic.json
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
 
-# Integration test with a real package on your machine (requires the package and expectations.json in _local/)
+# Integration test with a real package on your machine (package in _local/unitypackages/, expectations.json in _local/)
 blender -b --factory-startup --python tests/integration_import.py
 ```
 
 Pull requests and pushes to main / release branches run `.github/workflows/tests.yml`: the unit tests on Python 3.11 and 3.13
 (the versions bundled with Blender 4.5 and 5.2), and the integration tests with the synthetic packages on Blender 4.5 LTS and 5.2 LTS.
 
-Test data (unitypackage files, extracted contents, expected values) goes in `_local/`. This directory is gitignored,
+Test data (unitypackage files, extracted contents, expected values) goes in `_local/` (packages themselves in `_local/unitypackages/`). This directory is gitignored,
 and the data of the assets used for testing is never committed (the committed test data is synthetic only).
 See `tests/expectations.schema.md` for the file format.
 
