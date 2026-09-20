@@ -18,6 +18,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
 - SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
+- SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
+  ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -337,6 +339,19 @@ def main() -> None:
             mod(11, slab_prefab, "m_LocalRotation.w", 0.9238795),
             mod(10, slab_prefab, "m_Name", "SlabRoot"),
         ]),
+        # 1 メッシュの FBX をモデルの PrefabInstance で置く（#99）。位置と回転だけを上書きし、スケールは
+        # FBX のノードの値（Unity では 100）のままにする
+        instance(5100, slab_model, 0, [
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalPosition.x", 2),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalPosition.y", 0.5),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalPosition.z", -6),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalRotation.x", 0),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalRotation.y", 0.25881905),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalRotation.z", 0),
+            mod(ROOT_TRANSFORM, slab_model, "m_LocalRotation.w", 0.96592583),
+            mod(ROOT_GAME_OBJECT, slab_model, "m_Name", "SlabInstance"),
+        ]),
+        stripped_transform(5101, ROOT_TRANSFORM, slab_model, 5100),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),
