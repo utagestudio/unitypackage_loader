@@ -184,6 +184,12 @@ class PrefabMappingTests(unittest.TestCase):
         self.assertEqual(res["FbxMat0"].guid, MAT_B)
         self.assertEqual(res["FbxMat1"].guid, MAT_A)
 
+    def test_mesh_without_slots_does_not_vote(self):
+        # マテリアルを持たないメッシュにはスロット 0 の割り当てが返るが、突き合わせる名前が無い（#102）
+        object_slots = {"Body": [], "Prop": ["FbxMat0"]}
+        res = resolve_materials(["FbxMat0"], None, self.mats, "", self.table, object_slots)
+        self.assertEqual((res["FbxMat0"].guid, res["FbxMat0"].method), (MAT_B, "prefab"))
+
 
 class SlotAssignmentTests(unittest.TestCase):
     def setUp(self):
@@ -221,6 +227,18 @@ class SlotAssignmentTests(unittest.TestCase):
         object_slots = {"Body": ["Skin", "Unused", "Hair"]}
         result = slot_assignments(object_slots, table_of(), self.mats, {"Body": [2, 0]})
         self.assertEqual(result, {("Body", 2): MAT_A, ("Body", 0): MAT_B})
+
+    def test_slot_assignments_for_a_mesh_without_materials(self):
+        from unitypackage_loader.core.mapping import slot_assignments
+
+        # マテリアルを持たないモデルはスロットが 0 個。Unity ではサブメッシュ 1 つなので m_Materials の先頭を当てる（#102）
+        self.assertEqual(slot_assignments({"Body": []}, table_of(), self.mats), {("Body", 0): MAT_A})
+        # サブメッシュ順の表があっても、スロットが無ければ先頭を当てる
+        self.assertEqual(slot_assignments({"Body": []}, table_of(), self.mats, {"Body": []}), {("Body", 0): MAT_A})
+        # m_Materials が空の Renderer、パッケージに無い .mat では当てない
+        empty = {"Body": RendererMaterials("Body", [], 137, MODEL_A, 4300000)}
+        self.assertEqual(slot_assignments({"Body": []}, empty, self.mats), {})
+        self.assertEqual(slot_assignments({"Body": []}, table_of(), {}), {})
 
 
 def variant_yaml(instance_id: int, source: str, modifications: list[tuple[int, str, str, str | None]]) -> str:

@@ -1,6 +1,6 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true, "unit": "PREFABS", "arrange": "STACK" },
-  "objects": { "count": 8, "mesh_count": 8, "armature_count": 0 },
+  "objects": { "count": 9, "mesh_count": 9, "armature_count": 0 },
   "prefabs": { "count": 7 },
   "warnings_max": 0,
   "collections": {

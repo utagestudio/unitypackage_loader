@@ -42,7 +42,7 @@ class ImportReport:
     images: list[str] = field(default_factory=list)
     extract_root: str = ""
     outlines: int = 0
-    split_slots: int = 0  # prefab の割り当てに従って差し替えたマテリアルスロット数
+    split_slots: int = 0  # prefab の割り当てに従って差し替えた（スロットが無ければ作って入れた）マテリアルスロット数
     lights: int = 0  # シーンから作ったライト
     cameras: int = 0  # シーンから作ったカメラ
     warnings: list[str] = field(default_factory=list)

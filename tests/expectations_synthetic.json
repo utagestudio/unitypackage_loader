@@ -1,12 +1,12 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
   "errors": 0,
-  "objects": { "count": 14, "mesh_count": 14, "armature_count": 0 },
-  "materials": { "count": 16, "mapped": 13, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "shared"] },
+  "objects": { "count": 15, "mesh_count": 15, "armature_count": 0 },
+  "materials": { "count": 17, "mapped": 14, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
   "images": { "count": 2 },
   "warnings_max": 2,
-  "split_slots": 0,
-  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"] },
+  "split_slots": 1,
+  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"], "SyntheticNoMat": ["NoMatMat"] },
   "material_checks": [
     { "name": "CubeMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png", "base_colorspace": "sRGB", "normal_image": "Normal.png", "normal_colorspace": "Non-Color", "node_types": ["ShaderNodeBsdfPrincipled", "ShaderNodeNormalMap"] },
     { "name": "SphereMat", "alpha_mode": "cutout", "render_method": "DITHERED", "mode": "PRINCIPLED", "base_image": "ColorA.png", "node_types": ["ShaderNodeMath", "ShaderNodeMix"] },
@@ -18,6 +18,7 @@
     { "name": "QuestToonMat", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": true, "mode": "UNLIT", "shader_name": "VRChat/Mobile/Toon Lit", "base_image": "ColorA.png", "base_colorspace": "sRGB", "node_types": ["ShaderNodeEmission"] },
     { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" },
     { "name": "HdrpMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "base_image": "ColorA.png", "emission_strength": 0.0 },
+    { "name": "NoMatMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png" },
     { "name": "HdrpEmissiveMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25] }
   ]
 }
