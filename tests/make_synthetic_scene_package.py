@@ -20,6 +20,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
 - SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
+- TowerRoot: LOD を 2 段持つ FBX（Tower.fbx）の LODGroup を持つ prefab を、位置 (-6, 0, 0) に（Issue #104。
+  Tower_LOD1 は読み込んだうえで非表示にする）
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -38,6 +40,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
+from unitypackage_loader.core.unity_ids import mesh_file_id  # noqa: E402
 
 ROOT_GAME_OBJECT = 919132149155446097
 ROOT_TRANSFORM = -8679921383154817045
@@ -105,6 +108,21 @@ def export_slab_fbx(path: Path) -> None:
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
 
+def export_lod_fbx(path: Path) -> None:
+    """LOD の段ごとにメッシュを持つ FBX（Tower_LOD0 は突起付き、Tower_LOD1 は素の立方体）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("ProbeMat")
+    for name, tip in (("Tower_LOD0", (1.7, 0.6, 1.3)), ("Tower_LOD1", None)):
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, 0))
+        obj = bpy.context.active_object
+        obj.name = name
+        obj.data.name = name
+        if tip is not None:
+            max(obj.data.vertices, key=lambda v: (v.co.x, v.co.y, v.co.z)).co = tip
+        obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
 def game_object(file_id, name, active=1):
     return f"--- !u!1 &{file_id}\nGameObject:\n  m_Name: {name}\n  m_IsActive: {active}\n"
 
@@ -125,6 +143,19 @@ def mesh_renderer(filter_id, renderer_id, go, model_guid, mat_guid, mesh_file_id
         f"  m_Mesh: {{fileID: {mesh_file_id}, guid: {model_guid}, type: 3}}\n"
         f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
         f"  m_Materials:\n  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}\n"
+    )
+
+
+def lod_group(file_id, go, levels, enabled=1):
+    """LODGroup（#104）。``levels`` は段の順に並べた Renderer の fileID。"""
+    body = ""
+    for index, renderers in enumerate(levels):
+        body += f"  - screenRelativeHeight: {round(0.5 / (index + 1), 4)}\n    fadeTransitionWidth: 0\n    renderers:\n"
+        body += "".join(f"    - renderer: {{fileID: {r}}}\n" for r in renderers)
+    return (
+        f"--- !u!205 &{file_id}\nLODGroup:\n  m_GameObject: {{fileID: {go}}}\n  serializedVersion: 2\n"
+        f"  m_LocalReferencePoint: {{x: 0, y: 0, z: 0}}\n  m_Size: 2\n  m_FadeMode: 0\n  m_AnimateCrossFading: 0\n"
+        f"  m_LastLODIsBillboard: 0\n  m_LODs:\n{body}  m_Enabled: {enabled}\n"
     )
 
 
@@ -293,6 +324,24 @@ def main() -> None:
         stripped_transform(21, ROOT_TRANSFORM, model, 20),
     ])).encode(), prefab_meta(nested_path))
 
+    # LOD の 2 段を持つ FBX と、その LODGroup を持つ prefab（#104）
+    lod_fbx = tmp / "tower.fbx"
+    export_lod_fbx(lod_fbx)
+    lod_model_path = "Assets/Synthetic/Models/Tower.fbx"
+    lod_model = add(lod_model_path, lod_fbx.read_bytes(), model_meta(guid_of(lod_model_path), {"ProbeMat": mats["ProbeMat"]}))
+    lod_prefab_path = "Assets/Synthetic/Prefabs/Tower.prefab"
+    lod_prefab = add(lod_prefab_path, (HEADER + "".join([
+        game_object(10, "Tower"),
+        transform(11, 10),
+        lod_group(12, 10, [[103], [113]]),
+        game_object(100, "Tower_LOD0"),
+        transform(101, 100, father=11),
+        mesh_renderer(102, 103, 100, lod_model, mats["ProbeMat"], mesh_file_id("Tower_LOD0")),
+        game_object(110, "Tower_LOD1"),
+        transform(111, 110, father=11),
+        mesh_renderer(112, 113, 110, lod_model, mats["ProbeMat"], mesh_file_id("Tower_LOD1")),
+    ])).encode(), prefab_meta(lod_prefab_path))
+
     # 点光源だけの prefab。シーンで強さを上書きして置く
     lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
     lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
@@ -352,6 +401,11 @@ def main() -> None:
             mod(ROOT_GAME_OBJECT, slab_model, "m_Name", "SlabInstance"),
         ]),
         stripped_transform(5101, ROOT_TRANSFORM, slab_model, 5100),
+        # LODGroup を持つ prefab（#104）。LOD1 は読み込んで非表示にする
+        instance(5200, lod_prefab, 0, [
+            mod(11, lod_prefab, "m_LocalPosition.x", -6),
+            mod(10, lod_prefab, "m_Name", "TowerRoot"),
+        ]),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),

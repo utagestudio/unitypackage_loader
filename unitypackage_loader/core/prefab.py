@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelNames, placements
+from .meta import strip_numeric_suffix
+from .unity_ids import mesh_file_id
 
 
 @dataclass
@@ -29,6 +31,20 @@ class RendererMaterials:
     renderer_class: int = CLASS_MESH_RENDERER
     mesh_guid: str | None = None  # メッシュを持つアセット（モデル）の GUID
     mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
+    lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
+
+
+def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
+    """Blender のオブジェクト名で表を引く（完全一致 → 連番を外した形 → メッシュ参照の fileID のハッシュ）。
+
+    prefab で GameObject の名前を変えてあると名前では引けないので、オブジェクト名から求めたメッシュの fileID を
+    表の Renderer のメッシュ参照と照合する（Scenes 単位と同じ。#71）。
+    """
+    rm = table.get(obj_name) or table.get(strip_numeric_suffix(obj_name))
+    if rm is not None:
+        return rm
+    ids = {mesh_file_id(obj_name), mesh_file_id(strip_numeric_suffix(obj_name))}
+    return next((r for r in table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
 
 
 def tables_from_hierarchy(
@@ -51,7 +67,10 @@ def tables_from_hierarchy(
         for name, renderer in placement.renderers.items():
             table.setdefault(
                 name,
-                RendererMaterials(name, list(renderer.materials), renderer.renderer_class, placement.model_guid, renderer.mesh_file_id),
+                RendererMaterials(
+                    name, list(renderer.materials), renderer.renderer_class, placement.model_guid,
+                    renderer.mesh_file_id, renderer.lod_level,
+                ),
             )
     return result
 

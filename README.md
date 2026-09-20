@@ -82,7 +82,9 @@ Choose the unit at the top, then tick what to import in the list:
   Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
   Small props copied side by side under a common parent in Unity (for example several cups in a room) are placed one by one.
   Parts of a model file that a prefab or the scene does not use (for example unused LODs or extra nodes) are hidden,
-  matched by the mesh each Unity renderer references.
+  matched by the mesh each Unity renderer references. Where Unity has an LODGroup, only the most detailed level (LOD0)
+  stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the dialog; the hidden
+  objects stay in the file and keep their level in the `unity_lod` custom property).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
   measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
@@ -93,7 +95,7 @@ Choose the unit at the top, then tick what to import in the list:
 - **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
   Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
   them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
-  `Stack at Origin`.
+  `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, as scenes do.
 - **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
   [Matching meshes to materials](#matching-meshes-to-materials).
 

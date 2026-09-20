@@ -71,9 +71,9 @@
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 | `prefabs.count` | 読み込む単位 Prefabs で読み込んだ prefab の数（`options` に `"unit": "PREFABS"` を指定する） |
-| `collections` | prefab ごとのコレクションの中身。`objects` はオブジェクト数（子コレクション込み）、`prefab` はコレクションの `unity_prefab`、`mat_files` はメッシュに付いたマテリアルの元の .mat のファイル名の集合（同じモデルを読み直すとマテリアル名に連番が付くため、名前ではなく元のファイルで比べる） |
+| `collections` | prefab ごとのコレクションの中身。`objects` はオブジェクト数（子コレクション込み）、`prefab` はコレクションの `unity_prefab`、`mat_files` はメッシュに付いたマテリアルの元の .mat のファイル名の集合（同じモデルを読み直すとマテリアル名に連番が付くため、名前ではなく元のファイルで比べる）、`parts` はオブジェクト名ごとの `hidden`（`hide_get()`）と `lod`（`unity_lod` カスタムプロパティ） |
 | `scenes.count` | 読み込む単位 Scenes で読み込んだシーンの数（`options` に `"unit": "SCENES"` を指定する） |
-| `placed_objects` | シーンで配置したオブジェクト。最上位の Empty（Unity の最上位の GameObject）の名前とオブジェクト名（`.001` などの連番を除く）で 1 つに絞る。`tip` は評価後のメッシュで重心から最も遠い頂点のワールド座標（誤差 0.001 まで）、`hidden` は `hide_get()`、`mat_files` はスロットのマテリアルの元の .mat のファイル名の集合 |
+| `placed_objects` | シーンで配置したオブジェクト。最上位の Empty（Unity の最上位の GameObject）の名前とオブジェクト名（`.001` などの連番を除く）で 1 つに絞る。`tip` は評価後のメッシュで重心から最も遠い頂点のワールド座標（誤差 0.001 まで）、`hidden` は `hide_get()`、`lod` は `unity_lod` カスタムプロパティ、`mat_files` はスロットのマテリアルの元の .mat のファイル名の集合 |
 | `lights` / `cameras` | シーンから作ったライト・カメラ（オブジェクト名で探す）。`type`、`energy`、`spot_size`、`spot_blend`、`size`、`size_y`、`shape`、`use_shadow`、`use_custom_distance`、`cutoff_distance`、`use_temperature`、`temperature`、`lens`、`sensor_fit`、`ortho_scale`、`clip_end` はライト・カメラのデータの値（数値は 0.1% まで）。`direction` はオブジェクトの -Z のワールドでの向き、`location` はワールド座標、`hidden` は `hide_get()` |
 | `scene_camera` | シーンのカメラになったオブジェクトの名前 |
 | `light_count` / `camera_count` | レポートのライト・カメラの数 |

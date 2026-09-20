@@ -127,6 +127,7 @@ jobs:
           run synthetic_multi.unitypackage expectations_synthetic_prefabs.json
           run synthetic_multi.unitypackage expectations_synthetic_prefabs_stack.json
           run synthetic_scene.unitypackage expectations_synthetic_scene.json
+          run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs.json
           run synthetic_broken_model.unitypackage expectations_synthetic_broken_model.json
           run synthetic_broken_all.unitypackage expectations_synthetic_broken_all.json
           if [ -n "$failed" ]; then

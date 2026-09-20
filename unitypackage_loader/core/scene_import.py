@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import NamedTuple
 
 from .hierarchy import Hierarchy, ModelPlacement, SceneContents
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
-__all__ = ["parts_to_hide", "scene_warnings"]
+__all__ = ["HiddenParts", "lod_warning", "parts_to_hide", "scene_warnings"]
+
+
+class HiddenParts(NamedTuple):
+    """配置で読み込んだオブジェクトのうち、隠すものと、その理由の内訳。"""
+
+    names: set[str]  # 隠すオブジェクトの名前
+    unused: int  # そのうち「Unity で使われていない部品」として隠した数（#58）
+    lods: dict[str, int]  # LODGroup の段が分かったオブジェクトの名前 → 段（隠さない LOD0 も含む。#104）
+    hidden_lods: int = 0  # そのうち遠景用 LOD として隠した数
 
 
 def parts_to_hide(
-    h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]]
-) -> tuple[set[str], int]:
-    """配置で読み込んだオブジェクトのうち隠すものの名前と、そのうち「Unity で使われていない部品」として隠した数。
+    h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]], hide_lods: bool = True
+) -> HiddenParts:
+    """配置で読み込んだオブジェクトのうち隠すものと、LODGroup の段。
 
     ``objects`` は (Blender のオブジェクト名, メッシュか)。
 
@@ -23,24 +33,36 @@ def parts_to_hide(
       メッシュ（prefab が使っていない LOD や別のノード）も隠す（#58）。FBX 由来の名前に「.002」が付いていることもあるので、
       表の名前は連番を外した形でも照合し、名前で引けなければ Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
       （表で名前を引けない新しい形式のモデル）
+    - ``hide_lods`` なら、LODGroup の遠景用の段（LOD1 以降）の Renderer を隠す（#104）
     """
     from_renderers = placement.root in h.nodes and h.nodes[placement.root].model_guid is None
     disabled = {name for name, r in placement.renderers.items() if not r.visible}
     used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
     mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
+    levels = {name: r.lod_level for name, r in placement.renderers.items()}
+    by_mesh_id = {r.mesh_file_id: r.lod_level for r in placement.renderers.values() if r.mesh_file_id}
     hide: set[str] = set()
-    unused_count = 0
+    lods: dict[str, int] = {}
+    unused_count = lod_count = 0
     for obj_name, is_mesh in objects:
         name = strip_numeric_suffix(obj_name)
         unused = (
             from_renderers and is_mesh and obj_name not in used and name not in used
             and mesh_file_id(obj_name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
         )
-        if not placement.active or name in disabled or unused:
+        level = levels.get(obj_name, levels.get(name))
+        if level is None and is_mesh:
+            level = by_mesh_id.get(mesh_file_id(obj_name), by_mesh_id.get(mesh_file_id(name)))
+        if level is not None:
+            lods[obj_name] = level
+        lod_hidden = bool(hide_lods and level)
+        if not placement.active or name in disabled or unused or lod_hidden:
             hide.add(obj_name)
-        if unused and placement.active:
-            unused_count += 1
-    return hide, unused_count
+        # 数えるのは、その理由だけで隠れたもの（非アクティブな配置や無効な Renderer は、そちらの扱い）
+        if placement.active and name not in disabled:
+            unused_count += int(unused)
+            lod_count += int(lod_hidden and not unused)
+    return HiddenParts(hide, unused_count, lods, lod_count)
 
 
 def scene_warnings(
@@ -50,6 +72,7 @@ def scene_warnings(
     baked_lights: int = 0,
     light_notes: Iterable[str] = (),
     hidden_unused: int = 0,
+    hidden_lods: int = 0,
     skipped_nodes: int = 0,
     skipped_offsets: int = 0,
 ) -> list[str]:
@@ -80,6 +103,8 @@ def scene_warnings(
                 f"{hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
                 "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
             )
+        if hidden_lods:
+            messages.append(lod_warning(hidden_lods))
         if skipped_nodes:
             messages.append(
                 f"{skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
@@ -90,3 +115,11 @@ def scene_warnings(
                 f"{skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
             )
     return [prefix + m for m in messages]
+
+
+def lod_warning(hidden_lods: int) -> str:
+    """遠景用 LOD を隠したときの文言（Scenes / Prefabs のどちらからも使う）。"""
+    return (
+        f"{hidden_lods} object(s) are lower LOD levels of a Unity LODGroup and were hidden "
+        "(they stay in the file; their LOD level is in the 'unity_lod' custom property)"
+    )

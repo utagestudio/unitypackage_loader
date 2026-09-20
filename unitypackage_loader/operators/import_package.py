@@ -34,6 +34,12 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     arrange: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE", options={"HIDDEN", "SKIP_SAVE"})
     scene_lights: BoolProperty(name="Scene Lights", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_cameras: BoolProperty(name="Scene Cameras", default=True, options={"HIDDEN", "SKIP_SAVE"})
+    hide_lods: BoolProperty(
+        name="Hide Lower LODs",
+        default=True,
+        description="Hide the distant LOD levels of Unity LODGroups (scenes and prefabs)",
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -207,6 +213,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 arrange=self.arrange,
                 scene_lights=self.scene_lights,
                 scene_cameras=self.scene_cameras,
+                hide_lods=self.hide_lods,
                 material_mode=self.material_mode,
                 force_opaque=self.force_opaque,
                 backface_culling=self.backface_culling,

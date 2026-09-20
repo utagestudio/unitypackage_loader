@@ -9,8 +9,7 @@ from typing import Literal
 
 from .material import UnityMaterial
 from .meta import ModelImporterInfo, strip_numeric_suffix
-from .prefab import RendererMaterials
-from .unity_ids import mesh_file_id
+from .prefab import RendererMaterials, find_renderer
 
 __all__ = ["MaterialResolution", "resolve_materials", "slot_assignments", "submesh_slot_order"]
 
@@ -106,16 +105,12 @@ def _prefab_slots(
 ) -> list[tuple[int, str | None]]:
     """オブジェクトの (Blender スロット番号, prefab がそのサブメッシュに指す .mat GUID) の組。
 
-    表は GameObject 名で引く（完全一致 → 連番を外した形）。prefab で GameObject の名前を変えてあって引けなければ、
-    オブジェクト名から求めたメッシュの fileID を、表の Renderer のメッシュ参照と照合する（Scenes 単位と同じ。#71）。
+    表の引き方は ``prefab.find_renderer``（名前 → 連番を外した名前 → メッシュ参照の fileID）。
 
     モデルがマテリアルを 1 つも持たないとスロットは 0 個になるが、Unity ではサブメッシュが 1 つあって Renderer の
     ``m_Materials[0]`` で描かれる。この場合は先頭の .mat をスロット 0 の組として返す（スロットは読み込む側で作る。#102）。
     """
-    rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
-    if rm is None:
-        ids = {mesh_file_id(obj_name), mesh_file_id(strip_numeric_suffix(obj_name))}
-        rm = next((r for r in prefab_table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
+    rm = find_renderer(prefab_table, obj_name)
     if rm is None:
         return []
     if slot_count <= 0:
