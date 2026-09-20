@@ -120,6 +120,16 @@
       ]
     },
     {
+      "top": "SlabInstance",
+      "object": "Slab",
+      "tip": [
+        -0.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
       "top": "AllRed",
       "object": "Spike",
       "hidden": false,

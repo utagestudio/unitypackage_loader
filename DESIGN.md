@@ -73,6 +73,12 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - 当てるのはモデルの最上位のオブジェクトだけ。入れ子のオブジェクトとアーマチュアで変形するものは件数を警告に出す。表に無い fileID は今までどおり数える
 - 室内アセットのシーンでは、FBX 由来の Renderer 120 個すべてで、Unity の外形の中心との差が 1 cm 未満、マテリアルも一致した
 
+**1 メッシュの FBX をモデルの PrefabInstance で置いた配置**（Issue #99）: この形の FBX では Unity がノードを `//RootNode` に畳み、**モデルのルートの Transform の値が FBX のノードの変換 L** になる（Issue #98 と同じ事実の裏返し）。シーンの上書きは L の成分を置き換えるので、上書きしなかった成分には L の値が残る（位置と回転だけ動かした配置では、スケールは FBX のノードの値のまま）。展開した階層はルートを単位行列で作るため、そのままでは上書きの無い成分が失われ、さらに Blender のオブジェクトが持つノードの変換と二重に掛かっていた。
+
+- `core/hierarchy.py`: 表から畳まれたノードの名前を求め（`collapsed_root_name`）、配置の `root_node` に入れる。ルートの Transform への上書きは、当てるのに加えて成分ごとに `node_transforms[root_node]` へ記録する（上書きの無い成分は None）
+- `blender/scene_objects.py` の `apply_collapsed_root`: 原点に読み込んだオブジェクトの行列から L を逆算し、上書きを当てた M で配置の Empty を C·M·C⁻¹ に直し、オブジェクトはノードを単位行列にした C·A にする。Empty を直すので、そこに付けたシーン側の子も Unity と同じ位置になる
+- 期待値は Unity 6000.6.0f1 で同じ置き方（位置と回転だけ上書き）を再現した頂点のワールド座標で確かめた（合成シーンの `SlabInstance`）
+
 **シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
 
 ライトの強さは推測で決めず、Unity 6（Built-in と URP 17.6、Linear）と Blender 5.2 EEVEE で、環境光を切って白い拡散面をライトの真下から見た画素値（線形 HDR）を測って合わせた（Unity は batchmode でも `-nographics` を付けなければ GPU で描画でき、RenderTexture から読める。Blender は `light_threshold = 0`、`use_soft_falloff = False` にして測る）。

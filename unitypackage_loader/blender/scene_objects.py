@@ -194,41 +194,81 @@ def _by_object_name(table: dict, name: str):
     return table.get(strip_numeric_suffix(name))
 
 
-def apply_node_transforms(template: SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
-    """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
+def _file_scale(unit_scale: float | None) -> float:
+    """Unity の fileScale（= FBX の UnitScaleFactor / 100）。読めなければ 1 として扱う。"""
+    return (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
+
+
+def _node_basis(basis: Matrix, spec: dict, f: float) -> Matrix:
+    """ノードへの上書きを当てたオブジェクトの行列（C·M·A）。
 
     Unity のノード空間の行列 L と、原点に読み込んだ Blender のオブジェクトの行列 N の関係は N = C·L·A
     （C は Unity → Blender の基底、A = diag(-f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）。
     Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、Unity 6 が読んだノードの値と
     突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はその値のまま使う。
-    当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
     """
-    f = (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
     basis_a = Matrix.Diagonal((-f, f, f, 1.0))
     basis_a_inverse = Matrix.Diagonal((-1.0 / f, 1.0 / f, 1.0 / f, 1.0))
-    to_blender, to_unity = Matrix(UNITY_TO_BLENDER), Matrix(BLENDER_TO_UNITY)
+    location, rotation, scale = (Matrix(BLENDER_TO_UNITY) @ basis @ basis_a_inverse).decompose()
+    position = [location.x, location.y, location.z]
+    quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
+    scaling = [scale.x, scale.y, scale.z]
+    for values, key in ((position, "position"), (quaternion, "rotation"), (scaling, "scale")):
+        for index, value in enumerate(spec.get(key, [])):
+            if value is not None and index < len(values):
+                values[index] = value
+    local = Matrix(trs(tuple(position), tuple(quaternion), tuple(scaling)))
+    return Matrix(UNITY_TO_BLENDER) @ local @ basis_a
+
+
+def _movable(obj, members: set) -> bool:
+    """行列を直接入れ替えられるオブジェクトか（入れ子やアーマチュアで変形するものは対象外）。"""
+    deformed = obj.type == "ARMATURE" or any(m.type == "ARMATURE" for m in getattr(obj, "modifiers", []))
+    return obj.parent not in members and not deformed
+
+
+def apply_node_transforms(template: SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
+    """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
+
+    当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
+    行列の組み立ては ``_node_basis`` を参照。
+    """
+    f = _file_scale(unit_scale)
     members = set(objects)
     skipped = 0
     for original, obj in zip(template.objects, objects):
         spec = _by_object_name(overrides, obj.name)
         if spec is None:
             continue
-        nested = obj.parent in members
-        deformed = obj.type == "ARMATURE" or any(m.type == "ARMATURE" for m in getattr(obj, "modifiers", []))
-        if nested or deformed:
+        if not _movable(obj, members):
             skipped += 1
             continue
-        location, rotation, scale = (to_unity @ template.basis[original] @ basis_a_inverse).decompose()
-        position = [location.x, location.y, location.z]
-        quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
-        scaling = [scale.x, scale.y, scale.z]
-        for values, key in ((position, "position"), (quaternion, "rotation"), (scaling, "scale")):
-            for index, value in enumerate(spec.get(key, [])):
-                if value is not None and index < len(values):
-                    values[index] = value
-        local = Matrix(trs(tuple(position), tuple(quaternion), tuple(scaling)))
-        obj.matrix_basis = to_blender @ local @ basis_a
+        obj.matrix_basis = _node_basis(template.basis[original], spec, f)
     return skipped
+
+
+def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec: dict, unit_scale: float | None) -> bool:
+    """1 メッシュの FBX をモデルの PrefabInstance で置いた配置を、FBX のノードの変換ぶんも含めて置き直す（#99）。
+
+    この形の FBX では Unity のモデルのルートの Transform の値が FBX のノードの変換 L で、シーンの上書きは
+    その成分を置き換える（上書きしなかった成分は L のまま）。展開した階層は単位行列を基準に組み立てているので、
+    ここでルートの Empty を C·M·C⁻¹（M = L に上書きを当てた行列）に直し、オブジェクトはノードを単位行列にした
+    C·A にする。Empty を直すのは、そこに付けたシーンの子も Unity と同じ位置にするため。置き直せなければ False。
+    """
+    if root is None:
+        return False
+    f = _file_scale(unit_scale)
+    neutral = Matrix(UNITY_TO_BLENDER) @ Matrix.Diagonal((-f, f, f, 1.0))  # ノードを単位行列にしたオブジェクトの行列
+    members = set(objects)
+    for original, obj in zip(template.objects, objects):
+        if _by_object_name({name: spec}, obj.name) is None:
+            continue
+        if not _movable(obj, members):
+            return False
+        root.matrix_basis = _node_basis(template.basis[original], spec, f) @ neutral.inverted_safe()
+        obj.matrix_basis = neutral
+        return True
+    return False
 
 
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:

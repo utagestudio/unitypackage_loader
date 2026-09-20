@@ -52,6 +52,7 @@ from . import outline as outline_builder
 from .scene_objects import (
     SceneTemplate,
     defer_hide,
+    apply_collapsed_root,
     apply_node_transforms,
     apply_offsets,
     arrange_collections,
@@ -1061,7 +1062,16 @@ class _ImportSession:
             if placement.node_transforms:
                 if summary.guid not in unit_scales:
                     unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid]) if summary.entry.ext == ".fbx" else None
-                skipped_nodes += apply_node_transforms(template, objects, placement.node_transforms, unit_scales[summary.guid])
+                overrides = placement.node_transforms
+                if placement.root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
+                    overrides = {k: v for k, v in overrides.items() if k != placement.root_node}
+                    placed = apply_collapsed_root(
+                        template, objects, root, placement.root_node,
+                        placement.node_transforms[placement.root_node], unit_scales[summary.guid],
+                    )
+                    skipped_nodes += 0 if placed else 1
+                if overrides:
+                    skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
             if placement.offsets:
                 skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
             hide, unused = parts_to_hide(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
