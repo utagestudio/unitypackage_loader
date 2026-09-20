@@ -342,6 +342,32 @@ class MergeByMeshTests(unittest.TestCase):
         self.assertEqual(set(merge_prefab_tables([wheels, dict(wheels)])), {"WheelL", "WheelR"})
 
 
+class LodTableTests(unittest.TestCase):
+    def test_table_keeps_the_lod_level(self):
+        from tests.test_hierarchy import MODEL as LOD_MODEL, LodGroupTest
+
+        h = Expander(lambda guid: None, {LOD_MODEL: "Bike"}).expand_raw(parse_asset(LodGroupTest.bike()))
+        table = tables_from_hierarchy(h, {LOD_MODEL: "Bike"})[LOD_MODEL]
+        self.assertEqual({name: rm.lod_level for name, rm in table.items()}, {"Bike_LOD0": 0, "Bike_LOD1": 1, "Bike_LOD2": 2})
+
+
+class FindRendererTests(unittest.TestCase):
+    """表をオブジェクト名で引く（``mapping`` と LOD の非表示が共用する。#104）。"""
+
+    def test_lookup_order(self):
+        from unitypackage_loader.core.prefab import find_renderer
+        from unitypackage_loader.core.unity_ids import mesh_file_id
+
+        table = {
+            "Body": RendererMaterials("Body", [MAT_A]),
+            "Renamed": RendererMaterials("Renamed", [MAT_B], mesh_file_id=mesh_file_id("Door")),
+        }
+        self.assertEqual(find_renderer(table, "Body").materials, [MAT_A])
+        self.assertEqual(find_renderer(table, "Body.003").materials, [MAT_A])  # 連番を外す
+        self.assertEqual(find_renderer(table, "Door.001").materials, [MAT_B])  # メッシュ参照のハッシュ
+        self.assertIsNone(find_renderer(table, "Window"))
+
+
 class RenamedGameObjectMappingTests(unittest.TestCase):
     def test_slot_assignments_fall_back_to_mesh_file_id(self):
         from unitypackage_loader.core.mapping import slot_assignments
