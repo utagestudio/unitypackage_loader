@@ -8,6 +8,8 @@
 - 外から元のオブジェクトを指す参照（子を付ける親、上書き先）は、stripped ドキュメント
   （``m_CorrespondingSourceObject`` と ``m_PrefabInstance``）を対応表にして引く。シーンの fileID は XOR の規則に
   従わないため（Issue #48 の調査）。
+- ``LODGroup`` の ``m_LODs`` は、段ごとに並んだ Renderer の fileID として読み、``RendererInfo.lod_level`` に付ける
+  （0 = もっとも細かい LOD0）。読み込み側は 0 以外を非表示にする。
 - ``m_Modifications`` のうち、位置・回転・スケール（``m_LocalPosition.x`` など）、``m_IsActive``、``m_Name``、
   Renderer の ``m_Enabled`` とマテリアル（``m_Materials.Array.data[N]`` / ``.size``）を反映する。
   ``m_RemovedGameObjects`` / ``m_RemovedComponents`` で消されたものは除く。
@@ -47,6 +49,7 @@ CLASS_MESH_RENDERER = 23
 CLASS_MESH_FILTER = 33
 CLASS_LIGHT = 108
 CLASS_SKINNED_MESH_RENDERER = 137
+CLASS_LOD_GROUP = 205
 CLASS_TERRAIN = 218
 CLASS_CANVAS = 223
 CLASS_RECT_TRANSFORM = 224
@@ -102,6 +105,7 @@ class RendererInfo:
     renderer_class: int
     enabled: bool = True
     mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
+    lod_level: int = 0  # LODGroup の段（0 = もっとも細かい LOD0、または LODGroup が無い）
 
 
 @dataclass
@@ -137,6 +141,7 @@ class RawAsset:
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
     # ライト・カメラの fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
+    lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
@@ -152,6 +157,22 @@ def _vector(value: object, default: tuple[float, ...], keys: str) -> list[float]
 
 def _targets(items: object) -> list[tuple[int, str | None]]:
     return [(r.file_id, ref_guid(r)) for r in (items if isinstance(items, list) else []) if isinstance(r, UnityRef)]
+
+
+def _lod_levels(body: dict) -> list[list[int]]:
+    """LODGroup の ``m_LODs`` を、段の順に並べた Renderer の fileID にする。
+
+    無効な LODGroup（``m_Enabled: 0``）は Unity でもすべての Renderer が描かれるので、空のリストを返す。
+    """
+    if to_float(body.get("m_Enabled"), 1.0) == 0:
+        return []
+    lods = body.get("m_LODs")
+    levels: list[list[int]] = []
+    for lod in lods if isinstance(lods, list) else []:
+        renderers = lod.get("renderers") if isinstance(lod, dict) else None
+        refs = [item.get("renderer") for item in renderers if isinstance(item, dict)] if isinstance(renderers, list) else []
+        levels.append([r.file_id for r in refs if isinstance(r, UnityRef) and r.file_id])
+    return levels
 
 
 def parse_asset(data: str | bytes) -> RawAsset:
@@ -191,6 +212,10 @@ def parse_asset(data: str | bytes) -> RawAsset:
             renderer_docs.append(doc)
         elif doc.class_id in _COMPONENT_CLASSES:
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
+        elif doc.class_id == CLASS_LOD_GROUP:
+            levels = _lod_levels(body)
+            if levels:
+                raw.lod_groups.append(levels)
         elif doc.class_id == CLASS_PREFAB_INSTANCE:
             # 2018.2 以前は m_ParentPrefab。prefab アセット自身の記録（m_IsPrefabParent: 1）は元の GUID を持たないので飛ばす
             source = ref_guid(body.get("m_SourcePrefab", body.get("m_ParentPrefab")))
@@ -399,6 +424,8 @@ class Expander:
             if len(h.nodes) > MAX_NODES:
                 raise HierarchyError(f"hierarchy has more than {MAX_NODES} objects")
             self._insert(h, instance, resolve, stack)
+        # LODGroup は差し込んだ PrefabInstance の中の Renderer を指すことがあるので、差し込みの後に当てる
+        _apply_lod_groups(h, raw.lod_groups, resolve)
         return h
 
     def _insert(self, h: Hierarchy, instance: _RawInstance, resolve, stack) -> None:
@@ -484,6 +511,27 @@ class Expander:
             h.unresolved_overrides += 1
             if _MATERIAL_PATH.fullmatch(path) or path == "m_Materials.Array.size":
                 h.unresolved_material_overrides += 1
+
+
+def _apply_lod_groups(h: Hierarchy, groups: list[list[list[int]]], resolve: Callable[[int], int]) -> None:
+    """LODGroup の段を、そこに並んだ Renderer に付ける。
+
+    1 つの LODGroup の中で同じ Renderer が複数の段にあれば、もっとも細かい段（Unity で LOD0 として描かれる方）を採る。
+    既に段が付いている Renderer（ネストした prefab の中の LODGroup で付いたもの）は、粗い方を残す。内側の LODGroup で
+    遠景用だった Renderer は、外側で LOD0 に並べ直されても内側の判断で隠れたままにするため。
+    """
+    for levels in groups:
+        best: dict[int, int] = {}
+        for level, renderers in enumerate(levels):
+            for file_id in renderers:
+                key = h.renderers.get(resolve(file_id))
+                if key is None or key not in h.nodes or h.nodes[key].renderer is None:
+                    continue
+                if level < best.get(key, level + 1):
+                    best[key] = level
+        for key, level in best.items():
+            renderer = h.nodes[key].renderer
+            renderer.lod_level = max(renderer.lod_level, level)
 
 
 _CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
@@ -739,6 +787,7 @@ class PlacedRenderer:
     renderer_class: int
     visible: bool  # GameObject がアクティブで Renderer が有効
     mesh_file_id: int = 0  # メッシュ参照の fileID（表で名前を引けなかったとき、読み込み側がハッシュで照合する）
+    lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
 
 
 @dataclass
@@ -975,7 +1024,8 @@ def placements(
         if name in placement.renderers:
             continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
         placement.renderers[name] = PlacedRenderer(
-            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled, renderer.mesh_file_id
+            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
+            renderer.mesh_file_id, renderer.lod_level,
         )
         # ルートからこの Node までの、上書き前の行列の積で逆算する
         inverse = inverse_affine(node.scope_matrix)

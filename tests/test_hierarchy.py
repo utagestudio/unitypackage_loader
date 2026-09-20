@@ -80,11 +80,26 @@ def instance(file_id, source, parent, mods, removed_game_objects=""):
     )
 
 
-def stripped_transform(file_id, source_file_id, source_guid, instance_id):
+def stripped_transform(file_id, source_file_id, source_guid, instance_id, class_id=4, kind="Transform"):
     return (
-        f"--- !u!4 &{file_id} stripped\nTransform:\n"
+        f"--- !u!{class_id} &{file_id} stripped\n{kind}:\n"
         f"  m_CorrespondingSourceObject: {{fileID: {source_file_id}, guid: {source_guid}, type: 3}}\n"
         f"  m_PrefabInstance: {{fileID: {instance_id}}}\n"
+    )
+
+
+def lod_group(file_id, go, levels, enabled=1):
+    """LODGroup。``levels`` は段の順に並べた Renderer の fileID のリスト。"""
+    body = ""
+    for index, renderers in enumerate(levels):
+        body += f"  - screenRelativeHeight: {0.5 / (index + 1)}\n    fadeTransitionWidth: 0\n"
+        if renderers:
+            body += "    renderers:\n" + "".join(f"    - renderer: {{fileID: {r}}}\n" for r in renderers)
+        else:
+            body += "    renderers: []\n"
+    return (
+        f"--- !u!205 &{file_id}\nLODGroup:\n  m_GameObject: {{fileID: {go}}}\n  serializedVersion: 2\n"
+        f"  m_Size: 2\n  m_FadeMode: 0\n  m_LODs:\n{body}  m_Enabled: {enabled}\n"
     )
 
 
@@ -640,6 +655,87 @@ class NestingLimitCacheTests(unittest.TestCase):
         tail = expander.expand_asset(guids[count - 3])
         self.assertFalse(tail.depth_truncated)
         self.assertEqual(len(tail.nodes), 3)
+
+class LodGroupTest(unittest.TestCase):
+    """LODGroup の段を Renderer に付ける（Issue #104）。"""
+
+    @staticmethod
+    def bike(levels=((103,), (113,), (123,)), enabled=1):
+        """3 段の LOD を持つ prefab。``levels`` は LODGroup に並べる Renderer の fileID。"""
+        return HEADER + "".join([
+            game_object(10, "Bike"),
+            transform(11, 10),
+            lod_group(12, 10, [list(level) for level in levels], enabled=enabled),
+            LodGroupTest.LOD_OBJECTS,
+        ])
+
+    LOD_OBJECTS = "".join([
+        game_object(100, "Bike_LOD0"),
+        transform(101, 100, father=11),
+        mesh_renderer(102, 103, 100, MODEL, MAT_A, mesh_file_id=4300000),
+        game_object(110, "Bike_LOD1"),
+        transform(111, 110, father=11),
+        mesh_renderer(112, 113, 110, MODEL, MAT_A, mesh_file_id=4300002),
+        game_object(120, "Bike_LOD2"),
+        transform(121, 120, father=11),
+        mesh_renderer(122, 123, 120, MODEL, MAT_A, mesh_file_id=4300004),
+    ])
+
+    def levels(self, text, sources=None):
+        assets = dict(sources or {})
+        exp = Expander(lambda guid: parse_asset(assets[guid]) if guid in assets else None, {MODEL: "Bike"})
+        h = exp.expand_raw(parse_asset(text))
+        found = placements(h, [MODEL])
+        return {name: r.lod_level for p in found for name, r in p.renderers.items()}
+
+    def test_levels_follow_the_lod_group(self):
+        self.assertEqual(self.levels(self.bike()), {"Bike_LOD0": 0, "Bike_LOD1": 1, "Bike_LOD2": 2})
+
+    def test_disabled_group_leaves_every_renderer_at_zero(self):
+        # 無効な LODGroup は Unity でもすべての Renderer が描かれる
+        self.assertEqual(self.levels(self.bike(enabled=0)), {"Bike_LOD0": 0, "Bike_LOD1": 0, "Bike_LOD2": 0})
+
+    def test_renderer_in_two_levels_keeps_the_finest(self):
+        levels = ((103, 113), (113,), (123,))
+        self.assertEqual(self.levels(self.bike(levels)), {"Bike_LOD0": 0, "Bike_LOD1": 0, "Bike_LOD2": 2})
+
+    def test_empty_last_level_is_ignored(self):
+        # 最後の段に Renderer が無い（Culled）LODGroup
+        levels = ((103,), (113,), (123,), ())
+        self.assertEqual(self.levels(self.bike(levels)), {"Bike_LOD0": 0, "Bike_LOD1": 1, "Bike_LOD2": 2})
+
+    def test_levels_survive_a_prefab_instance(self):
+        scene = HEADER + "".join([
+            game_object(1000, "Street"),
+            transform(1001, 1000),
+            instance(2000, NESTED, 1001, [mod(11, NESTED, "m_LocalPosition.x", 3)]),
+            stripped_transform(2001, 11, NESTED, 2000),
+        ])
+        self.assertEqual(self.levels(scene, {NESTED: self.bike()}), {"Bike_LOD0": 0, "Bike_LOD1": 1, "Bike_LOD2": 2})
+
+    def test_group_in_the_scene_reaches_into_an_instance(self):
+        # シーンの LODGroup が、差し込んだ prefab の中の Renderer を stripped の参照で指す
+        plain = HEADER + "".join([
+            game_object(10, "Rock"),
+            transform(11, 10),
+            game_object(100, "Rock_Near"),
+            transform(101, 100, father=11),
+            mesh_renderer(102, 103, 100, MODEL, MAT_A, mesh_file_id=4300000),
+            game_object(110, "Rock_Far"),
+            transform(111, 110, father=11),
+            mesh_renderer(112, 113, 110, MODEL, MAT_A, mesh_file_id=4300002),
+        ])
+        scene = HEADER + "".join([
+            game_object(1000, "Street"),
+            transform(1001, 1000),
+            lod_group(1002, 1000, [[2103], [2113]]),
+            instance(2000, NESTED, 1001, []),
+            stripped_transform(2001, 11, NESTED, 2000),
+            stripped_transform(2103, 103, NESTED, 2000, class_id=23, kind="MeshRenderer"),
+            stripped_transform(2113, 113, NESTED, 2000, class_id=23, kind="MeshRenderer"),
+        ])
+        self.assertEqual(self.levels(scene, {NESTED: plain}), {"Rock_Near": 0, "Rock_Far": 1})
+
 
 if __name__ == "__main__":
     unittest.main()
