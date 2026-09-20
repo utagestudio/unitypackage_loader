@@ -763,14 +763,18 @@ def _node_names(table: dict[int, str]) -> set[str] | None:
 
 
 def _fbx_node_name(node: Node, model_guid: str, table: dict[int, str], names: set[str]) -> str | None:
-    """Node が FBX のどのノードか。GameObject 名で引き、名前を変えてあれば Renderer のメッシュ名で引く。"""
+    """Node が FBX のどのノードか。GameObject 名で引き、名前を変えてあれば Renderer のメッシュ名で引く。
+
+    1 メッシュの FBX（``names`` が空）では、Unity が ``//RootNode`` に畳んだノードそのものなので、表から引いた
+    メッシュ名を使う（Blender では FBX のノード名のオブジェクトになり、この形の FBX ではメッシュ名と同じ。#98）。
+    """
     base = unity_base_name(node.name)
     if base in names:
         return base
     renderer = node.renderer
     if renderer is not None and renderer.mesh_guid == model_guid:
         mesh_name = table.get(renderer.mesh_file_id)
-        if mesh_name in names:
+        if mesh_name in names or (not names and mesh_name and mesh_name != _ROOT_NODE_NAME):
             return mesh_name
     return None
 
@@ -850,6 +854,9 @@ def placements(
 
     FBX の中のノードをルートにした配置は、``node_transforms`` でそのノードを単位行列にする。Unity の GameObject の
     行列がノードの元の変換を含んでいるので、Blender のオブジェクトの元の変換を掛けないようにするため。
+    1 メッシュの FBX（Renderer の GameObject 自身がルート）も同じで、Unity はノードを ``//RootNode`` に畳んで
+    その変換をモデルのルートの Transform に載せ、メッシュの頂点はノード空間のままにするため、メッシュを直接指す
+    Renderer にはノードの変換が掛からない（Unity 6000.6.0f1 で確認。Issue #98）。
     """
     root_names = _model_names(model_guids)
     models = set(root_names)
@@ -921,7 +928,7 @@ def placements(
         if placement is None:
             placement = ModelPlacement(guid, root, worlds[root], active[root])
             names = node_names.get(guid)
-            if names and root == own:
+            if names is not None and root == own:
                 label = _fbx_node_name(h.nodes[root], guid, tables.get(guid, {}), names)
                 if label is not None:  # FBX の中のノードをルートにした
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)

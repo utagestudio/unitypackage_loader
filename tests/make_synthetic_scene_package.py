@@ -16,6 +16,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - C: FBX を展開した prefab（Unpacked。Transform の値は Unity が展開したときのもの）を、位置 (0, 0, -3)・Y 180 度・
   スケール (1, 2, 1) に。中の Child の位置を上書きし、Child のマテリアルを ProbeRed に差し替える
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
+- SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
+  Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -78,6 +80,26 @@ def export_probe_fbx(path: Path) -> None:
     skinned.vertex_groups.new(name="Hips").add([v.index for v in skinned.data.vertices], 1.0, "REPLACE")
     skinned.modifiers.new("Armature", "ARMATURE").object = arm
     skinned.parent = arm
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_slab_fbx(path: Path) -> None:
+    """メッシュが 1 つだけで、そのノードが原点から離れている FBX（Issue #98）。
+
+    Unity はこの形の FBX でノードを ``//RootNode`` に畳み、ノードの変換をモデルのルートの Transform に載せる。
+    メッシュの頂点はノード空間のままなので、メッシュを直接指す Renderer にはノードの変換が掛からない。
+    """
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("ProbeMat")
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = "Slab"
+    obj.data.name = "Slab_Mesh"
+    corner = max(obj.data.vertices, key=lambda v: (v.co.x, v.co.y, v.co.z))
+    corner.co = (1.6, 1.1, 0.7)
+    obj.location = (0, 4, 0.2)  # Unity では (0, 0.2, -4)
+    obj.rotation_euler = (0, 0, math.radians(90))
+    obj.data.materials.append(material)
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
 
@@ -196,6 +218,29 @@ def main() -> None:
     )
     model = add(model_path, fbx.read_bytes(), meta)
 
+    # 1 メッシュの FBX（#98）。表は新しい Unity が書く internalIDToNameTable の形で、GameObject はルートだけ
+    slab_fbx = tmp / "slab.fbx"
+    export_slab_fbx(slab_fbx)
+    slab_path = "Assets/Synthetic/Models/Slab.fbx"
+    slab_table = "".join(
+        f"  - first:\n      {class_id}: {file_id}\n    second: {name}\n" for class_id, file_id, name in (
+            (1, 100000, "//RootNode"), (4, 400000, "//RootNode"), (23, 2300000, "//RootNode"),
+            (33, 3300000, "//RootNode"), (43, 4300000, "Slab"),
+        )
+    )
+    slab_meta = model_meta(guid_of(slab_path), {"ProbeMat": mats["ProbeMat"]}).replace(
+        "ModelImporter:\n", f"ModelImporter:\n  internalIDToNameTable:\n{slab_table}", 1
+    )
+    slab_model = add(slab_path, slab_fbx.read_bytes(), slab_meta)
+
+    # Unity で、メッシュを直接指す GameObject だけの prefab（街並みアセットの歩道と同じ形）
+    slab_prefab_path = "Assets/Synthetic/Prefabs/Slab.prefab"
+    slab_prefab = add(slab_prefab_path, (HEADER + "".join([
+        game_object(10, "Slab"),
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, slab_model, mats["ProbeMat"], 4300000),
+    ])).encode(), prefab_meta(slab_prefab_path))
+
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
     def unpacked_prefab(name, mat_guid, spike_only=False):
         # spike_only: FBX を展開したあと Child と Skinned の Renderer を消した prefab（#58: Unity では Spike しか表示されない）
@@ -282,6 +327,15 @@ def main() -> None:
             mod(301, unpacked, "m_LocalPosition.y", 0.5),
             mod(303, unpacked, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}"),
             mod(100, unpacked, "m_Name", "C"),
+        ]),
+        # 1 メッシュの FBX をメッシュ参照で使う prefab（#98）。Y 45 度で (3, 1, 14) に置く
+        instance(5000, slab_prefab, 0, [
+            mod(11, slab_prefab, "m_LocalPosition.x", 3),
+            mod(11, slab_prefab, "m_LocalPosition.y", 1),
+            mod(11, slab_prefab, "m_LocalPosition.z", 14),
+            mod(11, slab_prefab, "m_LocalRotation.y", 0.38268346),
+            mod(11, slab_prefab, "m_LocalRotation.w", 0.9238795),
+            mod(10, slab_prefab, "m_Name", "SlabRoot"),
         ]),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),

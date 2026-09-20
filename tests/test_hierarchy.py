@@ -367,6 +367,10 @@ class ModelRootTest(unittest.TestCase):
         game_object(200, "Wall_LOD1"),
         transform(201, 200, father=181),
         mesh_renderer(202, 203, 200, PARTIAL, MAT_A, mesh_file_id=-123456789),
+        # 1 メッシュの FBX を、名前を変えた GameObject がメッシュ参照で使う（#98）
+        game_object(210, "Jar"),
+        transform(211, 210, pos=(0, 4, 0)),
+        mesh_renderer(212, 213, 210, SINGLE, MAT_A, mesh_file_id=4300000),
     ])
 
     @classmethod
@@ -383,7 +387,7 @@ class ModelRootTest(unittest.TestCase):
 
     def test_copies_in_a_room_are_placed_one_by_one(self):
         self.assertEqual(self.roots(MODEL), ["Part (1)", "Part (2)", "Lid (1)", "Kit", "Lid (2)", "Probe", "Box"])
-        self.assertEqual(self.roots(self.SINGLE), ["Pot", "Pot (1)", "Pot (2)"])
+        self.assertEqual(self.roots(self.SINGLE), ["Pot", "Pot (1)", "Pot (2)", "Jar"])
         self.assertEqual([round(v, 6) for v in transform_point(self.by_root("Part (2)").world, (0, 0, 0))], [2, 0, 0])
         self.assertEqual(set(self.by_root("Lid (1)").renderers), {"Lid"})
 
@@ -392,7 +396,10 @@ class ModelRootTest(unittest.TestCase):
         identity = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
         self.assertEqual(self.by_root("Part (1)").node_transforms, {"Part": identity})
         self.assertEqual(self.by_root("Lid (2)").node_transforms, {"Lid": identity})
-        self.assertEqual(self.by_root("Pot").node_transforms, {})  # 1 メッシュの FBX は GameObject がモデルのルート
+        # 1 メッシュの FBX も、Unity が //RootNode に畳んだノードなのでメッシュ名で戻す（#98）
+        self.assertEqual(self.by_root("Pot").node_transforms, {"Pot": identity})
+        self.assertEqual(self.by_root("Jar").node_transforms, {"Pot": identity})  # 名前を変えてあってもメッシュ名で引く
+        self.assertEqual(set(self.by_root("Jar").renderers), {"Pot"})
 
     def test_unpacked_root_keeps_its_parts_together(self):
         kit = self.by_root("Kit")
