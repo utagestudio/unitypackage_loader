@@ -108,6 +108,9 @@ def _prefab_slots(
 
     表は GameObject 名で引く（完全一致 → 連番を外した形）。prefab で GameObject の名前を変えてあって引けなければ、
     オブジェクト名から求めたメッシュの fileID を、表の Renderer のメッシュ参照と照合する（Scenes 単位と同じ。#71）。
+
+    モデルがマテリアルを 1 つも持たないとスロットは 0 個になるが、Unity ではサブメッシュが 1 つあって Renderer の
+    ``m_Materials[0]`` で描かれる。この場合は先頭の .mat をスロット 0 の組として返す（スロットは読み込む側で作る。#102）。
     """
     rm = prefab_table.get(obj_name) or prefab_table.get(strip_numeric_suffix(obj_name))
     if rm is None:
@@ -115,6 +118,8 @@ def _prefab_slots(
         rm = next((r for r in prefab_table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
     if rm is None:
         return []
+    if slot_count <= 0:
+        return [(0, rm.materials[0])] if rm.materials else []
     order = submesh_order.get(obj_name) if submesh_order is not None else None
     if order is None:
         order = list(range(slot_count))
@@ -133,7 +138,8 @@ def _from_prefab(
     votes: dict[str, int] = {}
     for obj_name, slots in object_slots.items():
         for index, guid in _prefab_slots(obj_name, len(slots), prefab_table, submesh_order):
-            if slots[index] != fbx_name:
+            # スロットの無いメッシュはスロット 0 の組が返るので、名前と突き合わせる相手がいない
+            if index >= len(slots) or slots[index] != fbx_name:
                 continue
             if guid and guid in materials:
                 votes[guid] = votes.get(guid, 0) + 1
@@ -181,6 +187,8 @@ def slot_assignments(
 
     m_Materials の並びは Unity のサブメッシュ順なので、``submesh_order``（{オブジェクト名: サブメッシュ順の
     スロット番号}、``submesh_slot_order`` の結果）でスロットに読み替える。無いオブジェクトはスロット順とみなす。
+
+    スロットが 0 個のメッシュ（マテリアルを持たないモデル）には、まだ無いスロット 0 への割り当てが入る（#102）。
     """
     result: dict[tuple[str, int], str] = {}
     if not prefab_table:

@@ -883,6 +883,13 @@ class _ImportSession:
             fbx_names, model_info, self.unity_mats, model.pathname, prefab_table, object_slots, submesh_order
         )
         assignments = slot_assignments(object_slots, prefab_table, self.unity_mats, submesh_order)
+        # マテリアルを 1 つも持たないモデルは、prefab の割り当てしか手掛かりが無い（#102）
+        for obj_name, slots in object_slots.items():
+            if not slots and (obj_name, 0) not in assignments:
+                self.report.warn(
+                    f"{model.name}: mesh {obj_name!r} has no material slots and no prefab assignment; "
+                    "it is left without a material"
+                )
         # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
         replaced = fully_replaced_materials(object_slots, assignments, resolution)
 
@@ -1161,13 +1168,21 @@ def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg
 
 def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normalized, built_by_guid,
                            images, tex_infos, build_opts, pkg, report) -> int:
-    """(オブジェクト, スロット) ごとに prefab の .mat を割り当てる。差し替えたスロット数を返す。"""
+    """(オブジェクト, スロット) ごとに prefab の .mat を割り当てる。割り当てたスロット数を返す。
+
+    モデルがマテリアルを持たないとスロットは 0 個になるが、Unity では Renderer の ``m_Materials[0]`` で描かれる。
+    このときはスロット 0 を作ってから割り当てる（#102）。
+    """
     by_name = {o.name: o for o in objects if o.type == "MESH"}
     count = 0
     for (obj_name, index), guid in assignments.items():
         obj = by_name.get(obj_name)
-        if obj is None or index >= len(obj.material_slots):
+        if obj is None:
             continue
+        if index >= len(obj.material_slots):
+            if index != 0:  # index が 0 で範囲外なら、スロットが 1 つも無いメッシュ
+                continue
+            obj.data.materials.append(None)
         slot = obj.material_slots[index]
         current = slot.material
         current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
