@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 4,
+  "warnings_max": 5,
   "placed_objects": [
     {
       "top": "A",
@@ -128,6 +128,21 @@
         1.6
       ],
       "hidden": false
+    },
+    {
+      "top": "TowerRoot",
+      "object": "Tower_LOD0",
+      "hidden": false,
+      "lod": 0,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "TowerRoot",
+      "object": "Tower_LOD1",
+      "hidden": true,
+      "lod": 1
     },
     {
       "top": "AllRed",

@@ -291,6 +291,16 @@ def main() -> int:
                 if slot.material is not None
             }
             c.eq(f"{coll_name}.mat_files", sorted(files), sorted(spec["mat_files"]))
+        # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
+        for obj_name, part in spec.get("parts", {}).items():
+            obj = next((o for o in objects if o.name == obj_name), None)
+            c.true(f"{coll_name}/{obj_name} exists", obj is not None)
+            if obj is None:
+                continue
+            if "hidden" in part:
+                c.eq(f"{coll_name}/{obj_name}.hidden", obj.hide_get(), part["hidden"])
+            if "lod" in part:
+                c.eq(f"{coll_name}/{obj_name}.lod", obj.get("unity_lod"), part["lod"])
 
     if "prefab_collections_overlap" in exp:
         bpy.context.view_layer.update()
@@ -334,6 +344,8 @@ def main() -> int:
             c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
         if "hidden" in spec:
             c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "lod" in spec:
+            c.eq(f"{label}.lod", obj.get("unity_lod"), spec["lod"])
         if "mat_files" in spec:
             files = sorted({s.material.get("unity_material_path", "").rsplit("/", 1)[-1] for s in obj.material_slots if s.material})
             c.eq(f"{label}.mat_files", files, sorted(spec["mat_files"]))
