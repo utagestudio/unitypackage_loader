@@ -107,6 +107,19 @@
       "hidden": true
     },
     {
+      "top": "SlabRoot",
+      "object": "Slab",
+      "tip": [
+        -2.9936,
+        -14.0163,
+        1.011
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
       "top": "AllRed",
       "object": "Spike",
       "hidden": false,
