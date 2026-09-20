@@ -142,6 +142,7 @@ Materials that match none of these are left as the importer created them and are
 What Unity actually renders is the material set on a prefab's Renderer, so when a prefab assigns a .mat, it takes
 precedence over steps 1 and 2. For packages where the FBX shares a small number of materials and the prefab assigns
 a different .mat per part on the Unity side, Blender materials are split per slot following the prefab's assignments.
+When the model itself has no materials at all, a slot is created from the prefab's assignment and filled.
 A prefab's Renderers are applied only to the model whose mesh they reference, so objects with the same name in
 another model are not affected. With the Models unit, when several prefabs use the same model (for example, color
 variants), their assignments are merged, with the first one by path taking precedence; to use a specific prefab's

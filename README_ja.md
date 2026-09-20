@@ -131,6 +131,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 Unity で実際に表示されるのは prefab の Renderer に設定されたマテリアルなので、prefab に割り当てがあれば 1・2 の結果より優先します。
 FBX 内では少数のマテリアルを共有し、Unity 側で prefab がパーツごとに別の .mat を割り当てているパッケージでは、
 prefab の割り当てに従ってスロット単位で Blender マテリアルを分割します。
+モデル自体がマテリアルを 1 つも持たない場合も、prefab の割り当てからスロットを作って当てます。
 prefab の Renderer は、そのメッシュを持つモデルにだけ当てはめます（別モデルの同名オブジェクトには使いません）。
 読み込む単位が Models のとき、同じモデルを使う prefab が複数ある場合（色違いなど）は、すべてを統合し、パス順で先のものを優先します。
 特定の prefab の割り当てを使うには、読み込む単位 Prefabs でその prefab を読み込みます。
