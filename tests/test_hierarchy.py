@@ -415,6 +415,49 @@ class ModelRootTest(unittest.TestCase):
         self.assertEqual(set(self.by_root("Wall").renderers), {"Wall", "Wall_LOD1"})
 
 
+class CollapsedModelRootTest(unittest.TestCase):
+    """1 メッシュの FBX をモデルの PrefabInstance で置いた配置（Issue #99）。
+
+    この形の FBX では Unity のモデルのルートの Transform の値が FBX のノードの変換で、シーンの上書きはその成分を
+    置き換える（上書きしなかった成分はノードの値のまま）。ノードの値は FBX を読むまで分からないので、
+    畳まれたノードの名前を ``root_node`` に、上書きした成分だけを ``node_transforms`` に入れて読み込み側へ渡す。
+    """
+
+    TABLE = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 3300000: "//RootNode", 4300000: "Slab"}
+    # 位置と回転だけを上書きし、スケールは触らない（Unity のエディタで動かしたときと同じ形）
+    SCENE = HEADER + instance(2000, MODEL, 0, [
+        mod(ROOT_TRANSFORM, MODEL, "m_LocalPosition.x", 2),
+        mod(ROOT_TRANSFORM, MODEL, "m_LocalPosition.y", 0.5),
+        mod(ROOT_TRANSFORM, MODEL, "m_LocalPosition.z", -6),
+        mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.y", 0.25881905),
+        mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.w", 0.96592583),
+        mod(ROOT_GAME_OBJECT, MODEL, "m_Name", "SlabInstance"),
+    ])
+
+    def placement(self, table=None):
+        exp = Expander(lambda g: None, {MODEL: "Slab"}, {MODEL: table} if table else None)
+        h = exp.expand_raw(parse_asset(self.SCENE))
+        return h, placements(h, {MODEL: "Slab"}, {MODEL: table} if table else None)[0]
+
+    def test_overridden_components_are_recorded_for_the_collapsed_node(self):
+        h, placement = self.placement(self.TABLE)
+        self.assertEqual(h.nodes[placement.root].name, "SlabInstance")
+        self.assertEqual(placement.root_node, "Slab")
+        self.assertEqual(placement.node_transforms, {"Slab": {
+            "position": [2.0, 0.5, -6.0], "rotation": [None, 0.25881905, None, 0.96592583],
+        }})
+
+    def test_model_with_several_nodes_is_left_alone(self):
+        table = self.TABLE | {100002: "Lid", 400002: "Lid", 4300002: "Lid"}
+        _, placement = self.placement(table)
+        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
+
+    def test_without_a_table_the_node_is_unknown(self):
+        _, placement = self.placement()
+        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
+        self.assertEqual([round(v, 6) for v in transform_point(placement.world, (0, 0, 0))], [2, 0.5, -6])
+
+
 class LegacyFormatTest(unittest.TestCase):
     """Unity 2018.2 以前の形式（Prefab / m_ParentPrefab / m_PrefabParentObject / m_PrefabInternal、ルートは 400000）。"""
 

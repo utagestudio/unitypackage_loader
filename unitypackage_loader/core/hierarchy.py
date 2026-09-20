@@ -310,6 +310,8 @@ class Expander:
         self._models = {g.lower(): name for g, name in model_names.items()}  # モデルの GUID → ルートの名前
         # モデルの GUID → 古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける）
         self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
+        # 1 メッシュの FBX（Unity がノードを //RootNode に畳むモデル）の GUID → そのノードの名前（#99）
+        self._collapsed = {g: name for g, table in self._recycle.items() if (name := collapsed_root_name(table))}
         # GUID → (展開結果, 深さで打ち切ったときの展開時のスタックの長さ。打ち切りが無ければ None)
         self._cache: dict[str, tuple[Hierarchy | None, int | None]] = {}
 
@@ -466,10 +468,15 @@ class Expander:
 
         root_key =remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
         table = self._recycle.get(source, {}) if is_model else {}
+        # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
+        # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
+        collapsed = self._collapsed.get(source) if is_model else None
         for file_id, guid, path, value, reference in instance.modifications:
             key = target_key(file_id, guid)
             if key is None:
                 continue
+            if collapsed is not None and key == root_key and root_key in h.nodes:
+                _record_node_transform(h.nodes[root_key], collapsed, path, value)
             if _apply_modification(h, added_keys, key, path, value, reference) or not is_model or not _is_tracked(path):
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
@@ -495,6 +502,24 @@ def _model_object_name(table: dict[int, str], file_id: int) -> str | None:
     return meshes[0] if len(meshes) == 1 else None
 
 
+def _record_node_transform(root: Node, name: str, path: str, value: object) -> bool:
+    """モデルの中のノードへの位置・回転・スケールの上書きを、名前付きで配置のルートに記録する。
+
+    上書きの無い成分は ``None`` のままにする（読み込み側で、Blender のオブジェクトから逆算した元の値を使う）。
+    """
+    match = _TRS_PATH.fullmatch(path)
+    if match is None:
+        return False
+    field_name = _TRS_FIELDS[match.group(1)]
+    size = 4 if field_name == "rotation" else 3
+    values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
+    index = _AXES[match.group(2)]
+    if index < size:
+        number = to_float(value, float("nan"))
+        values[index] = None if math.isnan(number) else number
+    return True
+
+
 def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int, path: str, value: object, reference: object) -> bool:
     """モデルの中への上書きを、表で引いた名前付きで配置のルートに記録する。名前を引けなければ False。"""
     if not table:
@@ -503,15 +528,7 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
     name = _model_object_name(table, file_id)
     if name is None:
         return False
-    match = _TRS_PATH.fullmatch(path)
-    if match and class_id == _CLASS_PREFIX_TRANSFORM:
-        field_name = _TRS_FIELDS[match.group(1)]
-        size = 4 if field_name == "rotation" else 3
-        values = root.model_transforms.setdefault(name, {}).setdefault(field_name, [None] * size)
-        index = _AXES[match.group(2)]
-        if index < size:
-            number = to_float(value, float("nan"))
-            values[index] = None if math.isnan(number) else number
+    if class_id == _CLASS_PREFIX_TRANSFORM and _record_node_transform(root, name, path, value):
         return True
     material = _MATERIAL_PATH.fullmatch(path)
     if material and class_id in (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER):
@@ -735,6 +752,10 @@ class ModelPlacement:
     offsets: dict[str, Mat4] = field(default_factory=dict)  # 中のノードが動いた Renderer の名前 → そこから逆算したルートの行列
     # モデルの PrefabInstance の中のノードへの上書き（古い形式の .meta で名前を引けたもの）。名前 → position/rotation/scale
     node_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)
+    # 1 メッシュの FBX をモデルの PrefabInstance で置いた配置での、畳まれたノード（Blender のオブジェクト）の名前。
+    # このとき ``world`` は上書きの無い成分に FBX のノードの値が入っていないので、読み込み側が
+    # ``node_transforms[root_node]`` とオブジェクトの元の行列から組み立て直す（#99）
+    root_node: str = ""
 
     def signature(self) -> tuple:
         """読み込み結果を使い回せるかの判定に使う値（モデルと、名前ごとのマテリアル）。"""
@@ -760,6 +781,18 @@ def _node_names(table: dict[int, str]) -> set[str] | None:
         return names
     meshes = sum(1 for k in table if k // 100000 == _CLASS_PREFIX_MESH)
     return set() if game_objects and meshes <= 1 else None
+
+
+def collapsed_root_name(table: dict[int, str]) -> str | None:
+    """1 メッシュの FBX で、Unity が ``//RootNode`` に畳んだノード（Blender ではメッシュ名のオブジェクト）の名前。
+
+    表が無いモデルと、ノードが複数あるモデルは None。この形の FBX では、モデルのルートの Transform が
+    FBX のノードの変換を持ち、メッシュの頂点はノード空間のままになる（Issue #98 / #99。Unity 6000.6.0f1 で確認）。
+    """
+    if _node_names(table) != set():
+        return None
+    root_id = next((k for k in table if k // 100000 == CLASS_GAME_OBJECT), 0)
+    return _model_object_name(table, root_id)
 
 
 def _fbx_node_name(node: Node, model_guid: str, table: dict[int, str], names: set[str]) -> str | None:
@@ -883,6 +916,11 @@ def placements(
             for name, slots in node.model_materials.items():
                 placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
             placement.node_transforms = copy.deepcopy(node.model_transforms)
+            # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
+            collapsed = collapsed_root_name(tables.get(node.model_guid, {}))
+            if collapsed is not None:
+                placement.root_node = collapsed
+                placement.node_transforms.setdefault(collapsed, {})
             items.append(placement)
             continue
         renderer = node.renderer
