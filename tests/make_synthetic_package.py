@@ -6,7 +6,8 @@
 
 内容: FBX 3 つ（Cube / Sphere / Cone）、OBJ 1 つ、.gltf 1 つ（.bin 付き）、.blend 1 つ、Standard シェーダーの .mat 3 つ、PNG 2 枚（うち 1 枚は
 ノーマルマップ設定）、externalObjects 付きの .meta、Cone と Pair（2 マテリアル。ポリゴンの使用順がスロット順と逆）に
-.mat を割り当てる prefab。Pair のサブメッシュの割り当てを入れ替えた色違いの prefab（PairSwap）と、Renderer を持たない
+.mat を割り当てる prefab。マテリアルを 1 つも持たない FBX（NoMat。同じ prefab が .mat を指す）。
+Pair のサブメッシュの割り当てを入れ替えた色違いの prefab（PairSwap）と、Renderer を持たない
 prefab（Empty）。同じ名前のオブジェクトを持つ 2 モデル（TwinA / TwinB）と、それぞれを使う prefab。
 Renderer を持つ prefab と、そのマテリアルを上書きした Prefab Variant（VariantBase / VariantAlt）。
 バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
@@ -276,10 +277,11 @@ TextureImporter:
 """
 
 
-def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = None, first_used_mat: str | None = None) -> None:
+def export_model(kind: str, mat_name: str | None, path: Path, *, name: str | None = None, first_used_mat: str | None = None) -> None:
     """``first_used_mat`` を渡すと 2 番目のスロットに追加し、先頭側の半分のポリゴンに割り当てる。
 
     ポリゴンで最初に使われるのが 2 番目のスロットになり、Unity のサブメッシュ順がスロット順と逆になる。
+    ``mat_name`` に None を渡すと、マテリアルを 1 つも持たないモデルになる（#102）。
     """
     bpy.ops.wm.read_factory_settings(use_empty=True)
     if kind == "cube":
@@ -298,8 +300,9 @@ def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = Non
         bpy.ops.mesh.primitive_cylinder_add()
     obj = bpy.context.active_object
     obj.name = name or f"Synthetic{kind.capitalize()}"
-    mat = bpy.data.materials.new(mat_name)
-    obj.data.materials.append(mat)
+    mat = bpy.data.materials.new(mat_name) if mat_name else None
+    if mat is not None:
+        obj.data.materials.append(mat)
     if first_used_mat:
         obj.data.materials.append(bpy.data.materials.new(first_used_mat))
         polygons = obj.data.polygons
@@ -315,7 +318,7 @@ def export_model(kind: str, mat_name: str, path: Path, *, name: str | None = Non
         bpy.ops.export_scene.gltf(filepath=str(path.with_suffix(".glb")), export_format="GLB", use_selection=False)
         path.with_suffix(".glb").rename(path)
     elif path.suffix == ".blend":
-        # 既にノードが組まれたマテリアルを持つ .blend（KEEP の確認用）
+        # 既にノードが組まれたマテリアルを持つ .blend（KEEP の確認用。マテリアル無しでは使わない）
         if mat.node_tree is None:  # Blender 4.x の materials.new() はノードを持たない
             mat.use_nodes = True
         mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.2, 0.9, 0.3, 1.0)
@@ -411,10 +414,21 @@ def main() -> None:
     add(pair_path, path.read_bytes(),
         model_meta(guid_of(pair_path), {"PairA": mat_guids["PairA"], "PairB": mat_guids["PairB"]}))
 
+    # マテリアルを 1 つも持たない FBX（Blender ではスロットが 0 個になる）。externalObjects も名前一致も無く、
+    # prefab の Renderer だけが .mat を指す。読み込む側でスロットを作らないと当てられない（Issue #102）
+    nomat_mat_path = "Assets/Synthetic/Materials/NoMatMat.mat"
+    mat_guids["NoMatMat"] = add(nomat_mat_path, mat_yaml("NoMatMat", tex_a, None, (0.2, 0.9, 0.4), 0).encode(),
+                                f"fileFormatVersion: 2\nguid: {guid_of(nomat_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "nomat.fbx"
+    export_model("torus", None, path, name="SyntheticNoMat")
+    nomat_path = "Assets/Synthetic/Models/NoMat.fbx"
+    add(nomat_path, path.read_bytes(), model_meta(guid_of(nomat_path), {}))
+
     prefab_path = "Assets/Synthetic/Prefabs/Cone.prefab"
     prefab = prefab_yaml([
         ("SyntheticCone", guid_of(cone_path), [mat_guids["CylinderMat"]]),
         ("SyntheticPair", guid_of(pair_path), [mat_guids["PairB"], mat_guids["PairA"]]),
+        ("SyntheticNoMat", guid_of(nomat_path), [mat_guids["NoMatMat"]]),
     ])
     add(prefab_path, prefab.encode(), prefab_meta(prefab_path))
 
