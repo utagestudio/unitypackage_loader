@@ -176,6 +176,7 @@ _UNIT_PROP = "unitypkg_select_unit"
 _ARRANGE_PROP = "unitypkg_select_arrange"
 _LIGHTS_PROP = "unitypkg_select_lights"
 _CAMERAS_PROP = "unitypkg_select_cameras"
+_LODS_PROP = "unitypkg_select_hide_lods"
 
 
 def _items(context):
@@ -276,6 +277,12 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             row.prop(wm, _LIGHTS_PROP, toggle=True, icon="LIGHT")
             row.prop(wm, _CAMERAS_PROP, toggle=True, icon="CAMERA_DATA")
 
+        if unit in (UNIT_PREFABS, UNIT_SCENES):
+            # LODGroup を持つ prefab・シーンだけに効く。タブを切り替えても高さが変わらないよう、両方に出す
+            split = layout.split(factor=0.2)
+            split.label(text="LODs")
+            split.prop(wm, _LODS_PROP, toggle=True, icon="MOD_DECIM")
+
         col = layout.column(align=True)
         col.label(text=self.summary_materials, icon="MATERIAL")
         col.label(text=self.summary_textures, icon="TEXTURE")
@@ -317,6 +324,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts.arrange = arrange
         opts.scene_lights = getattr(wm, _LIGHTS_PROP)
         opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
+        opts.hide_lods = getattr(wm, _LODS_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
         if unit == UNIT_SCENES:
             opts.scene_paths = [s.pathname for s in prepared.scenes if s.guid in chosen]
@@ -398,10 +406,18 @@ def register() -> None:
     setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
     setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
     setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))
+    setattr(wm, _LODS_PROP, BoolProperty(
+        name="Hide Distant Levels",
+        default=True,
+        description=(
+            "Hide the distant LOD levels of Unity LODGroups, so only the most detailed mesh is visible. "
+            "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
+        ),
+    ))
 
 
 def unregister() -> None:
-    for prop in (_CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
+    for prop in (_LODS_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
         if hasattr(bpy.types.WindowManager, prop):
             delattr(bpy.types.WindowManager, prop)
     for cls in reversed(_classes):

@@ -32,11 +32,11 @@ from ..core.mapping import fully_replaced_materials, resolve_materials, slot_ass
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, merge_prefab_tables, tables_from_hierarchy
+from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, tables_from_hierarchy
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
-from ..core.scene_import import parts_to_hide, scene_warnings
+from ..core.scene_import import lod_warning, parts_to_hide, scene_warnings
 from ..core.units import (
     UNIT_PREFABS,
     UNIT_SCENES,
@@ -86,6 +86,7 @@ class ImportOptions:
     scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）
     scene_lights: bool = True  # シーンのライトを読み込む
     scene_cameras: bool = True  # シーンのカメラを読み込む
+    hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
@@ -813,15 +814,22 @@ class _ImportSession:
                         skipped = self.model_by_guid.get(guid)
                         if skipped is not None and not skipped.supported:
                             self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+                hidden_lods = 0
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                     done += 1
                     if summary.guid in self.failed_models:
                         continue
                     try:
-                        self.import_model(summary, prefab_table, target)
+                        objects = self.import_model(summary, prefab_table, target)
                     except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
                         _record_failure(self.report, f"could not import {summary.entry.pathname}: {exc}")
+                        continue
+                    # Models 単位の表は prefab をまたいで統合したものなので、LOD を隠すのは prefab 単位のときだけ
+                    if group.prefab is not None:
+                        hidden_lods += self.hide_prefab_lods(objects, prefab_table)
+                if hidden_lods and group.prefab is not None:
+                    self.report.warn(f"prefab {group.prefab.pathname}: {lod_warning(hidden_lods)}")
             for scene_summary in scenes:
                 try:
                     self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
@@ -1018,6 +1026,24 @@ class _ImportSession:
             self.failed_models.add(summary.guid)
             raise
 
+    def hide_prefab_lods(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
+        """prefab の LODGroup で遠景用だったメッシュを隠し、隠した数を返す（#104）。
+
+        段はどのオブジェクトにも ``unity_lod`` として残すので、オプションを切っていても LOD0 かどうかは分かる。
+        """
+        hidden = 0
+        for obj in objects:
+            if obj.type != "MESH":
+                continue
+            rm = find_renderer(prefab_table, obj.name)
+            if rm is None:
+                continue
+            obj["unity_lod"] = rm.lod_level
+            if rm.lod_level and self.opts.hide_lods:
+                defer_hide(obj, self.hidden_objects)
+                hidden += 1
+        return hidden
+
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
@@ -1035,6 +1061,7 @@ class _ImportSession:
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
         skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
         hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
+        hidden_lods = 0  # LODGroup の遠景用の段として隠したオブジェクト
         count = len(scene_summary.placements)
         for index, placement in enumerate(scene_summary.placements):
             if index % 25 == 0:
@@ -1081,11 +1108,16 @@ class _ImportSession:
                     skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
             if placement.offsets:
                 skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
-            hide, unused = parts_to_hide(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
+            hidden = parts_to_hide(
+                hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods
+            )
             for obj in objects:
-                if obj.name in hide:
+                if obj.name in hidden.lods:
+                    obj["unity_lod"] = hidden.lods[obj.name]
+                if obj.name in hidden.names:
                     defer_hide(obj, self.hidden_objects)
-            hidden_unused += unused
+            hidden_unused += hidden.unused
+            hidden_lods += hidden.hidden_lods
 
         # --- ライト・カメラ ---
         baked_lights = 0
@@ -1121,7 +1153,8 @@ class _ImportSession:
                 defer_hide(obj, self.hidden_objects)
         for message in scene_warnings(
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
-            hidden_unused=hidden_unused, skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets,
+            hidden_unused=hidden_unused, hidden_lods=hidden_lods,
+            skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets,
         ):
             self.report.warn(message)
 
