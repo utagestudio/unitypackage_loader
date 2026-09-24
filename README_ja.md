@@ -1,6 +1,6 @@
 # Unitypackage Importer for Blender
 
-日本語 | [English](README.md) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
+日本語 | [English](README.md) | [紹介ページ](https://utagestudio.github.io/unitypackage_loader/ja/) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
 `.unitypackage` を Blender の File > Import から直接読み込み、メッシュ（アーマチュア・シェイプキー込み）に
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
@@ -30,7 +30,7 @@ GitHub Pages で配布しています。Blender の Preferences > Get Extensions
 https://utagestudio.github.io/unitypackage_loader/index.json
 ```
 
-同じページ（`index.json` を除いた URL）に登録用 URL と zip のリンクを載せています。
+[同じページ](https://utagestudio.github.io/unitypackage_loader/ja/)（`index.json` を除いた URL。日本語版は `ja/`）に登録用 URL と zip のリンクを載せています。
 サイトは `.github/workflows/pages.yml` が main への push ごとに生成します（Blender の
 `extension build` と `extension server-generate` を CI 上で実行）。初回のみ、リポジトリの
 Settings > Pages > Source を "GitHub Actions" にしてください。

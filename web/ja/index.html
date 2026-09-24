@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {{GTM_HEAD}}
-<title>Unitypackage Importer for Blender（日本語）</title>
-<meta name="description" content="購入した VRChat アバターの .unitypackage を、Unity を開かずに Blender へドラッグ＆ドロップで読み込める無料アドオン。ボーン・表情・テクスチャ付きで、lilToon / Poiyomi / MToon の見た目に近い状態で読み込めます。">
+<title>unitypackage を Blender で開く無料アドオン｜VRChat アバターをテクスチャ付きで - Unitypackage Importer</title>
+<meta name="description" content="VRChat アバターの .unitypackage を、Unity を開かずに Blender へドラッグ＆ドロップで読み込める無料アドオン。ボーン・表情・テクスチャ付きで、lilToon / Poiyomi / MToon の見た目に近い状態で読み込めます。">
 <link rel="canonical" href="{{BASE_URL}}/ja/">
 <link rel="alternate" hreflang="en" href="{{BASE_URL}}/">
 <link rel="alternate" hreflang="ja" href="{{BASE_URL}}/ja/">
@@ -13,17 +13,17 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Unitypackage Importer">
 <meta property="og:title" content="Unitypackage Importer for Blender">
-<meta property="og:description" content="買ったアバターを、テクスチャ付きで Blender へ。Unity 不要、ドラッグ＆ドロップで読み込める無料アドオン（Blender 4.5 以降）。">
+<meta property="og:description" content="Unity 向けのアバターを、テクスチャ付きで Blender へ。Unity を開かずに、ドラッグ＆ドロップで読み込める無料アドオン（Blender 4.5 以降）。">
 <meta property="og:url" content="{{BASE_URL}}/ja/">
 <meta property="og:image" content="{{BASE_URL}}/assets/og-ja.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Unitypackage Importer：買ったアバターを、テクスチャ付きで Blender へ。FBX だけの読み込みとこのアドオンでの読み込みの比較画像付き。">
+<meta property="og:image:alt" content="Unitypackage Importer：Unity 向けのアバターを、テクスチャ付きで Blender へ。FBX だけの読み込みとこのアドオンでの読み込みの比較画像付き。">
 <meta property="og:locale" content="ja_JP">
 <meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Unitypackage Importer for Blender">
-<meta name="twitter:description" content="買ったアバターを、テクスチャ付きで Blender へ。Unity 不要、ドラッグ＆ドロップで読み込める無料アドオン（Blender 4.5 以降）。">
+<meta name="twitter:description" content="Unity 向けのアバターを、テクスチャ付きで Blender へ。Unity を開かずに、ドラッグ＆ドロップで読み込める無料アドオン（Blender 4.5 以降）。">
 <meta name="twitter:image" content="{{BASE_URL}}/assets/og-ja.png">
 <meta name="theme-color" content="#f07f2a">
 <link rel="icon" href="../assets/logo.svg" type="image/svg+xml">
@@ -61,7 +61,7 @@
   "author": { "@type": "Organization", "name": "utagestudio", "url": "https://github.com/utagestudio" },
   "codeRepository": "https://github.com/utagestudio/unitypackage_loader",
   "inLanguage": ["ja", "en"],
-  "description": "購入した VRChat アバターの .unitypackage を、Unity を開かずに Blender へドラッグ＆ドロップで読み込める無料アドオン。ボーン・表情・テクスチャ付きで、lilToon / Poiyomi / MToon の見た目に近い状態で読み込めます。"
+  "description": "VRChat アバターの .unitypackage を、Unity を開かずに Blender へドラッグ＆ドロップで読み込める無料アドオン。ボーン・表情・テクスチャ付きで、lilToon / Poiyomi / MToon の見た目に近い状態で読み込めます。"
 }
 </script>
 </head>
@@ -92,8 +92,7 @@
   <section class="hero">
     <div class="wrap">
       <div class="hero-copy">
-        <span class="eyebrow">VRChat アバター向け · 無料の Blender アドオン</span>
-        <h1><span class="nb">買ったアバターを、</span><wbr><em class="nb">テクスチャ付きで</em><wbr><span class="nb">Blender へ。</span></h1>
+        <h1><span class="eyebrow"><span><span class="nb">unitypackage を Blender に</span><wbr><span class="nb">読み込む無料アドオン</span> · <span class="nb">VRChat アバター向け</span></span></span><span><span class="nb">Unity 向けの</span><wbr><span class="nb">アバターを、</span><wbr><em class="nb">テクスチャ付きで</em><wbr><span class="nb">Blender へ。</span></span></h1>
         <p class="lede">BOOTH などで手に入れた<sup>※</sup> <code>.unitypackage</code> を、Blender にドラッグ＆ドロップするだけ。Unity を開かなくても、ボーンや表情（シェイプキー）はそのまま、lilToon や Poiyomi の見た目に近い状態で読み込めます。</p>
         <div class="cta">
           <a class="btn btn-primary" href="#install">
@@ -112,7 +111,7 @@
       </div>
       <figure class="shot">
         <div class="frame ba">
-          <img src="../assets/hero-before.webp" width="960" height="1200" alt="FBX だけを Blender に読み込んだアバター。マテリアルが付いておらず、全体が真っ白な状態" loading="eager">
+          <img src="../assets/hero-before.webp" width="960" height="1200" fetchpriority="high" alt="FBX だけを Blender に読み込んだアバター。マテリアルが付いておらず、全体が真っ白な状態" loading="eager">
           <img class="ba-after" src="../assets/hero-after.webp" width="960" height="1200" alt="同じアバターをこのアドオンで読み込んだ状態。髪や着物にテクスチャと色が付いている" loading="eager">
           <span class="ba-label ba-label-before">FBX だけ読み込むと</span>
           <span class="ba-label ba-label-after">このアドオンなら</span>
@@ -224,7 +223,7 @@
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">読み込まれるもの</span>
-        <h2>アバターに必要なものは、<wbr>まとめて入ります</h2>
+        <h2><span class="nb">lilToon や Poiyomi の</span><wbr><span class="nb">アバターも、</span><wbr><span class="nb">まとめて入ります</span></h2>
       </div>
       <div class="included">
         <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>ボーン（アーマチュア）</b><span>すぐにポーズを付けられる状態で入ります。</span></div></div>
@@ -281,6 +280,7 @@
             <div class="mode"><span class="name">PBR（Principled BSDF）</span><span>Cycles でもそのままレンダリングできます</span></div>
           </div>
           <p class="modes-note">ほかに、ライティングの影響を受けない Unlit と、名前だけの空マテリアルを作るモードもあります。</p>
+          <p class="modes-note">Cycles でもトゥーンの見た目で撮りたいときは、同じ作者の <a href="https://utagestudio.github.io/CyclesTooner/ja/">CyclesTooner</a> で、読み込んだトゥーンのマテリアルを Cycles 向けの Toon BSDF に変換し、アウトラインも付けられます。</p>
         </div>
         <figure class="shot">
           <div class="frame"><img src="../assets/shot-modes.webp" width="1400" height="800" alt="同じアバターを 2 体並べた比較。左は「自動」で読み込んだトゥーンの見た目、右はそれをサイドバーで PBR（Principled BSDF）に切り替えた陰影の付いた見た目" loading="lazy"></div>
@@ -339,6 +339,19 @@
       </div>
       <div class="faq">
         <details>
+          <summary>unitypackage を Blender で開くには？</summary>
+          <div class="answer">
+            <p>Blender だけでは <code>.unitypackage</code> を開けません。中身は Unity のアセットを ID 名のフォルダに詰めたアーカイブで、モデル・マテリアル・テクスチャの繋がりが Blender にはわからない形で入っているためです。</p>
+            <p>このアドオンを入れて、<code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unitypackage を選んでください。アドオンがアーカイブを読み取り、メッシュごとに Unity のマテリアルを対応付けて、テクスチャを繋いだ状態で読み込みます。</p>
+          </div>
+        </details>
+        <details>
+          <summary>unitypackage から FBX やテクスチャを取り出せますか？</summary>
+          <div class="answer">
+            <p>はい。テクスチャは既定で、保存済みの .blend と同じ場所の <code>textures/&lt;パッケージ名&gt;/</code> に書き出されます（.blend を保存する前はアドオンのキャッシュフォルダに書き出されます）。書き出し先はインポートの設定で変えられます。モデルは Blender に読み込まれるので、ファイルとして必要なときはファイル &gt; エクスポート &gt; FBX で書き出してください。手作業で FBX を取り出す場合と違って、マテリアルとテクスチャが繋がった状態から始められます。</p>
+          </div>
+        </details>
+        <details>
           <summary>Unity は必要ですか？</summary>
           <div class="answer">
             <p>いいえ。Unity も Unity Hub もインストールしなくて大丈夫です。パッケージの中身はアドオンが直接読み取ります。</p>
@@ -365,9 +378,9 @@
           </div>
         </details>
         <details>
-          <summary>買ったアバターを改変したり、レンダリングした画像を公開したりしてもいいですか？</summary>
+          <summary>アバターを改変したり、レンダリングした画像を公開したりしてもいいですか？</summary>
           <div class="answer">
-            <p>このアドオンはファイルを読み込むための道具で、アセットの使い方を許可するものではありません。改変や画像・動画の公開、Unity 以外での利用ができるかどうかは、アセットごとの利用規約で決まります。購入したショップのページや同梱の規約を確認してから使ってください。</p>
+            <p>このアドオンはファイルを読み込むための道具で、アセットの使い方を許可するものではありません。改変や画像・動画の公開、Unity 以外での利用ができるかどうかは、アセットごとの利用規約で決まります。配布ページや同梱の規約を確認してから使ってください。</p>
           </div>
         </details>
         <details>

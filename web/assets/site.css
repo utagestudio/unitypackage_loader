@@ -262,3 +262,5 @@ details.more[open] > summary { margin-bottom: 18px; }
 .site-footer .links a { color: var(--text); }
 .site-footer .fine { max-width: 80ch; }
 .site-footer .fine p + p { margin-top: 6px; }
+.hero h1 { display: grid; gap: 22px; }
+.hero h1 .eyebrow { letter-spacing: normal; line-height: 1.5; }
