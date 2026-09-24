@@ -338,6 +338,19 @@
       </div>
       <div class="faq">
         <details>
+          <summary>How do I open a .unitypackage in Blender?</summary>
+          <div class="answer">
+            <p>Blender cannot open a <code>.unitypackage</code> on its own. The file is an archive of Unity assets stored under ID-named folders, so the models, materials and textures inside are not linked together in a way Blender understands.</p>
+            <p>With this add-on installed, drag the <code>.unitypackage</code> onto the 3D Viewport, or choose File &gt; Import &gt; Unitypackage. The add-on reads the archive, matches each mesh with its Unity material, and brings everything in with the textures connected.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Can I get the FBX and textures out of a .unitypackage?</summary>
+          <div class="answer">
+            <p>Yes. Textures are written next to your saved .blend file (<code>textures/&lt;package name&gt;/</code>) by default, or to the add-on's cache folder if the file has not been saved yet. The folder can be changed in the import options. The model is imported into Blender, so if you need it as a file, export it with File &gt; Export &gt; FBX. Unlike extracting the FBX by hand, the materials and textures are already connected.</p>
+          </div>
+        </details>
+        <details>
           <summary>Do I need Unity?</summary>
           <div class="answer">
             <p>No. You don't need to install Unity or Unity Hub. The add-on reads the package contents itself.</p>

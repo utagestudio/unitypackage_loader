@@ -338,6 +338,19 @@
       </div>
       <div class="faq">
         <details>
+          <summary>unitypackage を Blender で開くには？</summary>
+          <div class="answer">
+            <p>Blender だけでは <code>.unitypackage</code> を開けません。中身は Unity のアセットを ID 名のフォルダに詰めたアーカイブで、モデル・マテリアル・テクスチャの繋がりが Blender にはわからない形で入っているためです。</p>
+            <p>このアドオンを入れて、<code>.unitypackage</code> を 3D ビューポートにドラッグ＆ドロップするか、ファイル &gt; インポート &gt; Unitypackage を選んでください。アドオンがアーカイブを読み取り、メッシュごとに Unity のマテリアルを対応付けて、テクスチャを繋いだ状態で読み込みます。</p>
+          </div>
+        </details>
+        <details>
+          <summary>unitypackage から FBX やテクスチャを取り出せますか？</summary>
+          <div class="answer">
+            <p>はい。テクスチャは既定で、保存済みの .blend と同じ場所の <code>textures/&lt;パッケージ名&gt;/</code> に書き出されます（.blend を保存する前はアドオンのキャッシュフォルダに書き出されます）。書き出し先はインポートの設定で変えられます。モデルは Blender に読み込まれるので、ファイルとして必要なときはファイル &gt; エクスポート &gt; FBX で書き出してください。手作業で FBX を取り出す場合と違って、マテリアルとテクスチャが繋がった状態から始められます。</p>
+          </div>
+        </details>
+        <details>
           <summary>Unity は必要ですか？</summary>
           <div class="answer">
             <p>いいえ。Unity も Unity Hub もインストールしなくて大丈夫です。パッケージの中身はアドオンが直接読み取ります。</p>
