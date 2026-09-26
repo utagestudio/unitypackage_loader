@@ -5,8 +5,8 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
-from unitypackage_loader.core.hierarchy import Expander, parse_asset
-from unitypackage_loader.core.prefab import RendererMaterials, merge_prefab_tables, tables_from_hierarchy
+from unitypackage_loader.core.hierarchy import SOLE_RENDERER, Expander, parse_asset
+from unitypackage_loader.core.prefab import RendererMaterials, merge_prefab_tables, resolve_sole_renderer, tables_from_hierarchy
 
 MAT_A = "1" * 32
 MAT_B = "2" * 32
@@ -318,17 +318,53 @@ class PrefabVariantTests(unittest.TestCase):
         self.assertEqual(tables_of(BASE, assets), {})
 
     def test_overrides_on_model_objects_are_counted(self):
-        # 元がモデルなので、中のオブジェクトの fileID を名前に結び付けられない（名前の上書きは数えない）
+        # 元がモデルなので、中のオブジェクトの fileID を名前に結び付けられない（名前の上書きは数えない）。
+        # マテリアルの上書きが別々の対象を指すので、Renderer が複数あり、どれがどれかを決められない（#31）
         on_model = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
             (123456789, "m_Materials.Array.data[0]", "", MAT_C),
+            (987654321, "m_Materials.Array.data[0]", "", MAT_A),
             (123456789, "m_Name", "Renamed", None),
         ])})
-        self.assertEqual((on_model.unresolved_overrides, on_model.unresolved_material_overrides), (1, 1))
+        self.assertEqual((on_model.unresolved_overrides, on_model.unresolved_material_overrides), (2, 2))
         self.assertEqual(tables_from_hierarchy(on_model, MODELS), {})  # FBX を置いただけの prefab はモデルを使うものとして数えない
         moved = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_LocalPosition.x", "1", None)])})
         self.assertEqual((moved.unresolved_overrides, moved.unresolved_material_overrides), (1, 0))
         resolvable = expand(VARIANT, {BASE: PREFAB, VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])})
         self.assertEqual(resolvable.unresolved_overrides, 0)
+
+
+    def test_material_overrides_on_one_model_object_are_kept_for_the_sole_renderer(self):
+        # 名前を引けなくても、すべて同じ対象を指すなら、モデルの Renderer が 1 つのときにそれと確定する（#109）
+        h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
+            (-7511558181221131132, "m_Materials.Array.data[2]", "", MAT_C),
+            (-7511558181221131132, "m_Materials.Array.data[0]", "", MAT_A),
+            (-7511558181221131132, "m_Materials.Array.size", "40", None),  # 長さは当てられないので数える
+        ])})
+        self.assertEqual((h.unresolved_overrides, h.unresolved_material_overrides), (1, 1))
+        table = tables_from_hierarchy(h, MODELS)[MODEL_A]
+        self.assertEqual(list(table), [SOLE_RENDERER])
+        self.assertEqual(table[SOLE_RENDERER].materials, [MAT_A, None, MAT_C])
+
+    def test_sole_renderer_row_goes_to_the_only_mesh(self):
+        table = {SOLE_RENDERER: RendererMaterials(SOLE_RENDERER, [MAT_A, None, MAT_C], mesh_guid=MODEL_A)}
+        resolved, unread = resolve_sole_renderer(table, ["MetroEntrance_02"])
+        self.assertEqual(unread, 0)
+        self.assertEqual(list(resolved), ["MetroEntrance_02"])
+        self.assertEqual(resolved["MetroEntrance_02"].materials, [MAT_A, None, MAT_C])
+        # メッシュが複数（または無い）なら当てず、当てられなかった上書きの数を返す
+        for meshes in (["Body", "Hair"], []):
+            resolved, unread = resolve_sole_renderer(table, meshes)
+            self.assertEqual((resolved, unread), ({}, 2))
+
+    def test_sole_renderer_row_fills_only_empty_slots_of_a_named_row(self):
+        table = {
+            "Body": RendererMaterials("Body", [MAT_B, None]),
+            SOLE_RENDERER: RendererMaterials(SOLE_RENDERER, [MAT_A, MAT_C, MAT_A]),
+        }
+        resolved, unread = resolve_sole_renderer(table, ["Body"])
+        self.assertEqual((list(resolved), unread), (["Body"], 0))
+        self.assertEqual(resolved["Body"].materials, [MAT_B, MAT_C, MAT_A])
+        self.assertIs(resolve_sole_renderer(table := {"Body": table["Body"]}, ["Body"])[0], table)  # 行が無ければそのまま
 
 
 class MergeByMeshTests(unittest.TestCase):

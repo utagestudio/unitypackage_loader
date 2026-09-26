@@ -23,7 +23,8 @@
   prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
   候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。prefab の展開（Variant / ネスト・上書き・削除・古い形式。
   fileID は PrefabInstance の fileID XOR 元の fileID。Node の key は通し番号で、上書きは PrefabInstance ごとの表で引く。#107）は Scenes 単位と同じ `core/hierarchy.py` の `Expander` で行い、表はその配置から作る（#71）。
-  元が FBX の新しい形式の上書きは未対応（Issue #31）。
+  元が FBX の新しい形式の上書きは未対応（Issue #31）。ただし、マテリアルの上書きがすべて同じ対象を指し、読み込んだモデルのメッシュが 1 つなら
+  それに当てる（`SOLE_RENDERER`。判定は読み込み後の `prefab.resolve_sole_renderer`。#109）。
 - **読み込む単位**: 選択ダイアログで Scenes / Prefabs / Models を選ぶ（排他。候補は推測で外さず、読めないものは理由付きで灰色）。
   Scenes は `core/hierarchy.py` で .unity を展開し、モデルの配置ごとに Empty の下へ読み込む。Unity のモデル空間の (x, y, z) は
   Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。

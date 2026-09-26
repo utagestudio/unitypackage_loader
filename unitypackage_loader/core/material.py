@@ -252,6 +252,10 @@ class NormalizedMaterial:
     metallic: float = 0.0
     roughness: float = 0.5
     metallic_tex: TexRef | None = None  # Unity 形式: R=metallic, A=smoothness
+    # Smoothness の元（metallic_tex の A、``smoothness_from_albedo`` なら base_color_tex の A）に掛ける倍率。
+    # Unity は Smoothness = A × 倍率（URP は _Smoothness、Built-in Standard は _GlossMapScale）。元が無ければ ``roughness`` を使う（#112）
+    smoothness_scale: float = 1.0
+    smoothness_from_albedo: bool = False  # _SmoothnessTextureChannel = 1（Smoothness をアルベドの A から取る）
     occlusion_tex: TexRef | None = None
     cull_backface: bool = True
     uv_scale: tuple[float, float] = (1.0, 1.0)

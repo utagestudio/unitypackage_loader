@@ -18,6 +18,8 @@
   },
   "images": { "count": 0 },
   "warnings_max": 0,
+  "warnings_contain": ["<警告に含まれる文字列>"],
+  "warnings_exclude": ["<どの警告にも含まれない文字列>"],
   "material_checks": [
     {
       "name": "<Blender 上のマテリアル名>",
@@ -32,6 +34,7 @@
       "normal_colorspace": "Non-Color",
       "emission_strength": 0.0,
       "emission_color": [1.0, 1.0, 1.0],
+      "smoothness_scale": 1.0,
       "node_types": ["ShaderNodeMixShader"]
     }
   ],
@@ -63,11 +66,13 @@
 | `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared` / `replaced` / `prefab-split`）。`shared` は同じ回に組み立て済みの同じ .mat のマテリアルを使った行 |
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
+| `warnings_contain` / `warnings_exclude` | 挙げた文字列を含む警告があること / 無いこと |
 | `result` | オペレーターの結果（既定は `FINISHED`。何も読み込めずに失敗する場合は `CANCELLED`） |
 | `errors` | レポートのエラー数（読み込めなかったモデル・シーン、続けられなかった失敗） |
 | `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
 | `material_checks[].emission_strength` / `emission_color` | Principled BSDF の Emission Strength と、リンクされていない Emission Color（RGB、小数 4 桁で比較） |
+| `material_checks[].smoothness_scale` | Roughness を「1 − Smoothness の元 × 倍率」で組んだときの倍率（小数 4 桁。元が無ければ `null`） |
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 | `prefabs.count` | 読み込む単位 Prefabs で読み込んだ prefab の数（`options` に `"unit": "PREFABS"` を指定する） |

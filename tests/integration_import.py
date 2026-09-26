@@ -210,6 +210,10 @@ def main() -> int:
         c.eq("image count", len(report.images), exp["images"]["count"])
     if "warnings_max" in exp:
         c.le("warning count", len(report.warnings), exp["warnings_max"])
+    for text in exp.get("warnings_contain", []):
+        c.true(f"warning contains {text!r}", any(text in w for w in report.warnings))
+    for text in exp.get("warnings_exclude", []):
+        c.eq(f"warnings without {text!r}", [w for w in report.warnings if text in w], [])
     if "split_slots" in exp:
         c.eq("split slots", report.split_slots, exp["split_slots"])
 
@@ -260,6 +264,12 @@ def main() -> int:
             if bsdf is not None and "emission_color" in spec:
                 actual = [round(v, 4) for v in bsdf.inputs["Emission Color"].default_value[:3]]
                 c.eq(f"{name}.emission_color", actual, spec["emission_color"])
+        if "smoothness_scale" in spec:
+            # Roughness = 1 - Smoothness の元に掛けた倍率（倍率 1 なら掛け算のノードは無い。#112）
+            nodes = mat.node_tree.nodes
+            inverted = any(n.type == "MATH" and n.label.startswith("Roughness = 1 - Smoothness") for n in nodes)
+            scale = next((n.inputs[1].default_value for n in nodes if n.type == "MATH" and n.label.startswith("Smoothness ×")), 1.0)
+            c.eq(f"{name}.smoothness_scale", round(scale, 4) if inverted else None, spec["smoothness_scale"])
         if "node_types" in spec:
             c.true(
                 f"{name}.node_types",

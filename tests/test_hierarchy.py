@@ -10,6 +10,8 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import (
+    SOLE_NODE,
+    SOLE_RENDERER,
     Expander,
     components,
     Hierarchy,
@@ -244,7 +246,9 @@ class PlacementTest(unittest.TestCase):
         self.assertFalse(self.placements[3].active)
 
     def test_overrides_inside_model_are_counted(self):
-        self.assertEqual(self.hierarchy.unresolved_overrides, 2)
+        # 回転の上書きだけを数える。マテリアルの上書きは対象が 1 つなので、唯一の Renderer 宛てとして残す（#109）
+        self.assertEqual(self.hierarchy.unresolved_overrides, 1)
+        self.assertEqual(self.placements[3].renderers[SOLE_RENDERER].materials, [MAT_B])
 
     def test_summary_counts(self):
         contents = summarize(self.hierarchy, [MODEL])
@@ -467,10 +471,46 @@ class CollapsedModelRootTest(unittest.TestCase):
         _, placement = self.placement(table)
         self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
 
-    def test_without_a_table_the_node_is_unknown(self):
+    def test_without_a_table_the_overrides_are_kept_for_the_importer(self):
+        # 表が無いと 1 メッシュの FBX か分からないので、成分付きで SOLE_NODE に記録し、読み込み側が
+        # オブジェクトの数で判定する（#111）。配置の行列は今までどおり単位行列を基準にしたもの
         _, placement = self.placement()
-        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
+        self.assertEqual(placement.root_node, SOLE_NODE)
+        self.assertEqual(placement.node_transforms, {SOLE_NODE: {
+            "position": [2.0, 0.5, -6.0], "rotation": [None, 0.25881905, None, 0.96592583],
+        }})
         self.assertEqual([round(v, 6) for v in transform_point(placement.world, (0, 0, 0))], [2, 0.5, -6])
+
+    def test_overrides_through_a_wrapping_prefab_are_recorded(self):
+        # FBX をそのまま置いた prefab（位置 0・回転なしに上書き）を、シーンがさらに上書きする（#111: Shibuya の地下鉄の入口）。
+        # シーンの上書きの target は「prefab の PrefabInstance の fileID XOR モデルのルートの fileID」
+        wrapper = "e" * 32
+        prefab = HEADER + instance(100, MODEL, 0, [
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalPosition.x", 0),
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.x", 0),
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.w", 1),
+        ])
+        scene = HEADER + instance(2000, wrapper, 0, [
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalPosition.x", 17.39),
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalRotation.x", -0.7071068),
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalRotation.w", 0.7071068),
+        ])
+        for table, key in ((None, SOLE_NODE), (self.TABLE, "Slab")):
+            exp = Expander(lambda g: parse_asset(prefab) if g == wrapper else None, {MODEL: "Slab"}, {MODEL: table} if table else None)
+            h = exp.expand_raw(parse_asset(scene))
+            placement = placements(h, {MODEL: "Slab"}, {MODEL: table} if table else None)[0]
+            self.assertEqual(placement.root_node, key)
+            self.assertEqual(placement.node_transforms[key], {
+                "position": [17.39, None, None], "rotation": [-0.7071068, None, None, 0.7071068],
+            })
+        # 包んだ prefab 自体の展開結果（キャッシュ）は、シーンの上書きで変わらない
+        self.assertEqual(exp.expand_asset(wrapper).nodes[1].model_transforms["Slab"]["position"], [0.0, None, None])
+
+    def test_without_a_table_and_without_root_overrides_nothing_is_recorded(self):
+        exp = Expander(lambda g: None, {MODEL: "Slab"})
+        h = exp.expand_raw(parse_asset(HEADER + instance(2000, MODEL, 0, [mod(ROOT_GAME_OBJECT, MODEL, "m_Name", "Plain")])))
+        placement = placements(h, {MODEL: "Slab"})[0]
+        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
 
 
 class LegacyFormatTest(unittest.TestCase):
@@ -517,7 +557,9 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (2.0, 0.0, 5.0))
         self.assertEqual(transform_point(found[1].world, (0, 0, 0)), (0.0, 0.0, -1.0))
         self.assertEqual(h.missing_sources, 0)
-        self.assertEqual(h.unresolved_overrides, 1)  # モデルの中の Renderer（2300000）へのマテリアルの上書き
+        # 表が無いのでモデルの中の Renderer（2300000）の名前は引けないが、対象が 1 つなので唯一の Renderer 宛てとして残す（#109）
+        self.assertEqual(h.unresolved_overrides, 0)
+        self.assertEqual(found[0].renderers[SOLE_RENDERER].materials, [MAT_B])
 
     def test_recycle_table_resolves_overrides_inside_model(self):
         # 1 メッシュの FBX: Renderer（2300000）は //RootNode に載り、Blender ではメッシュ名 Pot のオブジェクトになる

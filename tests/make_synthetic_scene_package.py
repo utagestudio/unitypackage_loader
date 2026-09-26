@@ -20,8 +20,17 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
 - SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
+- SlabBareInstance: 同じ FBX を表の無い .meta で別のモデル（SlabBare.fbx）にし、SlabInstance から Unity の X に 10 ずらして
+  同じ向きで置く（Issue #111。表が無くても、読み込んだオブジェクトが 1 つなら畳まれた形として組み立て直す）
+- SlabBareWrapped / SlabWrapped: 1 メッシュの FBX（表なし / 表あり）をルートの位置 0・回転なしで置いた prefab を、さらに
+  Unity の X に 20 / 30 ずらして SlabInstance と同じ向きで置く（Issue #111。包んだ prefab の上からの上書きも畳まれたノードに当てる）
 - TowerRoot: LOD を 2 段持つ FBX（Tower.fbx）の LODGroup を持つ prefab を、位置 (-6, 0, 0) に（Issue #104。
   Tower_LOD1 は読み込んだうえで非表示にする）
+- KioskRoot: Renderer が 1 つの FBX（Kiosk.fbx。表も externalObjects も無い 2 マテリアルのメッシュ）をそのまま置いた
+  prefab（Kiosk.prefab）を、位置 (8, 0, 8) に。prefab はモデルの中の Renderer の m_Materials[0] を ProbeRed に、[1] を
+  ProbeDecal（Standard の _Mode: 0 が残った、半透明＋アルファクリップの URP Lit。Issue #112）に上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
+- BoothRoot: メッシュが 2 つの FBX（Booth.fbx）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
+  モデルの中の Renderer 1 つへのマテリアルの上書きは、どちらのメッシュか決められないので当てずに警告する（Issue #31）
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -193,6 +202,42 @@ def camera_doc(file_id, go, fov=60, orthographic=0, size=5, near=0.3, far=1000, 
     )
 
 
+def export_kiosk_fbx(path: Path) -> None:
+    """メッシュが 1 つで、2 つのマテリアルをポリゴンの前半・後半に使う FBX（Issue #109）。
+
+    マテリアルの名前は .mat と一致させない（externalObjects も無いので、prefab の上書きを読まないと割り当てが無い）。
+    """
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = "Kiosk"
+    obj.data.name = "Kiosk"
+    obj.data.materials.append(bpy.data.materials.new("KioskTileFbx"))
+    obj.data.materials.append(bpy.data.materials.new("KioskFrameFbx"))
+    polygons = obj.data.polygons
+    for polygon in polygons[len(polygons) // 2 :]:
+        polygon.material_index = 1
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_booth_fbx(path: Path) -> None:
+    """メッシュが 2 つの FBX（Issue #31。表が無いと、中の Renderer への上書きの対象を決められない）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("BoothFbx")
+    for name, z in (("BoothWall", 0.0), ("BoothRoof", 1.5)):
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, z))
+        obj = bpy.context.active_object
+        obj.name = name
+        obj.data.name = name
+        obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+# Renderer の fileID は階層パスのハッシュで、計算式は分かっていない（Issue #31）。値は Shibuya.unitypackage の事例のもの
+KIOSK_RENDERER = -7511558181221131132
+BOOTH_RENDERER = 3713382542316546517
+
+
 def mod(target, guid, path, value="", reference="{fileID: 0}"):
     return (
         f"    - target: {{fileID: {target}, guid: {guid}, type: 3}}\n"
@@ -234,7 +279,14 @@ def main() -> None:
     mats = {}
     for name, color in (("ProbeMat", (1, 1, 1)), ("ProbeRed", (1, 0.2, 0.2))):
         mat_path = f"Assets/Synthetic/Materials/{name}.mat"
-        mats[name] = add(mat_path, mat_yaml(name, tex, None, color, 0).encode(),
+        text = mat_yaml(name, tex, None, color, 0)
+        if name == "ProbeRed":
+            # アルファの無い _MetallicGlossMap と _GlossMapScale（#112: Smoothness は A（= 1）× 0.25）
+            text = text.replace("    m_Floats:\n", (
+                f"    - _MetallicGlossMap:\n        m_Texture: {{fileID: 2800000, guid: {tex}, type: 3}}\n"
+                "        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n    m_Floats:\n    - _GlossMapScale: 0.25\n"
+            ), 1)
+        mats[name] = add(mat_path, text.encode(),
                          f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
 
     fbx = tmp / "probe.fbx"
@@ -265,6 +317,24 @@ def main() -> None:
         "ModelImporter:\n", f"ModelImporter:\n  internalIDToNameTable:\n{slab_table}", 1
     )
     slab_model = add(slab_path, slab_fbx.read_bytes(), slab_meta)
+
+    # 同じ FBX を、表の無い新しい形式の .meta で別のモデルとして置く（#111: 表が無いと 1 メッシュの FBX か分からない）
+    bare_path = "Assets/Synthetic/Models/SlabBare.fbx"
+    bare_model = add(bare_path, slab_fbx.read_bytes(), model_meta(guid_of(bare_path), {"ProbeMat": mats["ProbeMat"]}))
+
+    # 1 メッシュの FBX をそのまま置き、ルートの位置 0・回転なしに上書きした prefab（#111: Shibuya の地下鉄の入口と同じ形）。
+    # 表の無いモデル（SlabBare）と表のあるモデル（Slab）で 1 つずつ作る
+    wrapped = {}
+    for label, wrapped_model in (("SlabBareWrapped", bare_model), ("SlabWrapped", slab_model)):
+        wrapped_path = f"Assets/Synthetic/Prefabs/{label}.prefab"
+        wrapped[label] = add(wrapped_path, (HEADER + "".join([
+            instance(100, wrapped_model, 0, [
+                mod(ROOT_TRANSFORM, wrapped_model, f"m_LocalPosition.{axis}", 0) for axis in "xyz"
+            ] + [
+                mod(ROOT_TRANSFORM, wrapped_model, f"m_LocalRotation.{axis}", value) for axis, value in zip("xyzw", (0, 0, 0, 1))
+            ] + [mod(ROOT_GAME_OBJECT, wrapped_model, "m_Name", label)]),
+            stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, wrapped_model, 100),
+        ])).encode(), prefab_meta(wrapped_path))
 
     # Unity で、メッシュを直接指す GameObject だけの prefab（街並みアセットの歩道と同じ形）
     slab_prefab_path = "Assets/Synthetic/Prefabs/Slab.prefab"
@@ -342,6 +412,38 @@ def main() -> None:
         mesh_renderer(112, 113, 110, lod_model, mats["ProbeMat"], mesh_file_id("Tower_LOD1")),
     ])).encode(), prefab_meta(lod_prefab_path))
 
+    # Renderer が 1 つの FBX をそのまま置き、中の Renderer の m_Materials[0] だけを上書きした prefab（#109）。
+    # .meta は新しい形式で、表も externalObjects も無い
+    red = f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}"
+    # 半透明＋アルファクリップの URP Lit 系に、Standard から変換したときの _Mode: 0（不透明）が残ったもの（#112: 横断歩道の
+    # デカール）。Kiosk の 1 番スロットに当てる。URP Lit の GUID にするとパッケージ全体が URP と判定されてライトの換算が
+    # 変わるので、表に無いシェーダー（URP Lit から派生したもの。プロパティで URP と判定する）にする
+    decal_path = "Assets/Synthetic/Materials/ProbeDecal.mat"
+    decal_text = mat_yaml("ProbeDecal", tex, None, (1, 1, 1), 0).replace(
+        "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+        "{fileID: 4800000, guid: 7777777777777777aaaaaaaaaaaaaaaa, type: 3}",
+    ).replace("    - _MainTex:\n", "    - _BaseMap:\n").replace(
+        "    - _Cutoff: 0.5\n",
+        "    - _Cutoff: 0.439\n    - _Surface: 1\n    - _AlphaClip: 1\n    - _WorkflowMode: 1\n    - _Smoothness: 0.5\n",
+    )
+    mats["ProbeDecal"] = add(decal_path, decal_text.encode(),
+                             f"fileFormatVersion: 2\nguid: {guid_of(decal_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    decal = f"{{fileID: 2100000, guid: {mats['ProbeDecal']}, type: 2}}"
+    fbx_prefabs = {}
+    for name, export, renderer in (("Kiosk", export_kiosk_fbx, KIOSK_RENDERER), ("Booth", export_booth_fbx, BOOTH_RENDERER)):
+        path = tmp / f"{name.lower()}.fbx"
+        export(path)
+        fbx_model_path = f"Assets/Synthetic/Models/{name}.fbx"
+        fbx_model = add(fbx_model_path, path.read_bytes(), model_meta(guid_of(fbx_model_path), {}))
+        fbx_prefab_path = f"Assets/Synthetic/Prefabs/{name}.prefab"
+        fbx_prefabs[name] = add(fbx_prefab_path, (HEADER + "".join([
+            instance(100, fbx_model, 0, [
+                mod(ROOT_GAME_OBJECT, fbx_model, "m_Name", name),
+                mod(renderer, fbx_model, "m_Materials.Array.data[0]", "", red),
+            ] + ([mod(renderer, fbx_model, "m_Materials.Array.data[1]", "", decal)] if name == "Kiosk" else [])),
+            stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, fbx_model, 100),
+        ])).encode(), prefab_meta(fbx_prefab_path))
+
     # 点光源だけの prefab。シーンで強さを上書きして置く
     lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
     lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
@@ -401,10 +503,41 @@ def main() -> None:
             mod(ROOT_GAME_OBJECT, slab_model, "m_Name", "SlabInstance"),
         ]),
         stripped_transform(5101, ROOT_TRANSFORM, slab_model, 5100),
+        # 表の無い同じ FBX を、SlabInstance から Unity の X に 10 ずらして同じ向きで置く（#111）
+        instance(5150, bare_model, 0, [
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.x", 12),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.y", 0.5),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.z", -6),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.x", 0),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.y", 0.25881905),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.z", 0),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.w", 0.96592583),
+            mod(ROOT_GAME_OBJECT, bare_model, "m_Name", "SlabBareInstance"),
+        ]),
+        stripped_transform(5151, ROOT_TRANSFORM, bare_model, 5150),
+        # 上の prefab を、さらに Unity の X に 10 / 20 ずらして同じ向きで置く（#111: 包んだ prefab の上からの上書き）
+        *[instance(file_id, wrapped[label], 0, [
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.x", x),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.y", 0.5),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.z", -6),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalRotation.y", 0.25881905),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalRotation.w", 0.96592583),
+        ]) for file_id, label, x in ((5160, "SlabBareWrapped", 22), (5170, "SlabWrapped", 32))],
         # LODGroup を持つ prefab（#104）。LOD1 は読み込んで非表示にする
         instance(5200, lod_prefab, 0, [
             mod(11, lod_prefab, "m_LocalPosition.x", -6),
             mod(10, lod_prefab, "m_Name", "TowerRoot"),
+        ]),
+        # FBX をそのまま置いた prefab の中の Renderer へのマテリアルの上書き（#109 / #31）
+        instance(5300, fbx_prefabs["Kiosk"], 0, [
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Kiosk"], "m_LocalPosition.x", 8),
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Kiosk"], "m_LocalPosition.z", 8),
+            mod(ROOT_GAME_OBJECT ^ 100, fbx_prefabs["Kiosk"], "m_Name", "KioskRoot"),
+        ]),
+        instance(5400, fbx_prefabs["Booth"], 0, [
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Booth"], "m_LocalPosition.x", -8),
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Booth"], "m_LocalPosition.z", 8),
+            mod(ROOT_GAME_OBJECT ^ 100, fbx_prefabs["Booth"], "m_Name", "BoothRoot"),
         ]),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),

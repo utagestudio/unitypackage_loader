@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 5,
+  "warnings_max": 8,
   "placed_objects": [
     {
       "top": "A",
@@ -130,6 +130,36 @@
       "hidden": false
     },
     {
+      "top": "SlabBareInstance",
+      "object": "Slab",
+      "tip": [
+        -10.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
+      "top": "SlabBareWrapped",
+      "object": "Slab",
+      "tip": [
+        -20.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
+      "top": "SlabWrapped",
+      "object": "Slab",
+      "tip": [
+        -30.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
       "top": "TowerRoot",
       "object": "Tower_LOD0",
       "hidden": false,
@@ -225,6 +255,31 @@
       "top": "Partial",
       "object": "Skinned",
       "hidden": true
+    },
+    {
+      "top": "KioskRoot",
+      "object": "Kiosk",
+      "hidden": false,
+      "mat_files": [
+        "ProbeDecal.mat",
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "BoothRoot",
+      "object": "BoothWall",
+      "hidden": false,
+      "mat_files": [
+        ""
+      ]
+    },
+    {
+      "top": "BoothRoot",
+      "object": "BoothRoof",
+      "hidden": false,
+      "mat_files": [
+        ""
+      ]
     }
   ],
   "shared_meshes": [
@@ -370,6 +425,27 @@
         0,
         -1
       ]
+    }
+  ],
+  "warnings_contain": [
+    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet"
+  ],
+  "warnings_exclude": [
+    "Kiosk.fbx: "
+  ],
+  "material_checks": [
+    {
+      "name": "ProbeRed",
+      "smoothness_scale": 0.25
+    },
+    {
+      "name": "ProbeMat",
+      "smoothness_scale": null
+    },
+    {
+      "name": "KioskFrameFbx",
+      "alpha_mode": "cutout",
+      "smoothness_scale": null
     }
   ]
 }

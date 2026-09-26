@@ -17,6 +17,7 @@ from mathutils import Matrix
 from ..core.hierarchy import (
     CLASS_CAMERA,
     CLASS_LIGHT,
+    SOLE_NODE,
     Expander,
     Hierarchy,
     RawAsset,
@@ -32,7 +33,7 @@ from ..core.mapping import fully_replaced_materials, resolve_materials, slot_ass
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, tables_from_hierarchy
+from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, resolve_sole_renderer, tables_from_hierarchy
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -881,6 +882,14 @@ class _ImportSession:
         new_materials: list[bpy.types.Material] = new["materials"]
         fbx_names = [m.name for m in new_materials]
         mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
+        # 名前を引けないモデルの中へのマテリアルの上書きは、メッシュが 1 つのときだけそれに当てる（#109）
+        prefab_table, unread = resolve_sole_renderer(prefab_table or {}, [o.name for o in mesh_objects])
+        if unread:
+            self.report.warn(
+                f"{model.name}: {unread} material override(s) on an object inside the model are not read yet "
+                f"(the model has {len(mesh_objects)} meshes, so the overridden one is unknown); "
+                "the model's own assignments are used for them"
+            )
         object_slots = {
             o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
             for o in mesh_objects
@@ -1096,13 +1105,20 @@ class _ImportSession:
             if placement.node_transforms:
                 if summary.guid not in unit_scales:
                     unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid]) if summary.entry.ext == ".fbx" else None
-                overrides = placement.node_transforms
-                if placement.root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
-                    overrides = {k: v for k, v in overrides.items() if k != placement.root_node}
-                    placed = apply_collapsed_root(
-                        template, objects, root, placement.root_node,
-                        placement.node_transforms[placement.root_node], unit_scales[summary.guid],
-                    )
+                overrides = dict(placement.node_transforms)
+                root_node = placement.root_node
+                if root_node == SOLE_NODE:
+                    # 表の無いモデル。オブジェクトが 1 つだけなら、Unity はそのノードをルートに畳んでいる（#111）。
+                    # そうでなければルートの Transform は単位行列が基準なので、展開した行列のままでよい
+                    overrides = {k: v for k, v in overrides.items() if k != SOLE_NODE}
+                    if len(objects) == 1 and not objects[0].children:
+                        overrides[objects[0].name] = placement.node_transforms[SOLE_NODE]
+                        root_node = objects[0].name
+                    else:
+                        root_node = ""
+                if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
+                    spec = overrides.pop(root_node, placement.node_transforms.get(root_node, {}))
+                    placed = apply_collapsed_root(template, objects, root, root_node, spec, unit_scales[summary.guid])
                     skipped_nodes += 0 if placed else 1
                 if overrides:
                     skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
