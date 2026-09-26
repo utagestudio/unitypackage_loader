@@ -372,6 +372,18 @@ class SmoothnessTests(unittest.TestCase):
         self.assertAlmostEqual(n.roughness, 0.2)  # _Glossiness（マップが無いときの値）
         self.assertAlmostEqual(normalize_material(parse_material(STANDARD_CUTOUT)).smoothness_scale, 1.0)  # 既定は 1
 
+    def test_urp_alpha_ignores_leftover_standard_mode(self):
+        # 半透明＋アルファクリップの URP Lit に、Standard の _Mode: 0（不透明）が残っている（#112: 横断歩道のデカール）
+        text = URP_MASKED.replace("    - _Surface: 0\n", "    - _Surface: 1\n    - _AlphaClip: 1\n    - _Cutoff: 0.439\n    - _Mode: 0\n")
+        n = normalize_material(parse_material(text))
+        self.assertEqual(n.alpha_mode, "cutout")
+        self.assertTrue(n.alpha_from_texture)
+        self.assertAlmostEqual(n.alpha_cutoff, 0.439)
+        blend = normalize_material(parse_material(text.replace("_AlphaClip: 1", "_AlphaClip: 0")))
+        self.assertEqual(blend.alpha_mode, "blend")
+        # Built-in Standard は今までどおり _Mode で決める
+        self.assertEqual(normalize_material(parse_material(STANDARD_CUTOUT)).alpha_mode, "cutout")
+
     def test_albedo_channel(self):
         text = URP_MASKED.replace("_SmoothnessTextureChannel: 0", "_SmoothnessTextureChannel: 1")
         self.assertTrue(normalize_material(parse_material(text)).smoothness_from_albedo)
