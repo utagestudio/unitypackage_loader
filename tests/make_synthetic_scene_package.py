@@ -20,6 +20,10 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
 - SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
+- SlabBareInstance: 同じ FBX を表の無い .meta で別のモデル（SlabBare.fbx）にし、SlabInstance から Unity の X に 10 ずらして
+  同じ向きで置く（Issue #111。表が無くても、読み込んだオブジェクトが 1 つなら畳まれた形として組み立て直す）
+- SlabBareWrapped / SlabWrapped: 1 メッシュの FBX（表なし / 表あり）をルートの位置 0・回転なしで置いた prefab を、さらに
+  Unity の X に 20 / 30 ずらして SlabInstance と同じ向きで置く（Issue #111。包んだ prefab の上からの上書きも畳まれたノードに当てる）
 - TowerRoot: LOD を 2 段持つ FBX（Tower.fbx）の LODGroup を持つ prefab を、位置 (-6, 0, 0) に（Issue #104。
   Tower_LOD1 は読み込んだうえで非表示にする）
 - KioskRoot: Renderer が 1 つの FBX（Kiosk.fbx。表も externalObjects も無い 2 マテリアルのメッシュ）をそのまま置いた
@@ -307,6 +311,24 @@ def main() -> None:
     )
     slab_model = add(slab_path, slab_fbx.read_bytes(), slab_meta)
 
+    # 同じ FBX を、表の無い新しい形式の .meta で別のモデルとして置く（#111: 表が無いと 1 メッシュの FBX か分からない）
+    bare_path = "Assets/Synthetic/Models/SlabBare.fbx"
+    bare_model = add(bare_path, slab_fbx.read_bytes(), model_meta(guid_of(bare_path), {"ProbeMat": mats["ProbeMat"]}))
+
+    # 1 メッシュの FBX をそのまま置き、ルートの位置 0・回転なしに上書きした prefab（#111: Shibuya の地下鉄の入口と同じ形）。
+    # 表の無いモデル（SlabBare）と表のあるモデル（Slab）で 1 つずつ作る
+    wrapped = {}
+    for label, wrapped_model in (("SlabBareWrapped", bare_model), ("SlabWrapped", slab_model)):
+        wrapped_path = f"Assets/Synthetic/Prefabs/{label}.prefab"
+        wrapped[label] = add(wrapped_path, (HEADER + "".join([
+            instance(100, wrapped_model, 0, [
+                mod(ROOT_TRANSFORM, wrapped_model, f"m_LocalPosition.{axis}", 0) for axis in "xyz"
+            ] + [
+                mod(ROOT_TRANSFORM, wrapped_model, f"m_LocalRotation.{axis}", value) for axis, value in zip("xyzw", (0, 0, 0, 1))
+            ] + [mod(ROOT_GAME_OBJECT, wrapped_model, "m_Name", label)]),
+            stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, wrapped_model, 100),
+        ])).encode(), prefab_meta(wrapped_path))
+
     # Unity で、メッシュを直接指す GameObject だけの prefab（街並みアセットの歩道と同じ形）
     slab_prefab_path = "Assets/Synthetic/Prefabs/Slab.prefab"
     slab_prefab = add(slab_prefab_path, (HEADER + "".join([
@@ -460,6 +482,26 @@ def main() -> None:
             mod(ROOT_GAME_OBJECT, slab_model, "m_Name", "SlabInstance"),
         ]),
         stripped_transform(5101, ROOT_TRANSFORM, slab_model, 5100),
+        # 表の無い同じ FBX を、SlabInstance から Unity の X に 10 ずらして同じ向きで置く（#111）
+        instance(5150, bare_model, 0, [
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.x", 12),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.y", 0.5),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalPosition.z", -6),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.x", 0),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.y", 0.25881905),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.z", 0),
+            mod(ROOT_TRANSFORM, bare_model, "m_LocalRotation.w", 0.96592583),
+            mod(ROOT_GAME_OBJECT, bare_model, "m_Name", "SlabBareInstance"),
+        ]),
+        stripped_transform(5151, ROOT_TRANSFORM, bare_model, 5150),
+        # 上の prefab を、さらに Unity の X に 10 / 20 ずらして同じ向きで置く（#111: 包んだ prefab の上からの上書き）
+        *[instance(file_id, wrapped[label], 0, [
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.x", x),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.y", 0.5),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalPosition.z", -6),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalRotation.y", 0.25881905),
+            mod(ROOT_TRANSFORM ^ 100, wrapped[label], "m_LocalRotation.w", 0.96592583),
+        ]) for file_id, label, x in ((5160, "SlabBareWrapped", 22), (5170, "SlabWrapped", 32))],
         # LODGroup を持つ prefab（#104）。LOD1 は読み込んで非表示にする
         instance(5200, lod_prefab, 0, [
             mod(11, lod_prefab, "m_LocalPosition.x", -6),
