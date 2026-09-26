@@ -32,7 +32,7 @@ from ..core.mapping import fully_replaced_materials, resolve_materials, slot_ass
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, tables_from_hierarchy
+from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, resolve_sole_renderer, tables_from_hierarchy
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
@@ -881,6 +881,14 @@ class _ImportSession:
         new_materials: list[bpy.types.Material] = new["materials"]
         fbx_names = [m.name for m in new_materials]
         mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
+        # 名前を引けないモデルの中へのマテリアルの上書きは、メッシュが 1 つのときだけそれに当てる（#109）
+        prefab_table, unread = resolve_sole_renderer(prefab_table or {}, [o.name for o in mesh_objects])
+        if unread:
+            self.report.warn(
+                f"{model.name}: {unread} material override(s) on an object inside the model are not read yet "
+                f"(the model has {len(mesh_objects)} meshes, so the overridden one is unknown); "
+                "the model's own assignments are used for them"
+            )
         object_slots = {
             o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
             for o in mesh_objects
