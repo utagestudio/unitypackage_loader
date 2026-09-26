@@ -279,7 +279,14 @@ def main() -> None:
     mats = {}
     for name, color in (("ProbeMat", (1, 1, 1)), ("ProbeRed", (1, 0.2, 0.2))):
         mat_path = f"Assets/Synthetic/Materials/{name}.mat"
-        mats[name] = add(mat_path, mat_yaml(name, tex, None, color, 0).encode(),
+        text = mat_yaml(name, tex, None, color, 0)
+        if name == "ProbeRed":
+            # アルファの無い _MetallicGlossMap と _GlossMapScale（#112: Smoothness は A（= 1）× 0.25）
+            text = text.replace("    m_Floats:\n", (
+                f"    - _MetallicGlossMap:\n        m_Texture: {{fileID: 2800000, guid: {tex}, type: 3}}\n"
+                "        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n    m_Floats:\n    - _GlossMapScale: 0.25\n"
+            ), 1)
+        mats[name] = add(mat_path, text.encode(),
                          f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
 
     fbx = tmp / "probe.fbx"

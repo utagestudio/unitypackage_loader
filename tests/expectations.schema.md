@@ -34,6 +34,7 @@
       "normal_colorspace": "Non-Color",
       "emission_strength": 0.0,
       "emission_color": [1.0, 1.0, 1.0],
+      "smoothness_scale": 1.0,
       "node_types": ["ShaderNodeMixShader"]
     }
   ],
@@ -71,6 +72,7 @@
 | `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
 | `material_checks[].emission_strength` / `emission_color` | Principled BSDF の Emission Strength と、リンクされていない Emission Color（RGB、小数 4 桁で比較） |
+| `material_checks[].smoothness_scale` | Roughness を「1 − Smoothness の元 × 倍率」で組んだときの倍率（小数 4 桁。元が無ければ `null`） |
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 | `prefabs.count` | 読み込む単位 Prefabs で読み込んだ prefab の数（`options` に `"unit": "PREFABS"` を指定する） |

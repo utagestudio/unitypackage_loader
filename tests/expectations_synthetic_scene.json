@@ -432,5 +432,15 @@
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "
+  ],
+  "material_checks": [
+    {
+      "name": "ProbeRed",
+      "smoothness_scale": 0.25
+    },
+    {
+      "name": "ProbeMat",
+      "smoothness_scale": null
+    }
   ]
 }
