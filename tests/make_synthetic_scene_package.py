@@ -27,8 +27,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - TowerRoot: LOD を 2 段持つ FBX（Tower.fbx）の LODGroup を持つ prefab を、位置 (-6, 0, 0) に（Issue #104。
   Tower_LOD1 は読み込んだうえで非表示にする）
 - KioskRoot: Renderer が 1 つの FBX（Kiosk.fbx。表も externalObjects も無い 2 マテリアルのメッシュ）をそのまま置いた
-  prefab（Kiosk.prefab）を、位置 (8, 0, 8) に。prefab はモデルの中の Renderer の m_Materials[0] だけを ProbeRed に
-  上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
+  prefab（Kiosk.prefab）を、位置 (8, 0, 8) に。prefab はモデルの中の Renderer の m_Materials[0] を ProbeRed に、[1] を
+  ProbeDecal（Standard の _Mode: 0 が残った、半透明＋アルファクリップの URP Lit。Issue #112）に上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
 - BoothRoot: メッシュが 2 つの FBX（Booth.fbx）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
   モデルの中の Renderer 1 つへのマテリアルの上書きは、どちらのメッシュか決められないので当てずに警告する（Issue #31）
 
@@ -415,6 +415,20 @@ def main() -> None:
     # Renderer が 1 つの FBX をそのまま置き、中の Renderer の m_Materials[0] だけを上書きした prefab（#109）。
     # .meta は新しい形式で、表も externalObjects も無い
     red = f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}"
+    # 半透明＋アルファクリップの URP Lit 系に、Standard から変換したときの _Mode: 0（不透明）が残ったもの（#112: 横断歩道の
+    # デカール）。Kiosk の 1 番スロットに当てる。URP Lit の GUID にするとパッケージ全体が URP と判定されてライトの換算が
+    # 変わるので、表に無いシェーダー（URP Lit から派生したもの。プロパティで URP と判定する）にする
+    decal_path = "Assets/Synthetic/Materials/ProbeDecal.mat"
+    decal_text = mat_yaml("ProbeDecal", tex, None, (1, 1, 1), 0).replace(
+        "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+        "{fileID: 4800000, guid: 7777777777777777aaaaaaaaaaaaaaaa, type: 3}",
+    ).replace("    - _MainTex:\n", "    - _BaseMap:\n").replace(
+        "    - _Cutoff: 0.5\n",
+        "    - _Cutoff: 0.439\n    - _Surface: 1\n    - _AlphaClip: 1\n    - _WorkflowMode: 1\n    - _Smoothness: 0.5\n",
+    )
+    mats["ProbeDecal"] = add(decal_path, decal_text.encode(),
+                             f"fileFormatVersion: 2\nguid: {guid_of(decal_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    decal = f"{{fileID: 2100000, guid: {mats['ProbeDecal']}, type: 2}}"
     fbx_prefabs = {}
     for name, export, renderer in (("Kiosk", export_kiosk_fbx, KIOSK_RENDERER), ("Booth", export_booth_fbx, BOOTH_RENDERER)):
         path = tmp / f"{name.lower()}.fbx"
@@ -426,7 +440,7 @@ def main() -> None:
             instance(100, fbx_model, 0, [
                 mod(ROOT_GAME_OBJECT, fbx_model, "m_Name", name),
                 mod(renderer, fbx_model, "m_Materials.Array.data[0]", "", red),
-            ]),
+            ] + ([mod(renderer, fbx_model, "m_Materials.Array.data[1]", "", decal)] if name == "Kiosk" else [])),
             stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, fbx_model, 100),
         ])).encode(), prefab_meta(fbx_prefab_path))
 

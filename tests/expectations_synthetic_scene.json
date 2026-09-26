@@ -261,7 +261,7 @@
       "object": "Kiosk",
       "hidden": false,
       "mat_files": [
-        "",
+        "ProbeDecal.mat",
         "ProbeRed.mat"
       ]
     },
@@ -440,6 +440,11 @@
     },
     {
       "name": "ProbeMat",
+      "smoothness_scale": null
+    },
+    {
+      "name": "KioskFrameFbx",
+      "alpha_mode": "cutout",
       "smoothness_scale": null
     }
   ]
