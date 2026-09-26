@@ -3,11 +3,14 @@
 展開のしかた:
 
 - 各アセットの Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを
-  再帰的に展開して差し込む。展開した元のオブジェクトの key は「PrefabInstance の fileID XOR 元の key」
-  （上位ビットは落とす。prefab の中で Unity が使う番号と同じ）。
+  再帰的に展開して差し込む。Node の key は展開ごとに振る通し番号で、fileID からは表（``Hierarchy.transforms`` など）で
+  引く。差し込んだ元のオブジェクトの fileID は「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす。
+  prefab の中で Unity が使う番号と同じ）。
 - 外から元のオブジェクトを指す参照（子を付ける親、上書き先）は、stripped ドキュメント
   （``m_CorrespondingSourceObject`` と ``m_PrefabInstance``）を対応表にして引く。シーンの fileID は XOR の規則に
-  従わないため（Issue #48 の調査）。
+  従わないため（Issue #48 の調査）。PrefabInstance の上書き・削除と stripped の参照は、PrefabInstance ごとの
+  「元のアセットでの fileID → 差し込んだ Node」の表で引き、XOR の値は使わない。fileID を連番に振り直したパッケージでは
+  XOR の値が別の PrefabInstance のものと重なるため（Issue #107）。
 - ``LODGroup`` の ``m_LODs`` は、段ごとに並んだ Renderer の fileID として読み、``RendererInfo.lod_level`` に付ける
   （0 = もっとも細かい LOD0）。読み込み側は 0 以外を非表示にする。
 - ``m_Modifications`` のうち、位置・回転・スケール（``m_LocalPosition.x`` など）、``m_IsActive``、``m_Name``、
@@ -89,8 +92,13 @@ class HierarchyError(ValueError):
 
 
 def remap(instance_id: int, source_id: int) -> int:
-    """PrefabInstance で差し込んだ元のオブジェクトの key。"""
+    """PrefabInstance で差し込んだ元のオブジェクトの、差し込んだ先のアセットでの fileID。"""
     return (instance_id ^ source_id) & _MASK
+
+
+def _uid(file_id: int) -> int:
+    """表の key にする fileID（``remap`` の結果と揃えて上位ビットを落とす）。"""
+    return file_id & _MASK
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +270,11 @@ def parse_asset(data: str | bytes) -> RawAsset:
 
 @dataclass
 class Node:
-    """展開後の Transform 1 つ（GameObject と、あれば Renderer を含む）。"""
+    """展開後の Transform 1 つ（GameObject と、あれば Renderer を含む）。
+
+    ``key`` / ``parent`` / ``scope`` は展開ごとの通し番号。``game_object`` / ``renderer_key`` / ``components`` の key は
+    Unity の fileID（展開したアセットの空間での値）。
+    """
 
     key: int
     name: str
@@ -304,15 +316,23 @@ class Node:
 @dataclass
 class Hierarchy:
     nodes: dict[int, Node] = field(default_factory=dict)  # 親より先に子が来ることもある
-    game_objects: dict[int, int] = field(default_factory=dict)  # GameObject の key → Node の key
-    renderers: dict[int, int] = field(default_factory=dict)  # Renderer の key → Node の key
-    components: dict[int, int] = field(default_factory=dict)  # ライト・カメラの key → Node の key
+    # Unity の fileID（このアセットの空間での値）→ Node の key。差し込んだものの fileID（XOR）が既にあれば、先のものを残す
+    game_objects: dict[int, int] = field(default_factory=dict)
+    renderers: dict[int, int] = field(default_factory=dict)
+    components: dict[int, int] = field(default_factory=dict)  # ライト・カメラ
+    transforms: dict[int, int] = field(default_factory=dict)  # 消した Node を指したままのことがある
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
     unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）
     missing_sources: int = 0  # 元がパッケージに無い PrefabInstance
     # MAX_NESTING で打ち切った PrefabInstance を含む（キャッシュした深さより浅い位置から使うときは展開し直す）
     depth_truncated: bool = False
+    next_key: int = 1  # 次に振る Node の key（0 は使わない）
+
+    def new_key(self) -> int:
+        key = self.next_key
+        self.next_key += 1
+        return key
 
     def children(self) -> dict[int, list[int]]:
         result: dict[int, list[int]] = {}
@@ -320,6 +340,23 @@ class Hierarchy:
             if node.parent is not None:
                 result.setdefault(node.parent, []).append(key)
         return result
+
+
+_TABLES = ("transforms", "game_objects", "renderers", "components")
+
+
+@dataclass
+class _Inserted:
+    """差し込んだ PrefabInstance の中のオブジェクトの表（元のアセットでの fileID → 差し込んだ Node の key）。
+
+    上書き・削除・stripped の参照はこの表で引く。XOR した fileID は別の PrefabInstance のものと重なることがあるため。
+    """
+
+    instance_id: int
+    transforms: dict[int, int] = field(default_factory=dict)
+    game_objects: dict[int, int] = field(default_factory=dict)
+    renderers: dict[int, int] = field(default_factory=dict)
+    components: dict[int, int] = field(default_factory=dict)
 
 
 class Expander:
@@ -368,8 +405,9 @@ class Expander:
         return result
 
     def _model(self, guid: str) -> Hierarchy:
+        h = Hierarchy()
         root = Node(
-            key=MODEL_ROOT_TRANSFORM & _MASK,
+            key=h.new_key(),
             name=self._models[guid],
             position=[0.0, 0.0, 0.0],
             rotation=[0.0, 0.0, 0.0, 1.0],
@@ -378,57 +416,84 @@ class Expander:
             model_guid=guid,
         )
         root.scope = root.key
-        return Hierarchy({root.key: root}, {MODEL_ROOT_GAME_OBJECT: root.key})
+        h.nodes[root.key] = root
+        h.transforms[_uid(MODEL_ROOT_TRANSFORM)] = root.key
+        h.game_objects[MODEL_ROOT_GAME_OBJECT] = root.key
+        return h
 
     def _build(self, raw: RawAsset, stack: tuple[str, ...]) -> Hierarchy:
         h = Hierarchy(counts=Counter(raw.counts))
         model_instances = {i.file_id for i in raw.instances if i.source_guid in self._models}
+        inserted: dict[int, _Inserted] = {}  # PrefabInstance の fileID → 差し込んだオブジェクトの表
 
-        def resolve(file_id: int) -> int:
+        def resolve(file_id: int, table: str) -> int | None:
+            """fileID（stripped の別名を含む）の指すオブジェクトの Node。``table`` は ``_TABLES`` のどれか。"""
             alias = raw.aliases.get(file_id)
             if not alias:
-                return file_id
+                return getattr(h, table).get(_uid(file_id))
             instance_id, source_id = alias
+            scope = inserted.get(instance_id)
+            if scope is None:
+                return None
             if instance_id in model_instances:
                 source_id = _LEGACY_MODEL_IDS.get(source_id, source_id)
-            return remap(instance_id, source_id)
+            return getattr(scope, table).get(_uid(source_id))
 
+        fathers: list[tuple[int, int]] = []  # (Node の key, 親の fileID)。差し込みが終わってから解決する
         for t in raw.transforms.values():
             node = Node(
-                key=t.file_id,
+                key=h.new_key(),
                 name=raw.names.get(t.game_object, ""),
                 position=t.position,
                 rotation=t.rotation,
                 scale=t.scale,
-                parent=resolve(t.father) if t.father else None,
                 active=raw.active.get(t.game_object, True),
-                game_object=t.game_object,
+                game_object=_uid(t.game_object),
                 rect=t.rect,
             )
             h.nodes[node.key] = node
-            h.game_objects[t.game_object] = node.key
+            h.transforms[_uid(t.file_id)] = node.key
+            h.game_objects[node.game_object] = node.key
+            if t.father:
+                fathers.append((node.key, t.father))
+        own = set(h.nodes)
+        # アセット自身の Transform 同士の親子は先に付ける（scope を決めるため）
+        for key, father in fathers:
+            if father not in raw.aliases:
+                h.nodes[key].parent = h.transforms.get(_uid(father))
         for renderer_id, (go, info) in raw.renderers.items():
-            key = h.game_objects.get(go)
+            key = h.game_objects.get(_uid(go))
             if key is not None:
                 h.nodes[key].renderer = info
-                h.nodes[key].renderer_key = renderer_id
-                h.renderers[renderer_id] = key
+                h.nodes[key].renderer_key = _uid(renderer_id)
+                h.renderers[_uid(renderer_id)] = key
         for component_id, (go, class_id, body) in raw.components.items():
-            key = h.game_objects.get(go)
+            key = h.game_objects.get(_uid(go))
             if key is not None:
-                h.nodes[key].components[component_id] = (class_id, copy.deepcopy(body))
-                h.components[component_id] = key
-        _assign_scopes(h, set(h.nodes))
+                h.nodes[key].components[_uid(component_id)] = (class_id, copy.deepcopy(body))
+                h.components[_uid(component_id)] = key
+        _assign_scopes(h, own)
 
+        roots: list[tuple[int, int]] = []  # (差し込んだ最上位の Node の key, m_TransformParent の fileID)
         for instance in raw.instances:
             if len(h.nodes) > MAX_NODES:
                 raise HierarchyError(f"hierarchy has more than {MAX_NODES} objects")
-            self._insert(h, instance, resolve, stack)
+            scope = self._insert(h, instance, stack, roots)
+            if scope is not None:
+                inserted[instance.file_id] = scope
+        # 親は別の PrefabInstance の中にあることもあるので、全部を差し込んでから付ける
+        for key, father in fathers + roots:
+            if father and key in h.nodes and (father in raw.aliases or h.nodes[key].parent is None):
+                parent = resolve(father, "transforms")
+                h.nodes[key].parent = parent if parent in h.nodes else None
         # LODGroup は差し込んだ PrefabInstance の中の Renderer を指すことがあるので、差し込みの後に当てる
-        _apply_lod_groups(h, raw.lod_groups, resolve)
+        _apply_lod_groups(h, raw.lod_groups, lambda file_id: resolve(file_id, "renderers"))
         return h
 
-    def _insert(self, h: Hierarchy, instance: _RawInstance, resolve, stack) -> None:
+    def _insert(
+        self, h: Hierarchy, instance: _RawInstance, stack: tuple[str, ...], roots: list[tuple[int, int]]
+    ) -> _Inserted | None:
+        """PrefabInstance の元を差し込み、上書きと削除を当てる。最上位の Node は ``roots`` に足す（親は呼び出し側で付ける）。"""
         source = instance.source_guid
         is_model = source in self._models
         if not is_model and source not in stack and len(stack) >= MAX_NESTING:
@@ -436,85 +501,101 @@ class Expander:
         sub = self._model(source) if is_model else self._asset(source, stack)
         if sub is None:
             h.missing_sources += 1
-            return
+            return None
         h.depth_truncated = h.depth_truncated or sub.depth_truncated
         iid = instance.file_id
-        parent = resolve(instance.parent) if instance.parent else None
-        added: dict[int, int] = {}  # 元の key → 差し込んだ key
+        added = {key: h.new_key() for key in sub.nodes}  # 元の key → 差し込んだ key
         for key, node in sub.nodes.items():
-            new_key = remap(iid, key)
-            added[key] = new_key
+            new_key = added[key]
             copied = node.copy(
                 key=new_key,
-                parent=remap(iid, node.parent) if node.parent is not None else parent,
+                parent=added.get(node.parent) if node.parent is not None else None,
                 game_object=remap(iid, node.game_object),
                 renderer_key=remap(iid, node.renderer_key) if node.renderer else 0,
-                scope=remap(iid, node.scope),
+                scope=added.get(node.scope, 0),
             )
             copied.components = {remap(iid, k): value for k, value in copied.components.items()}
             h.nodes[new_key] = copied
-        for go, key in sub.game_objects.items():
-            h.game_objects[remap(iid, go)] = remap(iid, key)
-        for renderer, key in sub.renderers.items():
-            h.renderers[remap(iid, renderer)] = remap(iid, key)
-        for component, key in sub.components.items():
-            h.components[remap(iid, component)] = remap(iid, key)
+            if node.parent is None:
+                roots.append((new_key, instance.parent))
+        scope = _Inserted(iid)
+        for table in _TABLES:
+            local = {uid: added[key] for uid, key in getattr(sub, table).items() if key in added}
+            setattr(scope, table, local)
+            outer = getattr(h, table)
+            for uid, key in local.items():
+                outer.setdefault(remap(iid, uid), key)
         h.counts.update(sub.counts)
         h.unresolved_overrides += sub.unresolved_overrides
         h.unresolved_material_overrides += sub.unresolved_material_overrides
         h.missing_sources += sub.missing_sources
 
-        def target_key(file_id: int, guid: str | None) -> int | None:
+        def target(file_id: int, guid: str | None) -> int | None:
+            """上書き・削除の対象の、元のアセットでの fileID。別のアセットを指していれば None。"""
             if guid is not None and guid != source:
                 return None
             if is_model:
                 file_id = _LEGACY_MODEL_IDS.get(file_id, file_id)
-            return remap(iid, file_id)
+            return _uid(file_id)
 
-        added_keys = set(added.values())
         children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
         for file_id, guid in instance.removed_game_objects:
-            key = target_key(file_id, guid)
-            node_key = h.game_objects.get(key) if key is not None else None
-            if node_key is not None and node_key in added_keys:
+            uid = target(file_id, guid)
+            node_key = scope.game_objects.get(uid) if uid is not None else None
+            if node_key is not None and node_key in h.nodes:
                 if children is None:
                     children = h.children()
                 _remove_subtree(h, node_key, children)
             elif is_model:
                 h.unresolved_overrides += 1
         for file_id, guid in instance.removed_components:
-            key = target_key(file_id, guid)
-            node_key = h.renderers.pop(key, None) if key is not None else None
-            component_node = h.components.pop(key, None) if key is not None else None
-            if node_key is not None and node_key in h.nodes:
-                h.nodes[node_key].renderer = None
-            elif component_node is not None and component_node in h.nodes:
-                h.nodes[component_node].components.pop(key, None)
-            elif is_model:
+            uid = target(file_id, guid)
+            if uid is not None and _remove_component(h, scope, uid):
+                continue
+            if is_model:
                 h.unresolved_overrides += 1
 
-        root_key =remap(iid, MODEL_ROOT_TRANSFORM & _MASK) if is_model else None
+        root_key = scope.transforms.get(_uid(MODEL_ROOT_TRANSFORM)) if is_model else None
         table = self._recycle.get(source, {}) if is_model else {}
         # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
         # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
         collapsed = self._collapsed.get(source) if is_model else None
         for file_id, guid, path, value, reference in instance.modifications:
-            key = target_key(file_id, guid)
-            if key is None:
+            uid = target(file_id, guid)
+            if uid is None:
                 continue
-            if collapsed is not None and key == root_key and root_key in h.nodes:
+            if collapsed is not None and uid == _uid(MODEL_ROOT_TRANSFORM) and root_key in h.nodes:
                 _record_node_transform(h.nodes[root_key], collapsed, path, value)
-            if _apply_modification(h, added_keys, key, path, value, reference) or not is_model or not _is_tracked(path):
+            if _apply_modification(h, scope, uid, path, value, reference) or not is_model or not _is_tracked(path):
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
                 continue
             h.unresolved_overrides += 1
             if _MATERIAL_PATH.fullmatch(path) or path == "m_Materials.Array.size":
                 h.unresolved_material_overrides += 1
+        return scope
 
 
-def _apply_lod_groups(h: Hierarchy, groups: list[list[list[int]]], resolve: Callable[[int], int]) -> None:
-    """LODGroup の段を、そこに並んだ Renderer に付ける。
+def _remove_component(h: Hierarchy, scope: _Inserted, uid: int) -> bool:
+    """差し込んだ Renderer かライト・カメラを消す。見つからなければ False。"""
+    node = h.nodes.get(scope.renderers.get(uid))  # type: ignore[arg-type]
+    if node is not None and node.renderer is not None:
+        if h.renderers.get(node.renderer_key) == node.key:
+            del h.renderers[node.renderer_key]
+        node.renderer = None
+        return True
+    node = h.nodes.get(scope.components.get(uid))  # type: ignore[arg-type]
+    key = remap(scope.instance_id, uid)
+    if node is not None and key in node.components:
+        del node.components[key]
+        if h.components.get(key) == node.key:
+            del h.components[key]
+        return True
+    return False
+
+
+def _apply_lod_groups(h: Hierarchy, groups: list[list[list[int]]], resolve: Callable[[int], int | None]) -> None:
+    """LODGroup の段を、そこに並んだ Renderer に付ける。``resolve`` は Renderer の fileID から Node の key を引く。
 
     1 つの LODGroup の中で同じ Renderer が複数の段にあれば、もっとも細かい段（Unity で LOD0 として描かれる方）を採る。
     既に段が付いている Renderer（ネストした prefab の中の LODGroup で付いたもの）は、粗い方を残す。内側の LODGroup で
@@ -524,7 +605,7 @@ def _apply_lod_groups(h: Hierarchy, groups: list[list[list[int]]], resolve: Call
         best: dict[int, int] = {}
         for level, renderers in enumerate(levels):
             for file_id in renderers:
-                key = h.renderers.get(resolve(file_id))
+                key = resolve(file_id)
                 if key is None or key not in h.nodes or h.nodes[key].renderer is None:
                     continue
                 if level < best.get(key, level + 1):
@@ -599,12 +680,12 @@ def _is_tracked(path: str) -> bool:
     )
 
 
-def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, value: object, reference: object) -> bool:
-    """上書きを 1 つ当てる。当てる先が差し込んだオブジェクトに見つからなければ False。"""
+def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, value: object, reference: object) -> bool:
+    """上書きを 1 つ当てる。``uid`` は元のアセットでの fileID。当てる先が差し込んだオブジェクトに見つからなければ False。"""
     match = _TRS_PATH.fullmatch(path)
     if match:
-        node = h.nodes.get(key)
-        if node is None or key not in added:
+        node = h.nodes.get(scope.transforms.get(uid))  # type: ignore[arg-type]
+        if node is None:
             return False
         values = getattr(node, _TRS_FIELDS[match.group(1)])
         index = _AXES[match.group(2)]
@@ -612,22 +693,23 @@ def _apply_modification(h: Hierarchy, added: set[int], key: int, path: str, valu
             values[index] = to_float(value, values[index])
         return True
     if path in ("m_IsActive", "m_Name"):
-        node_key = h.game_objects.get(key)
-        if node_key is None or node_key not in added:
+        node = h.nodes.get(scope.game_objects.get(uid))  # type: ignore[arg-type]
+        if node is None:
             return False
         if path == "m_IsActive":
-            h.nodes[node_key].active = to_float(value, 1.0) != 0
+            node.active = to_float(value, 1.0) != 0
         else:
-            h.nodes[node_key].name = "" if value is None else str(value)
+            node.name = "" if value is None else str(value)
         return True
-    component_node = h.components.get(key)
+    component_node = scope.components.get(uid)
     if component_node is not None:
-        if component_node not in added or component_node not in h.nodes:
+        node = h.nodes.get(component_node)
+        component = node.components.get(remap(scope.instance_id, uid)) if node is not None else None
+        if component is None:
             return False
-        _set_property(h.nodes[component_node].components[key][1], path, value, reference)
+        _set_property(component[1], path, value, reference)
         return True
-    node_key = h.renderers.get(key)
-    node = h.nodes.get(node_key) if node_key is not None and node_key in added else None
+    node = h.nodes.get(scope.renderers.get(uid))  # type: ignore[arg-type]
     renderer = node.renderer if node is not None else None
     if path == "m_Enabled":
         if renderer is None:
@@ -729,11 +811,14 @@ def _remove_subtree(h: Hierarchy, key: int, children: dict[int, list[int]] | Non
         node = h.nodes.pop(current, None)
         if node is None:
             continue
-        h.game_objects.pop(node.game_object, None)
-        if node.renderer is not None:
-            h.renderers.pop(node.renderer_key, None)
+        # 表は同じ fileID の別の Node を指していることがある（XOR の値が重なったとき。#107）ので、自分を指すものだけ消す
+        if h.game_objects.get(node.game_object) == current:
+            del h.game_objects[node.game_object]
+        if node.renderer is not None and h.renderers.get(node.renderer_key) == current:
+            del h.renderers[node.renderer_key]
         for component in node.components:  # 消した GameObject のライト・カメラへの上書きが残っていることがある（#68）
-            h.components.pop(component, None)
+            if h.components.get(component) == current:
+                del h.components[component]
         stack.extend(children.get(current, []))
 
 
