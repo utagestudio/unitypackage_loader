@@ -737,5 +737,66 @@ class LodGroupTest(unittest.TestCase):
         self.assertEqual(self.levels(scene, {NESTED: plain}), {"Rock_Near": 0, "Rock_Far": 1})
 
 
+class SequentialFileIdTest(unittest.TestCase):
+    """fileID を連番に振り直したパッケージ（Issue #107）。
+
+    差し込んだオブジェクトの fileID（PrefabInstance XOR 元）が、別の PrefabInstance のものと重なる。
+    Road のルート 2 は 30 ^ 2 = 28、Sign のルート 52 は 40 ^ 52 = 28 になる。
+    """
+
+    SIGN_MODEL = "d" * 32
+
+    ROAD = HEADER + "".join([
+        game_object(1, "Road"),
+        transform(2, 1),
+        game_object(3, "Road_LOD0"),
+        transform(4, 3, father=2),
+        mesh_renderer(5, 6, 3, MODEL, MAT_A),
+    ])
+    SIGN = HEADER + "".join([
+        game_object(51, "Sign"),
+        transform(52, 51),
+        game_object(53, "Sign_Panel"),
+        transform(54, 53, father=52),
+        mesh_renderer(55, 56, 53, SIGN_MODEL, MAT_B),
+        game_object(57, "Sign_Pole"),
+        transform(58, 57, father=52),
+    ])
+    SCENE = HEADER + "".join([
+        game_object(21, "City"),
+        transform(22, 21),
+        instance(30, NESTED, 22, [mod(2, NESTED, "m_LocalPosition.x", 5)]),
+        stripped_transform(31, 2, NESTED, 30),
+        instance(40, UNPACKED, 22, [mod(52, UNPACKED, "m_LocalPosition.x", 7)],
+                 removed_game_objects="    - {fileID: 57, guid: " + UNPACKED + ", type: 3}\n"),
+        stripped_transform(41, 52, UNPACKED, 40),
+        game_object(60, "Lamp"),
+        transform(61, 60, father=41),
+    ])
+
+    @classmethod
+    def setUpClass(cls):
+        assets = {NESTED: cls.ROAD, UNPACKED: cls.SIGN}
+        models = {MODEL: "Road", cls.SIGN_MODEL: "Sign"}
+        exp = Expander(lambda guid: parse_asset(assets[guid]) if guid in assets else None, models)
+        cls.h = exp.expand_raw(parse_asset(cls.SCENE))
+        cls.worlds = world_matrices(cls.h)
+        cls.by_name = {node.name: key for key, node in cls.h.nodes.items()}
+
+    def test_instances_do_not_overwrite_each_other(self):
+        self.assertEqual(sorted(self.by_name), ["City", "Lamp", "Road", "Road_LOD0", "Sign", "Sign_Panel"])
+        found = placements(self.h, [MODEL, self.SIGN_MODEL])
+        self.assertEqual({p.model_guid: set(p.renderers) for p in found}, {MODEL: {"Road_LOD0"}, self.SIGN_MODEL: {"Sign_Panel"}})
+
+    def test_overrides_land_on_their_own_instance(self):
+        self.assertAlmostEqual(self.worlds[self.by_name["Road"]][0][3], 5.0)
+        self.assertAlmostEqual(self.worlds[self.by_name["Sign"]][0][3], 7.0)
+
+    def test_stripped_parent_points_into_the_right_instance(self):
+        lamp = self.h.nodes[self.by_name["Lamp"]]
+        self.assertEqual(lamp.parent, self.by_name["Sign"])
+        self.assertEqual(self.h.nodes[self.by_name["Road"]].parent, self.by_name["City"])
+
+
 if __name__ == "__main__":
     unittest.main()
