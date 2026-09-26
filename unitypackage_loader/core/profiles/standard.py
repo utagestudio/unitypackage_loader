@@ -51,9 +51,8 @@ class StandardProfile(ShaderProfile):
                 n.emission_color = emission_color
 
         n.metallic = mat.f("_Metallic", 0.0)
-        smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))
-        n.roughness = max(0.0, min(1.0, 1.0 - smoothness))
         n.metallic_tex = mat.tex("_MetallicGlossMap")
+        _smoothness(mat, n)
         n.occlusion_tex = mat.tex("_OcclusionMap")
         n.cull_backface = cull_backface(mat, default=True)
 
@@ -83,6 +82,26 @@ class StandardProfile(ShaderProfile):
         if info is not None and info.alpha is not None:
             return info.alpha
         return alpha_mode_from_blend_state(mat, default="opaque")
+
+
+def _smoothness(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """Smoothness（Blender では 1 − Roughness）。
+
+    URP Lit の Smoothness は ``_Smoothness``、Built-in Standard は ``_Glossiness``。マップ（``_MetallicGlossMap``）か
+    アルベドの A（``_SmoothnessTextureChannel`` = 1）から取るときは、その A に倍率を掛ける。倍率は URP が ``_Smoothness``、
+    Standard が ``_GlossMapScale``（#112: 倍率を掛けず、艶の無い面が鏡面になっていた）。URP から変換したマテリアルには
+    Standard の ``_Glossiness`` / ``_GlossMapScale`` が残っていることがあるので、URP ではそれらを見ない。
+    """
+    urp = n.family == "urp" or (n.family not in ("standard", "legacy") and mat.has("_WorkflowMode"))
+    if urp:
+        smoothness = mat.f("_Smoothness", 0.5)
+        n.smoothness_scale = smoothness
+    else:
+        smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))
+        n.smoothness_scale = mat.f("_GlossMapScale", 1.0)
+    n.roughness = max(0.0, min(1.0, 1.0 - smoothness))
+    n.smoothness_scale = max(0.0, min(1.0, n.smoothness_scale))
+    n.smoothness_from_albedo = int(mat.f("_SmoothnessTextureChannel", 0.0)) == 1 and n.base_color_tex is not None
 
 
 def _hdrp_emission(mat: UnityMaterial, n: NormalizedMaterial) -> None:
