@@ -18,7 +18,28 @@
           "lod": 1
         }
       }
+    },
+    "Kiosk": {
+      "prefab": "Assets/Synthetic/Prefabs/Kiosk.prefab",
+      "objects": 1,
+      "mat_files": [
+        "",
+        "ProbeRed.mat"
+      ]
+    },
+    "Booth": {
+      "prefab": "Assets/Synthetic/Prefabs/Booth.prefab",
+      "objects": 2,
+      "mat_files": [
+        ""
+      ]
     }
   },
-  "warnings_max": 1
+  "warnings_max": 4,
+  "warnings_contain": [
+    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet"
+  ],
+  "warnings_exclude": [
+    "Kiosk.fbx: "
+  ]
 }

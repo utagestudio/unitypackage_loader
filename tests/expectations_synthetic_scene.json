@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 5,
+  "warnings_max": 8,
   "placed_objects": [
     {
       "top": "A",
@@ -225,6 +225,31 @@
       "top": "Partial",
       "object": "Skinned",
       "hidden": true
+    },
+    {
+      "top": "KioskRoot",
+      "object": "Kiosk",
+      "hidden": false,
+      "mat_files": [
+        "",
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "BoothRoot",
+      "object": "BoothWall",
+      "hidden": false,
+      "mat_files": [
+        ""
+      ]
+    },
+    {
+      "top": "BoothRoot",
+      "object": "BoothRoof",
+      "hidden": false,
+      "mat_files": [
+        ""
+      ]
     }
   ],
   "shared_meshes": [
@@ -371,5 +396,11 @@
         -1
       ]
     }
+  ],
+  "warnings_contain": [
+    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet"
+  ],
+  "warnings_exclude": [
+    "Kiosk.fbx: "
   ]
 }

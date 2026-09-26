@@ -18,6 +18,8 @@
   },
   "images": { "count": 0 },
   "warnings_max": 0,
+  "warnings_contain": ["<警告に含まれる文字列>"],
+  "warnings_exclude": ["<どの警告にも含まれない文字列>"],
   "material_checks": [
     {
       "name": "<Blender 上のマテリアル名>",
@@ -63,6 +65,7 @@
 | `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared` / `replaced` / `prefab-split`）。`shared` は同じ回に組み立て済みの同じ .mat のマテリアルを使った行 |
 | `images.count` | 読み込まれた画像数 |
 | `warnings_max` | 許容する警告数の上限 |
+| `warnings_contain` / `warnings_exclude` | 挙げた文字列を含む警告があること / 無いこと |
 | `result` | オペレーターの結果（既定は `FINISHED`。何も読み込めずに失敗する場合は `CANCELLED`） |
 | `errors` | レポートのエラー数（読み込めなかったモデル・シーン、続けられなかった失敗） |
 | `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
