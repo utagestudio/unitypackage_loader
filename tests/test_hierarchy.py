@@ -10,6 +10,7 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import (
+    SOLE_NODE,
     SOLE_RENDERER,
     Expander,
     components,
@@ -470,10 +471,46 @@ class CollapsedModelRootTest(unittest.TestCase):
         _, placement = self.placement(table)
         self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
 
-    def test_without_a_table_the_node_is_unknown(self):
+    def test_without_a_table_the_overrides_are_kept_for_the_importer(self):
+        # 表が無いと 1 メッシュの FBX か分からないので、成分付きで SOLE_NODE に記録し、読み込み側が
+        # オブジェクトの数で判定する（#111）。配置の行列は今までどおり単位行列を基準にしたもの
         _, placement = self.placement()
-        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
+        self.assertEqual(placement.root_node, SOLE_NODE)
+        self.assertEqual(placement.node_transforms, {SOLE_NODE: {
+            "position": [2.0, 0.5, -6.0], "rotation": [None, 0.25881905, None, 0.96592583],
+        }})
         self.assertEqual([round(v, 6) for v in transform_point(placement.world, (0, 0, 0))], [2, 0.5, -6])
+
+    def test_overrides_through_a_wrapping_prefab_are_recorded(self):
+        # FBX をそのまま置いた prefab（位置 0・回転なしに上書き）を、シーンがさらに上書きする（#111: Shibuya の地下鉄の入口）。
+        # シーンの上書きの target は「prefab の PrefabInstance の fileID XOR モデルのルートの fileID」
+        wrapper = "e" * 32
+        prefab = HEADER + instance(100, MODEL, 0, [
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalPosition.x", 0),
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.x", 0),
+            mod(ROOT_TRANSFORM, MODEL, "m_LocalRotation.w", 1),
+        ])
+        scene = HEADER + instance(2000, wrapper, 0, [
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalPosition.x", 17.39),
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalRotation.x", -0.7071068),
+            mod(ROOT_TRANSFORM ^ 100, wrapper, "m_LocalRotation.w", 0.7071068),
+        ])
+        for table, key in ((None, SOLE_NODE), (self.TABLE, "Slab")):
+            exp = Expander(lambda g: parse_asset(prefab) if g == wrapper else None, {MODEL: "Slab"}, {MODEL: table} if table else None)
+            h = exp.expand_raw(parse_asset(scene))
+            placement = placements(h, {MODEL: "Slab"}, {MODEL: table} if table else None)[0]
+            self.assertEqual(placement.root_node, key)
+            self.assertEqual(placement.node_transforms[key], {
+                "position": [17.39, None, None], "rotation": [-0.7071068, None, None, 0.7071068],
+            })
+        # 包んだ prefab 自体の展開結果（キャッシュ）は、シーンの上書きで変わらない
+        self.assertEqual(exp.expand_asset(wrapper).nodes[1].model_transforms["Slab"]["position"], [0.0, None, None])
+
+    def test_without_a_table_and_without_root_overrides_nothing_is_recorded(self):
+        exp = Expander(lambda g: None, {MODEL: "Slab"})
+        h = exp.expand_raw(parse_asset(HEADER + instance(2000, MODEL, 0, [mod(ROOT_GAME_OBJECT, MODEL, "m_Name", "Plain")])))
+        placement = placements(h, {MODEL: "Slab"})[0]
+        self.assertEqual((placement.root_node, placement.node_transforms), ("", {}))
 
 
 class LegacyFormatTest(unittest.TestCase):

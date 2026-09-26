@@ -78,6 +78,9 @@ _MODEL_ROOT_UIDS = {MODEL_ROOT_GAME_OBJECT & _MASK, MODEL_ROOT_TRANSFORM & _MASK
 # モデルの中への上書きのうち、名前を引けなかったが、すべて同じ 1 つの Renderer を指すマテリアルの上書きを記録する名前。
 # 読み込み側が、モデルのメッシュのオブジェクトが 1 つだけならそれに当てる（#109）。Unity・Blender の名前には現れない
 SOLE_RENDERER = "\x00sole-renderer"
+# 表の無いモデルの PrefabInstance で、ルートの Transform への位置・回転・スケールの上書きを記録する名前。読み込み側が、
+# モデルのオブジェクトが 1 つだけ（Unity がノードを //RootNode に畳む形）ならそのノードへの上書きとして組み立て直す（#111）
+SOLE_NODE = "\x00sole-node"
 _MATERIAL_PATH = re.compile(r"m_Materials\.Array\.data\[(\d+)\]")
 _TRS_PATH = re.compile(r"m_Local(Position|Rotation|Scale)\.([xyzw])")
 _TRS_FIELDS = {"Position": "position", "Rotation": "rotation", "Scale": "scale"}
@@ -299,6 +302,9 @@ class Node:
     # （名前を引けず、すべて同じ Renderer を指すマテリアルの上書きは ``SOLE_RENDERER`` の名前で入る。#109）
     model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
     model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
+    # 1 メッシュの FBX（表で分かる畳まれたノードの名前）か表の無いモデル（``SOLE_NODE``）のモデルの PrefabInstance のルート。
+    # このルートへの位置・回転・スケールの上書きは、どの階層のものも成分付きで ``model_transforms`` に記録する（#99 / #111）
+    collapsed_key: str | None = None
 
     @property
     def local(self) -> Mat4:
@@ -565,14 +571,17 @@ class Expander:
         # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
         # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
         collapsed = self._collapsed.get(source) if is_model else None
+        if is_model and collapsed is None and source not in self._recycle:
+            # 表が無いと 1 メッシュの FBX か分からないので、成分付きで記録して読み込み側で判定する（#111）
+            collapsed = SOLE_NODE
+        if collapsed is not None and root_key in h.nodes:
+            h.nodes[root_key].collapsed_key = collapsed
         # 名前を引けなかったマテリアルの上書き。Renderer の fileID → [(スロット番号, .mat の GUID)]（#109）
         unnamed: dict[int, list[tuple[int, str | None]]] = {}
         for file_id, guid, path, value, reference in instance.modifications:
             uid = target(file_id, guid)
             if uid is None:
                 continue
-            if collapsed is not None and uid == _uid(MODEL_ROOT_TRANSFORM) and root_key in h.nodes:
-                _record_node_transform(h.nodes[root_key], collapsed, path, value)
             if _apply_modification(h, scope, uid, path, value, reference) or not is_model or not _is_tracked(path):
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
@@ -714,6 +723,9 @@ def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, val
         index = _AXES[match.group(2)]
         if index < len(values):
             values[index] = to_float(value, values[index])
+        if node.collapsed_key is not None:
+            # prefab で包んだ上から上書きした分も含めて記録する（#111: シーンの上書きが読み込み側に渡っていなかった）
+            _record_node_transform(node, node.collapsed_key, path, value)
         return True
     if path in ("m_IsActive", "m_Name"):
         node = h.nodes.get(scope.game_objects.get(uid))  # type: ignore[arg-type]
@@ -1078,6 +1090,9 @@ def placements(
             if collapsed is not None:
                 placement.root_node = collapsed
                 placement.node_transforms.setdefault(collapsed, {})
+            elif node.collapsed_key == SOLE_NODE and SOLE_NODE in placement.node_transforms:
+                # 表の無いモデルでルートを上書きした配置。畳まれた形かは読み込み側がオブジェクトの数で決める（#111）
+                placement.root_node = SOLE_NODE
             items.append(placement)
             continue
         renderer = node.renderer
