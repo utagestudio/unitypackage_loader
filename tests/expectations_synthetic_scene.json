@@ -130,6 +130,36 @@
       "hidden": false
     },
     {
+      "top": "SlabBareInstance",
+      "object": "Slab",
+      "tip": [
+        -10.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
+      "top": "SlabBareWrapped",
+      "object": "Slab",
+      "tip": [
+        -20.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
+      "top": "SlabWrapped",
+      "object": "Slab",
+      "tip": [
+        -30.9644,
+        4.5938,
+        1.6
+      ],
+      "hidden": false
+    },
+    {
       "top": "TowerRoot",
       "object": "Tower_LOD0",
       "hidden": false,
