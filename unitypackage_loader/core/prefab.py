@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelNames, placements
+from .hierarchy import CLASS_MESH_RENDERER, SOLE_RENDERER, Hierarchy, ModelNames, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
@@ -93,3 +93,33 @@ def merge_prefab_tables(tables: list[dict[str, RendererMaterials]]) -> dict[str,
                 added.add(rm.mesh_file_id)
         claimed |= added
     return merged
+
+
+def resolve_sole_renderer(
+    table: dict[str, RendererMaterials], mesh_objects: list[str]
+) -> tuple[dict[str, RendererMaterials], int]:
+    """``SOLE_RENDERER`` の行（名前を引けないが、すべて同じ Renderer を指すモデルの中へのマテリアルの上書き）を当てる。
+
+    読み込んだモデルのメッシュのオブジェクトが 1 つなら、Unity の Renderer もそれ 1 つなので、その行をそのオブジェクトの
+    名前に付け替える（名前で引けた行があれば、その行の空いたスロットだけを埋める）。複数あれば対象を決められないので
+    外す（推測で当てはめると別の部位の色が変わるため。#109 / #31）。戻り値は (表, 当てられなかった上書きの数)。
+    """
+    sole = table.get(SOLE_RENDERER)
+    if sole is None:
+        return table, 0
+    result = {name: rm for name, rm in table.items() if name != SOLE_RENDERER}
+    if len(mesh_objects) != 1:
+        return result, sum(1 for m in sole.materials if m)
+    name = mesh_objects[0]
+    named = find_renderer(result, name)
+    if named is None:
+        result[name] = RendererMaterials(name, list(sole.materials), sole.renderer_class, sole.mesh_guid)
+    else:
+        size = max(len(named.materials), len(sole.materials))
+        own = named.materials + [None] * (size - len(named.materials))
+        other = sole.materials + [None] * (size - len(sole.materials))
+        result[named.game_object] = RendererMaterials(
+            named.game_object, [a or b for a, b in zip(own, other)], named.renderer_class, named.mesh_guid,
+            named.mesh_file_id, named.lod_level,
+        )
+    return result, 0

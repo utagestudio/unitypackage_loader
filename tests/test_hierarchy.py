@@ -10,6 +10,7 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import (
+    SOLE_RENDERER,
     Expander,
     components,
     Hierarchy,
@@ -244,7 +245,9 @@ class PlacementTest(unittest.TestCase):
         self.assertFalse(self.placements[3].active)
 
     def test_overrides_inside_model_are_counted(self):
-        self.assertEqual(self.hierarchy.unresolved_overrides, 2)
+        # 回転の上書きだけを数える。マテリアルの上書きは対象が 1 つなので、唯一の Renderer 宛てとして残す（#109）
+        self.assertEqual(self.hierarchy.unresolved_overrides, 1)
+        self.assertEqual(self.placements[3].renderers[SOLE_RENDERER].materials, [MAT_B])
 
     def test_summary_counts(self):
         contents = summarize(self.hierarchy, [MODEL])
@@ -517,7 +520,9 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (2.0, 0.0, 5.0))
         self.assertEqual(transform_point(found[1].world, (0, 0, 0)), (0.0, 0.0, -1.0))
         self.assertEqual(h.missing_sources, 0)
-        self.assertEqual(h.unresolved_overrides, 1)  # モデルの中の Renderer（2300000）へのマテリアルの上書き
+        # 表が無いのでモデルの中の Renderer（2300000）の名前は引けないが、対象が 1 つなので唯一の Renderer 宛てとして残す（#109）
+        self.assertEqual(h.unresolved_overrides, 0)
+        self.assertEqual(found[0].renderers[SOLE_RENDERER].materials, [MAT_B])
 
     def test_recycle_table_resolves_overrides_inside_model(self):
         # 1 メッシュの FBX: Renderer（2300000）は //RootNode に載り、Blender ではメッシュ名 Pot のオブジェクトになる

@@ -210,6 +210,10 @@ def main() -> int:
         c.eq("image count", len(report.images), exp["images"]["count"])
     if "warnings_max" in exp:
         c.le("warning count", len(report.warnings), exp["warnings_max"])
+    for text in exp.get("warnings_contain", []):
+        c.true(f"warning contains {text!r}", any(text in w for w in report.warnings))
+    for text in exp.get("warnings_exclude", []):
+        c.eq(f"warnings without {text!r}", [w for w in report.warnings if text in w], [])
     if "split_slots" in exp:
         c.eq("split slots", report.split_slots, exp["split_slots"])
 

@@ -150,7 +150,8 @@ another model are not affected. With the Models unit, when several prefabs use t
 variants), their assignments are merged, with the first one by path taking precedence; to use a specific prefab's
 assignments, import that prefab with the Prefabs unit. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
 the package; overrides applied directly to a model (FBX) instance are applied when a scene is imported and the model's
-`.meta` is in the Unity 2018.2-and-earlier format (which has a name table), and are reported as a warning otherwise.
+`.meta` is in the Unity 2018.2-and-earlier format (which has a name table). Without a name table, material overrides are
+still applied when the model has only one mesh (so the overridden renderer is certain); otherwise they are reported as a warning.
 A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
 which can differ from Blender's slot order, so the entries are matched to slots in that order.
 

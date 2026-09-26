@@ -22,6 +22,11 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
 - TowerRoot: LOD を 2 段持つ FBX（Tower.fbx）の LODGroup を持つ prefab を、位置 (-6, 0, 0) に（Issue #104。
   Tower_LOD1 は読み込んだうえで非表示にする）
+- KioskRoot: Renderer が 1 つの FBX（Kiosk.fbx。表も externalObjects も無い 2 マテリアルのメッシュ）をそのまま置いた
+  prefab（Kiosk.prefab）を、位置 (8, 0, 8) に。prefab はモデルの中の Renderer の m_Materials[0] だけを ProbeRed に
+  上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
+- BoothRoot: メッシュが 2 つの FBX（Booth.fbx）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
+  モデルの中の Renderer 1 つへのマテリアルの上書きは、どちらのメッシュか決められないので当てずに警告する（Issue #31）
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -193,6 +198,42 @@ def camera_doc(file_id, go, fov=60, orthographic=0, size=5, near=0.3, far=1000, 
     )
 
 
+def export_kiosk_fbx(path: Path) -> None:
+    """メッシュが 1 つで、2 つのマテリアルをポリゴンの前半・後半に使う FBX（Issue #109）。
+
+    マテリアルの名前は .mat と一致させない（externalObjects も無いので、prefab の上書きを読まないと割り当てが無い）。
+    """
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = "Kiosk"
+    obj.data.name = "Kiosk"
+    obj.data.materials.append(bpy.data.materials.new("KioskTileFbx"))
+    obj.data.materials.append(bpy.data.materials.new("KioskFrameFbx"))
+    polygons = obj.data.polygons
+    for polygon in polygons[len(polygons) // 2 :]:
+        polygon.material_index = 1
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_booth_fbx(path: Path) -> None:
+    """メッシュが 2 つの FBX（Issue #31。表が無いと、中の Renderer への上書きの対象を決められない）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("BoothFbx")
+    for name, z in (("BoothWall", 0.0), ("BoothRoof", 1.5)):
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, z))
+        obj = bpy.context.active_object
+        obj.name = name
+        obj.data.name = name
+        obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+# Renderer の fileID は階層パスのハッシュで、計算式は分かっていない（Issue #31）。値は Shibuya.unitypackage の事例のもの
+KIOSK_RENDERER = -7511558181221131132
+BOOTH_RENDERER = 3713382542316546517
+
+
 def mod(target, guid, path, value="", reference="{fileID: 0}"):
     return (
         f"    - target: {{fileID: {target}, guid: {guid}, type: 3}}\n"
@@ -342,6 +383,24 @@ def main() -> None:
         mesh_renderer(112, 113, 110, lod_model, mats["ProbeMat"], mesh_file_id("Tower_LOD1")),
     ])).encode(), prefab_meta(lod_prefab_path))
 
+    # Renderer が 1 つの FBX をそのまま置き、中の Renderer の m_Materials[0] だけを上書きした prefab（#109）。
+    # .meta は新しい形式で、表も externalObjects も無い
+    red = f"{{fileID: 2100000, guid: {mats['ProbeRed']}, type: 2}}"
+    fbx_prefabs = {}
+    for name, export, renderer in (("Kiosk", export_kiosk_fbx, KIOSK_RENDERER), ("Booth", export_booth_fbx, BOOTH_RENDERER)):
+        path = tmp / f"{name.lower()}.fbx"
+        export(path)
+        fbx_model_path = f"Assets/Synthetic/Models/{name}.fbx"
+        fbx_model = add(fbx_model_path, path.read_bytes(), model_meta(guid_of(fbx_model_path), {}))
+        fbx_prefab_path = f"Assets/Synthetic/Prefabs/{name}.prefab"
+        fbx_prefabs[name] = add(fbx_prefab_path, (HEADER + "".join([
+            instance(100, fbx_model, 0, [
+                mod(ROOT_GAME_OBJECT, fbx_model, "m_Name", name),
+                mod(renderer, fbx_model, "m_Materials.Array.data[0]", "", red),
+            ]),
+            stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, fbx_model, 100),
+        ])).encode(), prefab_meta(fbx_prefab_path))
+
     # 点光源だけの prefab。シーンで強さを上書きして置く
     lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
     lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
@@ -405,6 +464,17 @@ def main() -> None:
         instance(5200, lod_prefab, 0, [
             mod(11, lod_prefab, "m_LocalPosition.x", -6),
             mod(10, lod_prefab, "m_Name", "TowerRoot"),
+        ]),
+        # FBX をそのまま置いた prefab の中の Renderer へのマテリアルの上書き（#109 / #31）
+        instance(5300, fbx_prefabs["Kiosk"], 0, [
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Kiosk"], "m_LocalPosition.x", 8),
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Kiosk"], "m_LocalPosition.z", 8),
+            mod(ROOT_GAME_OBJECT ^ 100, fbx_prefabs["Kiosk"], "m_Name", "KioskRoot"),
+        ]),
+        instance(5400, fbx_prefabs["Booth"], 0, [
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Booth"], "m_LocalPosition.x", -8),
+            mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Booth"], "m_LocalPosition.z", 8),
+            mod(ROOT_GAME_OBJECT ^ 100, fbx_prefabs["Booth"], "m_Name", "BoothRoot"),
         ]),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),

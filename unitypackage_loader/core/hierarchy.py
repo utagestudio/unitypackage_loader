@@ -74,6 +74,10 @@ MAX_NESTING = 16  # PrefabInstance をたどる深さの上限
 MAX_NODES = 200_000  # 1 つの階層に展開する Transform の上限（細工された巨大なシーンへの備え）
 MAX_SLOTS = 1024
 _MASK = 0x7FFF_FFFF_FFFF_FFFF
+_MODEL_ROOT_UIDS = {MODEL_ROOT_GAME_OBJECT & _MASK, MODEL_ROOT_TRANSFORM & _MASK}
+# モデルの中への上書きのうち、名前を引けなかったが、すべて同じ 1 つの Renderer を指すマテリアルの上書きを記録する名前。
+# 読み込み側が、モデルのメッシュのオブジェクトが 1 つだけならそれに当てる（#109）。Unity・Blender の名前には現れない
+SOLE_RENDERER = "\x00sole-renderer"
 _MATERIAL_PATH = re.compile(r"m_Materials\.Array\.data\[(\d+)\]")
 _TRS_PATH = re.compile(r"m_Local(Position|Rotation|Scale)\.([xyzw])")
 _TRS_FIELDS = {"Position": "position", "Rotation": "rotation", "Scale": "scale"}
@@ -292,6 +296,7 @@ class Node:
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
     components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
     # モデルの PrefabInstance で、古い形式の .meta（fileIDToRecycleName）から名前を引けた中への上書き
+    # （名前を引けず、すべて同じ Renderer を指すマテリアルの上書きは ``SOLE_RENDERER`` の名前で入る。#109）
     model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
     model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
 
@@ -560,6 +565,8 @@ class Expander:
         # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
         # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
         collapsed = self._collapsed.get(source) if is_model else None
+        # 名前を引けなかったマテリアルの上書き。Renderer の fileID → [(スロット番号, .mat の GUID)]（#109）
+        unnamed: dict[int, list[tuple[int, str | None]]] = {}
         for file_id, guid, path, value, reference in instance.modifications:
             uid = target(file_id, guid)
             if uid is None:
@@ -570,9 +577,25 @@ class Expander:
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
                 continue
+            material = _MATERIAL_PATH.fullmatch(path)
+            if material and uid not in _MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS:
+                unnamed.setdefault(uid, []).append((int(material.group(1)), ref_guid(reference)))
+                continue
             h.unresolved_overrides += 1
-            if _MATERIAL_PATH.fullmatch(path) or path == "m_Materials.Array.size":
+            if material or path == "m_Materials.Array.size":
                 h.unresolved_material_overrides += 1
+        if len(unnamed) == 1 and root_key in h.nodes:
+            # 対象が 1 つなら、モデルの Renderer が 1 つだけのときにそれと確定する（判定は読み込み側。#109）
+            slots = h.nodes[root_key].model_materials.setdefault(SOLE_RENDERER, [])
+            for index, material_guid in next(iter(unnamed.values())):
+                if index >= len(slots):
+                    slots.extend([None] * (index + 1 - len(slots)))
+                slots[index] = material_guid
+        else:
+            # 対象が複数あれば Renderer も複数あり、どれがどれかを決められない（#31）
+            pending = sum(len(v) for v in unnamed.values())
+            h.unresolved_overrides += pending
+            h.unresolved_material_overrides += pending
         return scope
 
 
