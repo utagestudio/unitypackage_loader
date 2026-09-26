@@ -245,9 +245,19 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
                 ─(Alpha)─▶ [Math > cutoff]* ─────────▶ Alpha        *Cutout 時のみ
 [TexImage normal (Non-Color)] ─▶ [Normal Map, strength=_BumpScale] ─▶ Normal
 [TexImage emission] × _EmissionColor ─▶ Emission Color (Strength 1)
-Metallic = _Metallic, Roughness = 1 − _Smoothness（_Glossiness）
+Metallic = _Metallic, Roughness = 1 − Smoothness（URP は _Smoothness、Built-in Standard は _Glossiness）
+[TexImage _MetallicGlossMap] ─(R)─▶ Metallic
+                             ─(A)─▶ [Math × 倍率]* ─▶ [1 − x] ─▶ Roughness   *倍率 ≠ 1 のときだけ
 _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿入
 ```
+
+Smoothness をマップ（`_MetallicGlossMap`）の A から取るときは、Unity と同じく A に倍率を掛ける（Issue #112）。倍率は URP Lit が `_Smoothness`、
+Built-in Standard が `_GlossMapScale`（`core/profiles/standard.py` の `_smoothness`。中間表現の `smoothness_scale`）。`_SmoothnessTextureChannel` が 1 なら、
+マップの代わりにベース画像の A を使う（`smoothness_from_albedo`。マップが無いときも同じ）。URP から変換したマテリアルには Standard の
+`_Glossiness` / `_GlossMapScale` が残っていることがあるので、URP（`urp` ファミリーか、`_WorkflowMode` を持つもの）ではそれらを見ない。
+以前は倍率を掛けておらず、アルファの無いマップ（Unreal の ORM マスクをそのまま割り当てたものなど）では Roughness が 0 になり、Unity では艶の無い面が鏡面になっていた。
+
+透明度も同じく、URP では Standard の残りより URP のプロパティを先に見る（Issue #112）。Standard / URP のプロファイルの `_alpha_mode` は、Built-in Standard の `_Mode`（0 不透明 / 1 Cutout / 2 Fade / 3 Transparent）、URP Lit の `_Surface`（1 なら半透明）と `_AlphaClip`（1 なら cutout）、HDRP Lit の `_SurfaceType` / `_AlphaCutoffEnable` の順に見るが、URP（`_is_urp`: シェーダー表で `urp` ファミリーのもの。表に無いシェーダーは`_WorkflowMode` / `_Surface` を持つもの）では `_Surface` / `_AlphaClip` を最初に見る。以前は Standard から変換したときの `_Mode: 0` が残った半透明＋アルファクリップの URP Lit（Shibuya の横断歩道のデカール）が不透明になり、ベース画像の A を Alpha につないでいなかった。
 
 **Unlit (Emission)** — 参考 .blend と同じ構成
 ```

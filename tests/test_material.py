@@ -343,6 +343,61 @@ def hdrp_mat_yaml(shader, emissive=(0, 0, 0, 1), ldr=(0, 0, 0, 1), intensity=1, 
     )
 
 
+# URP Lit に Standard の値が残ったもの（#112: Shibuya の横断歩道のデカール）。Smoothness はマップの A × _Smoothness
+URP_MASKED = mat_yaml(
+    "Crossing", "{fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}",
+    tex=[("_BaseMap", TEX_A, (1, 1), (0, 0)), ("_MetallicGlossMap", TEX_N, (1, 1), (0, 0))],
+    floats=[("_Surface", 0), ("_WorkflowMode", 1), ("_Metallic", 0), ("_Smoothness", 0.067), ("_Glossiness", 0.5),
+            ("_GlossMapScale", 1), ("_SmoothnessTextureChannel", 0)],
+    colors=[("_BaseColor", (1, 1, 1, 1))],
+    keywords=["_METALLICSPECGLOSSMAP"],
+)
+
+
+class SmoothnessTests(unittest.TestCase):
+    """Smoothness の倍率と元（#112）。"""
+
+    def test_urp_uses_smoothness_as_map_scale_and_ignores_standard_leftovers(self):
+        n = normalize_material(parse_material(URP_MASKED))
+        self.assertEqual(n.family, "urp")
+        self.assertAlmostEqual(n.smoothness_scale, 0.067)
+        self.assertAlmostEqual(n.roughness, 0.933)  # マップが無いときの値も _Glossiness ではなく _Smoothness
+        self.assertFalse(n.smoothness_from_albedo)
+
+    def test_standard_uses_gloss_map_scale(self):
+        text = STANDARD_CUTOUT.replace("    - _BumpScale: 1\n", "    - _BumpScale: 1\n    - _GlossMapScale: 0.15\n")
+        n = normalize_material(parse_material(text))
+        self.assertEqual(n.family, "standard")
+        self.assertAlmostEqual(n.smoothness_scale, 0.15)
+        self.assertAlmostEqual(n.roughness, 0.2)  # _Glossiness（マップが無いときの値）
+        self.assertAlmostEqual(normalize_material(parse_material(STANDARD_CUTOUT)).smoothness_scale, 1.0)  # 既定は 1
+
+    def test_urp_alpha_ignores_leftover_standard_mode(self):
+        # 半透明＋アルファクリップの URP Lit に、Standard の _Mode: 0（不透明）が残っている（#112: 横断歩道のデカール）
+        text = URP_MASKED.replace("    - _Surface: 0\n", "    - _Surface: 1\n    - _AlphaClip: 1\n    - _Cutoff: 0.439\n    - _Mode: 0\n")
+        n = normalize_material(parse_material(text))
+        self.assertEqual(n.alpha_mode, "cutout")
+        self.assertTrue(n.alpha_from_texture)
+        self.assertAlmostEqual(n.alpha_cutoff, 0.439)
+        blend = normalize_material(parse_material(text.replace("_AlphaClip: 1", "_AlphaClip: 0")))
+        self.assertEqual(blend.alpha_mode, "blend")
+        # Built-in Standard は今までどおり _Mode で決める
+        self.assertEqual(normalize_material(parse_material(STANDARD_CUTOUT)).alpha_mode, "cutout")
+
+    def test_albedo_channel(self):
+        text = URP_MASKED.replace("_SmoothnessTextureChannel: 0", "_SmoothnessTextureChannel: 1")
+        self.assertTrue(normalize_material(parse_material(text)).smoothness_from_albedo)
+
+    def test_round_trip_and_old_json(self):
+        n = normalize_material(parse_material(URP_MASKED))
+        again = NormalizedMaterial.from_dict(n.to_dict())
+        self.assertAlmostEqual(again.smoothness_scale, 0.067)
+        data = n.to_dict()
+        del data["smoothness_scale"], data["smoothness_from_albedo"]  # 1.9.1 以前に保存した中間表現
+        old = NormalizedMaterial.from_dict(data)
+        self.assertEqual((old.smoothness_scale, old.smoothness_from_albedo), (1.0, False))
+
+
 class HdrpEmissionTests(unittest.TestCase):
     def test_white_emission_color_is_ignored(self):
         for shader in (HDRP_LIT, HDRP_GRAPH):

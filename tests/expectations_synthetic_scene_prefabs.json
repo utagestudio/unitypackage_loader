@@ -23,7 +23,7 @@
       "prefab": "Assets/Synthetic/Prefabs/Kiosk.prefab",
       "objects": 1,
       "mat_files": [
-        "",
+        "ProbeDecal.mat",
         "ProbeRed.mat"
       ]
     },
@@ -41,5 +41,20 @@
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "
+  ],
+  "material_checks": [
+    {
+      "name": "ProbeRed",
+      "smoothness_scale": 0.25
+    },
+    {
+      "name": "ProbeMat",
+      "smoothness_scale": null
+    },
+    {
+      "name": "KioskFrameFbx",
+      "alpha_mode": "cutout",
+      "smoothness_scale": null
+    }
   ]
 }

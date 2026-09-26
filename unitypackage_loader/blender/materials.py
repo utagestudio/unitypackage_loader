@@ -168,7 +168,8 @@ def build_material(
     elif mode == MODE_TOON:
         _build_toon(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts)
     else:
-        _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts)
+        base_alpha = base_node.outputs["Alpha"] if base_node is not None else None
+        _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts, base_alpha)
     return mode, warnings
 
 
@@ -181,7 +182,7 @@ def _image_for(ref: TexRef | None, images, warnings: list[str], role: str):
     return image
 
 
-def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts):
+def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, tex_infos, warnings, opts, base_alpha=None):
     bsdf = b.add("ShaderNodeBsdfPrincipled", 3)
     b.link(bsdf.outputs["BSDF"], out.inputs["Surface"])
     if color_out is not None:
@@ -196,18 +197,30 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
     bsdf.inputs["Metallic"].default_value = max(0.0, min(1.0, norm.metallic))
     bsdf.inputs["Roughness"].default_value = max(0.0, min(1.0, norm.roughness))
 
+    smoothness_out = base_alpha if norm.smoothness_from_albedo else None
     if norm.metallic_tex is not None:
         img = _image_for(norm.metallic_tex, images, warnings, "metallic")
-        node = b.image(img, tex_infos.get(norm.metallic_tex.guid), 1, "Metallic (R) / Smoothness (A)")
+        label = "Metallic (R)" if norm.smoothness_from_albedo else "Metallic (R) / Smoothness (A)"
+        node = b.image(img, tex_infos.get(norm.metallic_tex.guid), 1, label)
         if mapping_out is not None:
             b.link(mapping_out, node.inputs["Vector"])
         sep = b.add("ShaderNodeSeparateColor", 2, label="Metallic R")
         b.link(node.outputs["Color"], sep.inputs["Color"])
         b.link(sep.outputs["Red"], bsdf.inputs["Metallic"])
-        inv = b.add("ShaderNodeMath", 2, label="Roughness = 1 - Smoothness(A)")
+        if not norm.smoothness_from_albedo:
+            smoothness_out = node.outputs["Alpha"]
+    if smoothness_out is not None:
+        # Unity の Smoothness は A × 倍率（URP の _Smoothness / Standard の _GlossMapScale。#112）
+        if abs(norm.smoothness_scale - 1.0) > 1e-4:
+            mul = b.add("ShaderNodeMath", 2, label=f"Smoothness × {norm.smoothness_scale:g}")
+            mul.operation = "MULTIPLY"
+            mul.inputs[1].default_value = norm.smoothness_scale
+            b.link(smoothness_out, mul.inputs[0])
+            smoothness_out = mul.outputs[0]
+        inv = b.add("ShaderNodeMath", 2, label="Roughness = 1 - Smoothness")
         inv.operation = "SUBTRACT"
         inv.inputs[0].default_value = 1.0
-        b.link(node.outputs["Alpha"], inv.inputs[1])
+        b.link(smoothness_out, inv.inputs[1])
         b.link(inv.outputs[0], bsdf.inputs["Roughness"])
 
     if opts.use_normal_maps and norm.normal_tex is not None:
