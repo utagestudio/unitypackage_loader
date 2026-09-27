@@ -130,6 +130,17 @@ class BuiltinLightTest(unittest.TestCase):
         self.assertEqual((area.type, area.shape, area.size, area.size_y, area.baked_only), ("AREA", "RECTANGLE", 2, 0.5, True))
         self.assertTrue(area.notes)
 
+    def test_hdrp_area_light_is_nits(self):
+        # HDRP の面光源の m_Intensity は nits。ほかのパイプラインと同じ式に 683 lm/W の換算を掛ける（#129: UnityJapanOffice の
+        # 7445.84 nits・2 × 0.5 の Rectangle が 683 倍の約 11700 W になり、室内が真っ白になった）
+        body = light(m_Type=3, m_Intensity=7445.84, m_AreaSize={"x": 2, "y": 0.5})
+        hdrp = convert_light(body, PIPELINE_HDRP)
+        self.assertAlmostEqual(hdrp.energy, 7445.84 / 683 * 1.0 * math.pi, places=4)
+        self.assertAlmostEqual(convert_light(body, PIPELINE_URP).energy / hdrp.energy, 683, places=4)
+        self.assertTrue(any("nits" in note for note in hdrp.notes))
+        disc = convert_light(light(m_Type=4, m_Intensity=683, m_AreaSize={"x": 2, "y": 2}), PIPELINE_HDRP)
+        self.assertAlmostEqual(disc.energy, math.pi * 1.0 * math.pi, places=4)  # 1 nit 相当 × 半径 1 の円 × π
+
     def test_broken_values(self):
         broken = convert_light({"m_Type": "x", "m_Intensity": float("nan"), "m_Color": 3, "m_Shadows": None}, PIPELINE_BUILTIN)
         self.assertEqual(broken.type, "POINT")
