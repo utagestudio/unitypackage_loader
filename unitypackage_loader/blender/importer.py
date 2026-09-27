@@ -38,6 +38,7 @@ from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
 from ..core.scene_import import lod_warning, parts_to_hide, scene_warnings
+from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
 from ..core.units import (
     UNIT_PREFABS,
     UNIT_SCENES,
@@ -265,6 +266,33 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
         return TextureImporterInfo()
 
 
+class _ShaderDeclarations:
+    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。"""
+
+    def __init__(self, pkg: UnityPackage, warn: Callable[[str], None]):
+        self._pkg = pkg
+        self._warn = warn
+        self._cache: dict[str, frozenset[str] | None] = {}
+
+    def get(self, guid: str | None) -> frozenset[str] | None:
+        if not guid:
+            return None
+        if guid not in self._cache:
+            self._cache[guid] = self._read(guid)
+        return self._cache[guid]
+
+    def _read(self, guid: str) -> frozenset[str] | None:
+        entry = self._pkg.get(guid)
+        if entry is None or not entry.has_asset or entry.ext not in SHADER_SOURCE_EXTS:
+            return None
+        try:
+            return declared_properties(self._pkg.read_asset(guid), entry.ext) or None
+        except Exception as exc:  # noqa: BLE001 - 補助データなので、宣言を使わずに続ける（#69）
+            self._warn(f"could not read the properties of {entry.pathname}: {exc}")
+            _log_exception(f"could not read the properties of {entry.pathname}")
+            return None
+
+
 def prepare_package(
     filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False
 ) -> PreparedPackage:
@@ -277,10 +305,11 @@ def prepare_package(
 
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}
+    declared = _ShaderDeclarations(pkg, warnings.append)
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
-            norm = normalize_material(umat, table)
+            norm = normalize_material(umat, table, declared.get(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warnings.append(f"could not parse {entry.pathname}: {exc}")
             _log_exception(f"could not parse {entry.pathname}")

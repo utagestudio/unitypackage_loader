@@ -381,6 +381,7 @@ unitypackage_loader/
 │   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
+│   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
@@ -540,6 +541,23 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    - Poiyomi: `_MainTex` と `_Poi...` 系プロパティ
    - VRChat Toon Standard: `_ShadowBoost` `_MinBrightness` `_MetallicStrength` と `_Ramp` スロット（Standard の残骸を持つので Standard より先に判定）
 3. どれにも該当しない → `generic`（`_MainTex`/`_BaseMap`/`_Color`/`_BumpMap`/`_EmissionMap`/`_Cutoff` の一般名だけで最善努力）
+
+**パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
+
+シェーダーを切り替えたマテリアルには、前のシェーダーのプロパティが残る（Unity は切り替えてもプロパティを消さない）。Standard / URP / HDRP の名前を決まった順に読むと、
+いまのシェーダーが使わない残り（黒い `_Color`、`_Metallic: 1`、`_Mode` など）を拾ってしまう。どの名前が本物かはシェーダーによって違う
+（UnityJapanOffice の Shader Graph の多くは `_MainTex` / `_Color` を公開していて、HDRP/Lit から切り替えたときの `_BaseColorMap` / `_BaseColor` のほうが残り）ので、
+シェーダーの定義がパッケージにあるときは、それが宣言するプロパティだけを残してから判定と正規化をする（`core/shader_source.py`、`normalize_material(..., declared=...)`）。
+
+- `.shader`: `Properties { ... }` に並んだ名前（コメントは除く）。
+- `.shadergraph`: プロパティとキーワードの参照名（`m_OverrideReferenceName`、空なら `m_DefaultReferenceName`）。古い形式（1 つの JSON。`m_SerializedProperties` の `JSONnodeData` が JSON の文字列）と
+  新しい形式（JSON のオブジェクトを並べたもの）の両方を読む。これに、URP / HDRP のターゲットがグラフに無くても足す描画設定（`_Surface` / `_SurfaceType` / `_AlphaClip` /
+  `_AlphaCutoffEnable` / `_Cull` / `_CullMode` / ブレンド係数など。`GRAPH_TARGET_PROPERTIES`）を加える。ターゲットが常に足す `_EmissionColor`（HDRP ではベイク用の白）は加えない。
+- シェーダー表で分かるシェーダー（lilToon、Poiyomi、Standard など）には当てない。各プロファイルがすでに自分の名前を読んでいるため。
+  宣言が 1 つも取れないとき（定義が読めない、`Properties` が無い）も当てない。読めない定義は警告を出して、そのシェーダーの宣言を使わずに続ける。
+- 外したプロパティ名は `extras["undeclared_properties"]`（`unity_props`）に残す。
+- シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないグラフは、残りで黒くなる代わりに白（テクスチャ無し）になる。
+  表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
 
 **lilToon プロファイルの変換規則（サンプルで確認した値）**
 
