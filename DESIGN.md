@@ -100,8 +100,19 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - スポット: `spot_size` = 外側の角度、`spot_blend` = 1 − 内側 / 外側（Built-in は内側の角度を使わないが同じ式で近似）
 - 面光源: Unity ではベイク専用で測れない。Blender の面光源は近くで 画素 ≈ P / (面積·π) なので、P = I·面積·π（近似。警告に出す）
 - HDRP: 物理単位（lux / lumen）を 683 lm/W で換算する近似（未計測。警告に出す）
-- パイプラインはマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）で決める。使うのはシェーダー表で分かったマテリアルだけで、
-  表に無いシェーダーを指紋で URP と読んだもの（Shader Graph や URP Lit 派生）は手掛かりにしない（#116。以前はそれらを Standard の系統として読んでいたので、結果は同じ）
+- パイプラインはパッケージ単位で決める（`core/lights.decide_pipeline`、Issue #120）。
+  1. シーン・prefab に URP / HDRP のライト・カメラの追加データ（`UniversalAdditionalLightData` / `UniversalAdditionalCameraData` /
+     `HDAdditionalLightData` / `HDAdditionalCameraData`。MonoBehaviour の `m_Script` の GUID は Unity 6000.6 同梱の URP / HDRP 17.6 の `.cs.meta`）が
+     あれば、そのパイプライン。マテリアルは Shader Graph ばかりだとシェーダー表で分からず、Built-in の Standard のまま移したアセットもあるので、ライトの手掛かりを優先する。
+     手掛かりは走査でメモリに読んだシーン・prefab のテキストから探す（再走査しない。Force Binary のアセットは GUID がバイト列なので見ない）。
+  2. 無ければマテリアルのシェーダーの系統（`hdrp` → HDRP、`urp` → URP、それ以外は Built-in）。使うのはシェーダー表で分かったマテリアルだけで、
+     表に無いシェーダーを指紋で URP と読んだもの（Shader Graph や URP Lit 派生）は手掛かりにしない（#116）。
+  - ライトの手掛かりとマテリアルの手掛かり（表で `urp` / `hdrp` / `standard` / `legacy` と分かったもの）が食い違うとき、URP と HDRP の両方のライトの追加データがあるとき
+    （マテリアルが示す方、無ければアセットの多い方を使う）は警告に出す。換算に使ったパイプラインと根拠（`lights` / `materials` / `default`）は、ライトのカスタムプロパティ
+    `unity_render_pipeline` / `unity_render_pipeline_source` に残す。
+  - 手元の実パッケージでは、Shibuya（URP）の 6 つ、UnityJapanOffice（HDRP）の 7 つのシーン・prefab に追加データがあり、Built-in のもの（Japanese Street / Apartment、
+    Gothic Lights）には無い。
+  - URP の物理ライト単位（Unity の 2026 年の方針で予定）は、URP 17.6 にはまだ無い。入ったら、単位ごとに換算を分ける（#128）
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
 **Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、マテリアルの上書きの件数を警告に出す（Issue #31）。マテリアルの上書きがすべて同じ target を指し、モデルのメッシュが 1 つなら、その Renderer に当てる（上記「Renderer が 1 つのモデルの中への上書き」。Issue #109）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
@@ -783,7 +794,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。
-- URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。
+- URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。 同じスクリプトが出す `synthetic_urp_standard`（マテリアルのシェーダーだけを Built-in の Standard にしたもの）を `tests/expectations_synthetic_urp_standard.json` で確かめ、ライトの追加データから URP として換算し、食い違いを警告することを見る（Issue #120）。
 - HDRP は、`tests/make_synthetic_hdrp_package.py` の合成パッケージを `tests/expectations_synthetic_hdrp.json` で確認する（Issue #119。ライトの単位が HDRP になるので別のパッケージにしてある）。どの .mat にも互換用の `_Color`（黒）/ `_MainTex` と Standard の `_Mode` / `_Glossiness` を残し、マスクマップと Remap（Principled の Metallic と Roughness がつながり、倍率とオフセットが入ること）、ノーマルマップ、両面、Specular Color、半透明、HDRP/Unlit、LayeredLit のレイヤー 0、シーンの平行光源（lux）と点光源（lumen）の換算を見る。単体テストは `tests/test_profiles_hdrp.py`。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/unitypackages/` のサンプルをインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。

@@ -10,6 +10,7 @@ HDRP の GUID のマテリアルがあるとパッケージ全体のライトが
 - HdrpLayered.fbx（円錐）: HdrpLayeredMat（HDRP/LayeredLit。レイヤー 0 を読む）
 
 Assets/Synthetic/Scenes/Hdrp.unity に 3 つの FBX を並べ、平行光源と点光源を 1 つずつ置く（HDRP の強さの換算を確かめる）。
+ライトには HDRP の追加データ（HDAdditionalLightData）を付ける（#120）。
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from tests.make_synthetic_scene_package import (  # noqa: E402
     instance,
     light_doc,
     mod,
+    mono_behaviour,
     transform,
 )
 from tests.make_synthetic_urp_package import texture  # noqa: E402
@@ -40,6 +42,7 @@ from tests.make_synthetic_urp_package import texture  # noqa: E402
 HDRP_LIT = "{fileID: 4800000, guid: 6e4ae4064600d784cac1e41a9e6f2e59, type: 3}"
 HDRP_LAYERED = "{fileID: 4800000, guid: 81d02e8644315b742b154842a3a2f98c, type: 3}"
 HDRP_UNLIT = "{fileID: 4800000, guid: c4edd00ff2db5b24391a4fcb1762e459, type: 3}"
+HDRP_LIGHT_DATA = "7a68c43fe1f2a47cfa234b5eeaa98012"  # HDAdditionalLightData
 
 
 def hdrp_mat_yaml(name: str, shader: str, *, textures: str, floats: dict, colors: dict) -> str:
@@ -139,9 +142,11 @@ def main() -> None:
         game_object(8000, "Directional Light"),
         transform(8001, 8000, pos=(0, 3, 0), rot=(0.40821788, -0.23456968, 0.10938163, 0.8754261)),
         light_doc(8002, 8000, 1, intensity=100000),  # lux
+        mono_behaviour(8003, 8000, HDRP_LIGHT_DATA),
         game_object(8100, "Point Light"),
         transform(8101, 8100, pos=(2, 1, 0)),
         light_doc(8102, 8100, 2, intensity=600, light_range=5),  # lumen
+        mono_behaviour(8103, 8100, HDRP_LIGHT_DATA),
     ]
     add(scene_path, (HEADER + "".join(docs)).encode(),
         f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")

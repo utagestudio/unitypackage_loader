@@ -192,6 +192,14 @@ def light_doc(file_id, go, light_type, intensity=1, light_range=10, spot=30, inn
     )
 
 
+def mono_behaviour(file_id, go, script_guid):
+    """スクリプトのコンポーネント（URP / HDRP のライトの追加データなど。#120）。"""
+    return (
+        f"--- !u!114 &{file_id}\nMonoBehaviour:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        f"  m_Script: {{fileID: 11500000, guid: {script_guid}, type: 3}}\n"
+    )
+
+
 def camera_doc(file_id, go, fov=60, orthographic=0, size=5, near=0.3, far=1000, mode=1, focal=50, sensor=(36, 24), gate=2):
     return (
         f"--- !u!20 &{file_id}\nCamera:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  serializedVersion: 2\n"

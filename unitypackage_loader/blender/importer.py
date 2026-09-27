@@ -26,7 +26,7 @@ from ..core.hierarchy import (
     summarize,
 )
 from ..core.hierarchy import components as scene_components
-from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light, detect_pipeline
+from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light, decide_pipeline, pipelines_in_assets
 from ..core.fbx_units import read_unit_scale
 from ..core.transform import unity_to_blender
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
@@ -158,7 +158,8 @@ class PreparedPackage:
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
-    pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
+    pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
+    pipeline_source: str = "default"  # lights（ライト・カメラの追加データ）/ materials / default
     _scenes: list[SceneSummary] | None = field(default=None, repr=False)
     _expander: Expander | None = field(default=None, repr=False)  # prefab の展開結果を持つ（シーンの展開で使い回す）
 
@@ -364,14 +365,29 @@ def prepare_package(
         if tables:
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
+    # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
+    # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
+    pipeline = decide_pipeline(
+        (n.family for n in normalized.values() if n.shader_name),
+        pipelines_in_assets(_asset_bytes(pkg, pkg.scenes() + pkg.prefabs())),
+    )
+    if pipeline.warning:
+        warnings.append(pipeline.warning)
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
         prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
-        # シェーダー表で分かったものだけで決める。指紋で URP / HDRP と読んだ表に無いシェーダーは、
-        # パッケージのパイプラインの手掛かりにしない（#116。以前は Standard の系統として読んでいた）
-        pipeline=detect_pipeline(n.family for n in normalized.values() if n.shader_name),
+        pipeline=pipeline.pipeline,
+        pipeline_source=pipeline.source,
     )
+
+
+def _asset_bytes(pkg: UnityPackage, entries: list[AssetEntry]):
+    """走査でメモリに読んだアセットの中身。手掛かりを探すだけなので、キャッシュに無いもののために再走査はしない。"""
+    for entry in entries:
+        data = pkg.cached_asset(entry.guid)
+        if data is not None:
+            yield data
 
 
 def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str, dict[int, str]]]:
@@ -1183,6 +1199,7 @@ class _ImportSession:
                 obj = make_light(component.name, values)
                 obj["unity_light"] = json_text(component.body)
                 obj["unity_render_pipeline"] = self.prepared.pipeline
+                obj["unity_render_pipeline_source"] = self.prepared.pipeline_source
                 baked_lights += values.baked_only
                 light_notes.update(values.notes)
                 self.report.lights += 1

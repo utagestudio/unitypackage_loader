@@ -12,7 +12,9 @@ from unitypackage_loader.core.lights import (
     PIPELINE_URP,
     convert_camera,
     convert_light,
+    decide_pipeline,
     detect_pipeline,
+    pipelines_in_assets,
 )
 from unitypackage_loader.core.transform import multiply, trs, unity_to_blender
 
@@ -35,6 +37,52 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(detect_pipeline(["liltoon", "standard"]), PIPELINE_BUILTIN)
         self.assertEqual(detect_pipeline(["urp", "liltoon"]), PIPELINE_URP)
         self.assertEqual(detect_pipeline(["urp", "hdrp"]), PIPELINE_HDRP)
+
+
+# シーンのライトに付く追加データ（MonoBehaviour）。GUID は URP / HDRP 17.6 の UniversalAdditionalLightData / HDAdditionalLightData
+URP_LIGHT_DATA = b"--- !u!114 &5\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: 474bcb49853aa07438625e644c072ee6, type: 3}\n"
+URP_CAMERA_DATA = b"--- !u!114 &6\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}\n"
+HDRP_LIGHT_DATA = b"--- !u!114 &7\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: 7a68c43fe1f2a47cfa234b5eeaa98012, type: 3}\n"
+PLAIN = b"--- !u!108 &3\nLight:\n  m_Intensity: 1\n"
+
+
+class PipelineDecisionTest(unittest.TestCase):
+    """ライト・カメラの追加データからのパイプラインの判定（#120）。"""
+
+    def test_count_assets_with_light_data(self):
+        self.assertEqual(pipelines_in_assets([PLAIN + URP_LIGHT_DATA, URP_CAMERA_DATA, PLAIN, HDRP_LIGHT_DATA]),
+                         {PIPELINE_URP: 2, PIPELINE_HDRP: 1})
+        self.assertEqual(pipelines_in_assets([PLAIN]), {})
+
+    def test_lights_win_over_missing_material_evidence(self):
+        # マテリアルが Shader Graph ばかり（表で分からない）でも、ライトの追加データで URP にする
+        decision = decide_pipeline(["liltoon"], {PIPELINE_URP: 3})
+        self.assertEqual((decision.pipeline, decision.source, decision.warning), (PIPELINE_URP, "lights", ""))
+
+    def test_agreeing_evidence(self):
+        decision = decide_pipeline(["urp", "standard"], {PIPELINE_URP: 1})
+        self.assertEqual((decision.pipeline, decision.warning), (PIPELINE_URP, ""))
+
+    def test_disagreement_warns(self):
+        # Built-in の Standard のままのマテリアルを URP のシーンに置いたもの
+        decision = decide_pipeline(["standard"], {PIPELINE_URP: 1})
+        self.assertEqual(decision.pipeline, PIPELINE_URP)
+        self.assertIn("materials say BUILTIN", decision.warning)
+        decision = decide_pipeline(["hdrp"], {PIPELINE_URP: 1})
+        self.assertIn("light data says URP", decision.warning)
+
+    def test_both_pipelines_in_one_package(self):
+        # マテリアルが示す方を選ぶ。無ければアセットの多い方
+        self.assertEqual(decide_pipeline(["hdrp"], {PIPELINE_URP: 5, PIPELINE_HDRP: 1}).pipeline, PIPELINE_HDRP)
+        decision = decide_pipeline([], {PIPELINE_URP: 5, PIPELINE_HDRP: 1})
+        self.assertEqual(decision.pipeline, PIPELINE_URP)
+        self.assertIn("both URP and HDRP", decision.warning)
+
+    def test_without_light_data_uses_materials(self):
+        self.assertEqual(decide_pipeline(["hdrp"], {}).pipeline, PIPELINE_HDRP)
+        self.assertEqual(decide_pipeline(["hdrp"], {}).source, "materials")
+        decision = decide_pipeline(["standard", "liltoon"], {})
+        self.assertEqual((decision.pipeline, decision.source), (PIPELINE_BUILTIN, "default"))
 
 
 class BuiltinLightTest(unittest.TestCase):

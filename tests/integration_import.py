@@ -405,6 +405,10 @@ def main() -> int:
                        f"expected {spec['location']}, got {[round(v, 4) for v in obj.matrix_world.translation]}")
             if "hidden" in spec:
                 c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+            # 強さの換算に使ったパイプラインと、その根拠（#120）
+            for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
     if "scene_camera" in exp:
         camera = bpy.context.scene.camera
         c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])

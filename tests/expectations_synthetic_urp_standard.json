@@ -1,0 +1,37 @@
+{
+  "options": {
+    "material_mode": "AUTO",
+    "models": "ALL",
+    "unit": "SCENES"
+  },
+  "errors": 0,
+  "scenes": {
+    "count": 1
+  },
+  "materials": {
+    "count": 8,
+    "families": [
+      "standard"
+    ]
+  },
+  "warnings_contain": [
+    "render pipeline: light data says URP but the materials say BUILTIN; converting light intensities as URP"
+  ],
+  "light_count": 2,
+  "lights": [
+    {
+      "name": "Directional Light",
+      "type": "SUN",
+      "energy": 6.2832,
+      "pipeline": "URP",
+      "pipeline_source": "lights"
+    },
+    {
+      "name": "Point Light",
+      "type": "POINT",
+      "energy": 78.9568,
+      "pipeline": "URP",
+      "pipeline_source": "lights"
+    }
+  ]
+}
