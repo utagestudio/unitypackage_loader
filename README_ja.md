@@ -75,6 +75,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 パッケージに選べるシーン・prefab・モデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
 上部で読み込む単位を選び、一覧で読み込むものにチェックを入れます。
+Scenes は、シーンをまとめて読み込むと建物やライトが重なりやすいので、最初の読み込めるシーンだけに既定でチェックが入ります（Prefabs と Models はすべて）。
 
 - **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
   モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
