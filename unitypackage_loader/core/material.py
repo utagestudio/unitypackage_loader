@@ -259,6 +259,10 @@ class NormalizedMaterial:
     # Unity は Smoothness = A × 倍率（URP は _Smoothness、Built-in Standard は _GlossMapScale）。元が無ければ ``roughness`` を使う（#112）
     smoothness_scale: float = 1.0
     smoothness_from_albedo: bool = False  # _SmoothnessTextureChannel = 1（Smoothness をアルベドの A から取る）
+    # スペキュラーの色（真上から見た反射率 F0。Unity の Specular ワークフローと Simple Lit の _SpecColor）。None なら Blender の既定（IOR 1.5）。
+    # ``specular_tex`` があれば F0 = その RGB × 色で、Smoothness の元（metallic_tex もアルベドも使わないとき）はその A（#117）
+    specular_color: Color | None = None
+    specular_tex: TexRef | None = None
     occlusion_tex: TexRef | None = None
     cull_backface: bool = True
     uv_scale: tuple[float, float] = (1.0, 1.0)
@@ -276,7 +280,7 @@ class NormalizedMaterial:
     def texture_refs(self) -> list[TexRef]:
         refs = [
             t
-            for t in (self.base_color_tex, self.normal_tex, self.emission_tex, self.metallic_tex, self.occlusion_tex)
+            for t in (self.base_color_tex, self.normal_tex, self.emission_tex, self.metallic_tex, self.specular_tex, self.occlusion_tex)
             if t is not None
         ]
         return refs
@@ -288,7 +292,7 @@ class NormalizedMaterial:
     # ---- JSON 往復（カスタムプロパティへの保存と再構築用） ----
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("base_color_tex", "normal_tex", "emission_tex", "metallic_tex", "occlusion_tex"):
+        for key in ("base_color_tex", "normal_tex", "emission_tex", "metallic_tex", "specular_tex", "occlusion_tex"):
             ref = getattr(self, key)
             data[key] = None if ref is None else {"guid": ref.guid, "scale": list(ref.scale), "offset": list(ref.offset)}
         data.pop("warnings", None)
@@ -311,6 +315,8 @@ class NormalizedMaterial:
                 kwargs[key] = _toon_value(_TOON_TYPES[key], value)
             elif key in ("base_color", "emission_color", "uv_scale", "uv_offset"):
                 kwargs[key] = tuple(value)
+            elif key == "specular_color":
+                kwargs[key] = None if value is None else tuple(value)
             else:
                 kwargs[key] = value
         if not any(key in data for key in _TOON_TYPES):
