@@ -1,5 +1,5 @@
 {
-  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py.",
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py. URP entries were collected from the .shader.meta files of com.unity.render-pipelines.universal 17.6 bundled with Unity 6000.6; their name selects the rule set in profiles/urp.py. HDRP entries were collected the same way from com.unity.render-pipelines.high-definition 17.6 (rule sets in profiles/hdrp.py).",
   "builtin_guid": "0000000000000000f000000000000000",
   "builtin_file_ids": {
     "46": {
@@ -523,17 +523,48 @@
       "family": "urp",
       "name": "Universal Render Pipeline/Unlit",
       "lighting": "unlit",
-      "verified": false
+      "verified": true
     },
     "8d2bb70cbf9db8d4da26e15b26e74248": {
       "family": "urp",
       "name": "Universal Render Pipeline/Simple Lit",
-      "verified": false
+      "verified": true
+    },
+    "ee7e4c9a5f6364b688a332c67fc32cca": {
+      "family": "urp",
+      "name": "Universal Render Pipeline/Complex Lit",
+      "verified": true
+    },
+    "0ca6dca7396eb48e5849247ffd444914": {
+      "family": "urp",
+      "name": "Universal Render Pipeline/Baked Lit",
+      "verified": true
     },
     "6e4ae4064600d784cac1e41a9e6f2e59": {
       "family": "hdrp",
       "name": "HDRP/Lit",
-      "verified": false
+      "verified": true
+    },
+    "756bac9090102564582875f4c7e30202": {
+      "family": "hdrp",
+      "name": "HDRP/LitTessellation",
+      "verified": true
+    },
+    "81d02e8644315b742b154842a3a2f98c": {
+      "family": "hdrp",
+      "name": "HDRP/LayeredLit",
+      "verified": true
+    },
+    "eab0538d9d5746246806a9611c04ac4d": {
+      "family": "hdrp",
+      "name": "HDRP/LayeredLitTessellation",
+      "verified": true
+    },
+    "c4edd00ff2db5b24391a4fcb1762e459": {
+      "family": "hdrp",
+      "name": "HDRP/Unlit",
+      "lighting": "unlit",
+      "verified": true
     },
     "1a97144e4ad27a04aafd70f7b915cedb": {
       "family": "mtoon",

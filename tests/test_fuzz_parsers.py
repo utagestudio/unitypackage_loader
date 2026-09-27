@@ -14,7 +14,9 @@ from tests import _paths  # noqa: F401
 from tests import test_hierarchy as th
 from tests import test_material as tm
 from tests import test_prefab as tp
+from tests import test_profiles_hdrp as tph
 from tests import test_profiles_toon as tpt
+from tests import test_profiles_urp as tpu
 from tests import test_profiles_vrchat_mobile as tpv
 from tests import test_shader_source as tss
 from tests.test_unity_binary import legacy_material
@@ -208,7 +210,7 @@ class ParserFuzzTest(unittest.TestCase):
     def test_materials(self):
         for mat in (
             tm.LILTOON_OPAQUE, tm.LILTOON_TRANS, tm.STANDARD_CUTOUT, tm.URP_TRANSPARENT, tm.LEGACY_EMISSION_ON,
-            tm.hdrp_mat_yaml(tm.HDRP_LIT), tpt.MTOON_LEGACY, tpt.POIYOMI, tpv.TOON_STANDARD_FULL, tpv.STANDARD_LITE_EMISSION_ON,
+            tm.hdrp_mat_yaml(tm.HDRP_LIT), tpu.urp_mat(floats=[("_Blend", 2)]), tph.hdrp_mat(tex=[("_MaskMap", "d" * 32, (1, 1), (0, 0))]), tpt.MTOON_LEGACY, tpt.POIYOMI, tpv.TOON_STANDARD_FULL, tpv.STANDARD_LITE_EMISSION_ON,
         ):
             self.fuzz("material", run_material, mat, mutate_text)
 
