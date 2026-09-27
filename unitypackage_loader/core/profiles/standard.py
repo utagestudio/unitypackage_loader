@@ -1,4 +1,4 @@
-"""Unity Standard / URP Lit / HDRP Lit、および未知シェーダー向けの一般規則。"""
+"""Unity Built-in Standard / HDRP Lit、および未知シェーダー向けの一般規則（URP Lit は urp.py）。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _EMISSION_KEYWORD_FAMILIES = ("standard", "urp")
 
 class StandardProfile(ShaderProfile):
     family = "standard"
-    aliases = ("urp", "hdrp", "legacy")
+    aliases = ("hdrp", "legacy")
     lighting = "pbr"
 
     def matches(self, mat: UnityMaterial) -> bool:
@@ -35,40 +35,21 @@ class StandardProfile(ShaderProfile):
         if mat.has("_EmissiveColor"):
             _hdrp_emission(mat, n)
         else:
-            # _EMISSION が m_InvalidKeywords にある = 現在のシェーダーに emission が無い。
-            # 以前のシェーダーの _EmissionColor が残っていても光らせない
-            emission_color = mat.color("_EmissionColor", default=BLACK)
-            emission_tex = mat.tex("_EmissionMap")
-            if "_EMISSION" in mat.invalid_keywords:
-                if emission_tex is not None or not is_black(emission_color):
-                    n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
-            elif n.family in _EMISSION_KEYWORD_FAMILIES and mat.keywords_known and "_EMISSION" not in mat.keywords:
-                # Standard / URP Lit は _EMISSION キーワードが有効なときだけ光る。発光を切っても _EmissionColor は残るので、
-                # キーワードの記述があるのに _EMISSION が無ければ光らせない（#52: 白い発光色が残った電柱が真っ白になった）
-                pass
-            elif emission_tex is not None or not is_black(emission_color):
-                n.emission_tex = emission_tex
-                n.emission_color = emission_color
+            read_emission(mat, n)
 
         n.metallic = mat.f("_Metallic", 0.0)
         n.metallic_tex = mat.tex("_MetallicGlossMap")
-        _smoothness(mat, n, info)
+        _smoothness(mat, n)
         n.occlusion_tex = mat.tex("_OcclusionMap")
         n.cull_backface = cull_backface(mat, default=True)
 
-        n.alpha_mode = self._alpha_mode(mat, info, _is_urp(mat, n, info))
+        n.alpha_mode = self._alpha_mode(mat, info)
         n.alpha_cutoff = mat.f("_Cutoff", 0.5)
         n.alpha_from_texture = n.alpha_mode != "opaque"
         return n
 
     @staticmethod
-    def _alpha_mode(mat: UnityMaterial, info: ShaderInfo | None, urp: bool = False):
-        # URP から変換したマテリアルには Standard の _Mode が残っていることがあるので、URP では _Surface を先に見る
-        # （#112: 半透明＋アルファクリップの横断歩道のデカールが、残った _Mode: 0 で不透明になっていた）
-        if urp and mat.has("_Surface"):
-            if mat.flag("_AlphaClip"):
-                return "cutout"
-            return "blend" if int(mat.f("_Surface", 0)) == 1 else "opaque"
+    def _alpha_mode(mat: UnityMaterial, info: ShaderInfo | None):
         if mat.has("_Mode"):  # Built-in Standard
             mode = int(mat.f("_Mode", 0))
             if mode == MODE_CUTOUT:
@@ -90,31 +71,33 @@ class StandardProfile(ShaderProfile):
         return alpha_mode_from_blend_state(mat, default="opaque")
 
 
-def _is_urp(mat: UnityMaterial, n: NormalizedMaterial, info: ShaderInfo | None) -> bool:
-    """URP Lit か、URP Lit から派生したシェーダーか（Standard の残りのプロパティより URP のものを優先して読む）。
+def read_emission(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """``_EmissionColor`` / ``_EmissionMap`` の発光（Built-in Standard、URP Lit と、同じ名前を使うシェーダー）。"""
+    # _EMISSION が m_InvalidKeywords にある = 現在のシェーダーに emission が無い。
+    # 以前のシェーダーの _EmissionColor が残っていても光らせない
+    emission_color = mat.color("_EmissionColor", default=BLACK)
+    emission_tex = mat.tex("_EmissionMap")
+    if "_EMISSION" in mat.invalid_keywords:
+        if emission_tex is not None or not is_black(emission_color):
+            n.warnings.append("_EMISSION keyword is invalid for this shader; emission ignored")
+    elif n.family in _EMISSION_KEYWORD_FAMILIES and mat.keywords_known and "_EMISSION" not in mat.keywords:
+        # Standard / URP Lit は _EMISSION キーワードが有効なときだけ光る。発光を切っても _EmissionColor は残るので、
+        # キーワードの記述があるのに _EMISSION が無ければ光らせない（#52: 白い発光色が残った電柱が真っ白になった）
+        pass
+    elif emission_tex is not None or not is_black(emission_color):
+        n.emission_tex = emission_tex
+        n.emission_color = emission_color
 
-    シェーダー表で系統が分かればそれに従う。表に無いシェーダー（プロパティの指紋で選んだもの）は、URP Lit にしか無い
-    ``_WorkflowMode`` / ``_Surface`` の有無で決める。
-    """
-    if info is not None:
-        return n.family == "urp"
-    return mat.has("_WorkflowMode", "_Surface")
 
-
-def _smoothness(mat: UnityMaterial, n: NormalizedMaterial, info: ShaderInfo | None) -> None:
+def _smoothness(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     """Smoothness（Blender では 1 − Roughness）。
 
-    URP Lit の Smoothness は ``_Smoothness``、Built-in Standard は ``_Glossiness``。マップ（``_MetallicGlossMap``）か
-    アルベドの A（``_SmoothnessTextureChannel`` = 1）から取るときは、その A に倍率を掛ける。倍率は URP が ``_Smoothness``、
-    Standard が ``_GlossMapScale``（#112: 倍率を掛けず、艶の無い面が鏡面になっていた）。URP から変換したマテリアルには
-    Standard の ``_Glossiness`` / ``_GlossMapScale`` が残っていることがあるので、URP ではそれらを見ない。
+    Built-in Standard の Smoothness は ``_Glossiness``。マップ（``_MetallicGlossMap``）かアルベドの A
+    （``_SmoothnessTextureChannel`` = 1）から取るときは、その A に ``_GlossMapScale`` を掛ける
+    （#112: 倍率を掛けず、艶の無い面が鏡面になっていた）。URP Lit は urp.py。
     """
-    if _is_urp(mat, n, info):
-        smoothness = mat.f("_Smoothness", 0.5)
-        n.smoothness_scale = smoothness
-    else:
-        smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))
-        n.smoothness_scale = mat.f("_GlossMapScale", 1.0)
+    smoothness = mat.f("_Glossiness", mat.f("_Smoothness", 0.5))
+    n.smoothness_scale = mat.f("_GlossMapScale", 1.0)
     n.roughness = max(0.0, min(1.0, 1.0 - smoothness))
     n.smoothness_scale = max(0.0, min(1.0, n.smoothness_scale))
     n.smoothness_from_albedo = int(mat.f("_SmoothnessTextureChannel", 0.0)) == 1 and n.base_color_tex is not None
