@@ -102,6 +102,12 @@ class SyntheticPackageTests(unittest.TestCase):
         self.assertIsNone(self.pkg.cached_asset(GUID_TEX))
         self.assertIsNone(self.pkg.cached_asset("f" * 32))
 
+    def test_read_assets_in_one_pass(self):
+        # キャッシュにあるものはそのまま、無いものは 1 回の再走査で読む（#130）。無い GUID は結果に入らない
+        self.pkg.scan()
+        result = self.pkg.read_assets([GUID_MAT, GUID_TEX, "f" * 32, GUID_FOLDER])
+        self.assertEqual(result, {GUID_MAT: MAT_TEXT, GUID_TEX: b"\x89PNG-fake"})
+
     def test_read_asset_rescan_failure_is_package_error(self):
         # scan の後でファイルが壊れても、再走査の失敗は scan と同じく PackageError にする（#69）
         self.pkg.scan()
