@@ -154,6 +154,38 @@ class NormalizeWithDeclaredTests(unittest.TestCase):
         self.assertEqual(n.alpha_mode, "opaque")
         self.assertEqual(n.base_color, (0.9, 0.95, 0.9, 1.0))
 
+    def test_custom_shader_with_own_texture_names(self):
+        # Amplify Shader Editor の自作シェーダー（_Base_Color / _Normal）。残りの _MainTex / _BumpMap を外したあとも、
+        # 独自の名前からテクスチャを取る（#118 のあと、Japanese Street の AE_Flower が白くなった）
+        shader = """Shader "Custom/Leaves" { Properties {
+            _Cutoff( "Mask Clip Value", Float ) = 0.6
+            _Color("Color", Color) = (1,1,1,0)
+            _Scale_Normal("Scale_Normal", Range( 0 , 3)) = 0
+            _Base_Color("Base_Color", 2D) = "white" {}
+            _Mask("Mask", 2D) = "white" {}
+            [Normal]_Normal("Normal", 2D) = "bump" {}
+        } SubShader { } }"""
+        text = mat_yaml(
+            "Flower", CUSTOM,
+            tex=[("_MainTex", TEX_N, (1, 1), (0, 0)), ("_BumpMap", TEX_N, (1, 1), (0, 0)), ("_Mask", TEX_N, (1, 1), (0, 0)),
+                 ("_Base_Color", TEX_A, (2, 3), (0, 0)), ("_Normal", TEX_A, (1, 1), (0, 0))],
+            floats=[("_Cutoff", 0.3), ("_Scale_Normal", 0.5), ("_BumpScale", 1), ("_Mode", 1)],
+            colors=[("_Color", (0.75, 0.75, 0.75, 1))],
+        )
+        n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"))
+        self.assertEqual(n.family, "unknown")
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        self.assertEqual(n.uv_scale, (2.0, 3.0))
+        self.assertEqual(n.base_color, (0.75, 0.75, 0.75, 1.0))
+        self.assertEqual(n.normal_tex.guid, TEX_A)
+        self.assertEqual(n.normal_strength, 0.5)  # 残りの _BumpScale ではなく _Scale_Normal
+
+    def test_generic_prefers_common_names_over_aliases(self):
+        text = mat_yaml("Both", CUSTOM, tex=[("_MainTex", TEX_A, (1, 1), (0, 0)), ("_Albedo", TEX_N, (1, 1), (0, 0))])
+        self.assertEqual(normalize_material(parse_material(text)).base_color_tex.guid, TEX_A)
+        text = mat_yaml("AlbedoOnly", CUSTOM, tex=[("_Albedo", TEX_N, (1, 1), (0, 0)), ("_ColorMask", TEX_A, (1, 1), (0, 0))])
+        self.assertEqual(normalize_material(parse_material(text)).base_color_tex.guid, TEX_N)
+
     def test_table_shader_is_not_restricted(self):
         # シェーダー表で分かるシェーダーは、定義があっても絞り込まない（各プロファイルの読み方に任せる）
         text = mat_yaml("Std", STANDARD, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], floats=[("_Metallic", 1), ("_Glossiness", 0.5)],

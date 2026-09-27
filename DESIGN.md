@@ -643,7 +643,10 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    - MToon: `_ShadeTexture` `_ShadeColor`
    - Poiyomi: `_MainTex` と `_Poi...` 系プロパティ
    - VRChat Toon Standard: `_ShadowBoost` `_MinBrightness` `_MetallicStrength` と `_Ramp` スロット（Standard の残骸を持つので Standard より先に判定）
-3. どれにも該当しない → `generic`（`_MainTex`/`_BaseMap`/`_Color`/`_BumpMap`/`_EmissionMap`/`_Cutoff` の一般名だけで最善努力）
+3. どれにも該当しない → `generic`（`_MainTex`/`_BaseMap`/`_Color`/`_BumpMap`/`_EmissionMap`/`_Cutoff` の一般名で最善努力）。
+   ベースカラーと法線のテクスチャが一般名で見つからなければ、自作シェーダー（Amplify Shader Editor など）でよく使われる名前を、大文字小文字と `_` を無視した完全一致で探す
+   （ベースカラーは `_Base_Color` / `_Albedo` / `_Diffuse` / `_MainTexture` / `_ColorMap` など、法線は `_Normal` / `_Bump` など、法線の強さは `_NormalScale` / `_Scale_Normal` / `_NormalStrength` など）。
+   `_Mask` や `_Color_Tilling` のような別の役割の名前を拾わないよう、部分一致にはしない
 
 **パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
 
@@ -659,7 +662,8 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 - シェーダー表で分かるシェーダー（lilToon、Poiyomi、Standard など）には当てない。各プロファイルがすでに自分の名前を読んでいるため。
   宣言が 1 つも取れないとき（定義が読めない、`Properties` が無い）も当てない。読めない定義は警告を出して、そのシェーダーの宣言を使わずに続ける。
 - 外したプロパティ名は `extras["undeclared_properties"]`（`unity_props`）に残す。
-- シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないグラフは、残りで黒くなる代わりに白（テクスチャ無し）になる。
+- シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないシェーダーは、generic の別名（上記）に当たればそのテクスチャを使い、
+  当たらなければ残りで黒くなる代わりに白（テクスチャ無し）になる（Japanese Street の `Leaves.shader` は `_Base_Color` / `_Normal` で、別名を足すまで AE_Flower などが白かった）。
   表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
 
 **lilToon プロファイルの変換規則（サンプルで確認した値）**
