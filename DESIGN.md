@@ -113,6 +113,23 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
   - 手元の実パッケージでは、Shibuya（URP）の 6 つ、UnityJapanOffice（HDRP）の 7 つのシーン・prefab に追加データがあり、Built-in のもの（Japanese Street / Apartment、
     Gothic Lights）には無い。
   - URP の物理ライト単位（Unity の 2026 年の方針で予定）は、URP 17.6 にはまだ無い。入ったら、単位ごとに換算を分ける（#128）
+- HDRP のシーンの露出（`core/exposure.py`、Issue #130）: HDRP は物理単位の光を、Volume の Exposure で表示の明るさに落としている
+  （画素 = 輝度（nits）× 1 / (1.2 × 2^EV100)。core の `PhysicalCamera.hlsl` の `ConvertEV100ToExposure`）。Blender は露出 0 のまま描くので、
+  パイプラインが HDRP のシーンを読み込むとき、そのシーンのグローバルな Volume の露出の分をライトの強さに掛ける。
+  アドオンの HDRP のライトは ÷ 683 してワットにしているので、倍率 = 2^(log2(683 / 1.2) − EV100) ≈ 569 / 2^EV100。
+  - Blender のシーンの露出（`view_settings.exposure`）は変えない。最初はシーンの露出を変える形で作ったが、読み込みをまたぐと上書きし合い、
+    パイプラインの違うシーンや、ユーザーが設定した露出を崩すので、ライトに掛ける形にした（ユーザーと 2026-09-27 に決定）。
+    Blender の値は「物理単位をそのまま換算した値」ではなくなるが、HDRP と Blender の間にはもともと誤差があり、「できる限り再現し、あとは Blender で調整する」方針に合う。
+    元の値はライトの `unity_light`、掛けた倍率は `unity_light_scale` に残す。HDRP の発光（強さ 1 に揃えている）には掛けない。
+  - Volume: シーンのグローバルな Volume（`Volume` の MonoBehaviour。`m_IsGlobal: 1`、有効、`weight` > 0）を `priority` の高い順に見て、
+    プロファイル（.asset。1 回の再走査でまとめて読む `UnityPackage.read_assets`）に上書きされた Exposure の `mode` がある最初のものを使う。
+    ローカルな Volume（コライダーの中だけで効く）はカメラの位置が決まらないので使わない（UnityJapanOffice のローカルな Volume は WhiteBalance だけ）。
+  - Fixed は `fixedExposure`、Use Physical Camera はシーンのカメラの `m_Aperture` / `m_ShutterSpeed` / `m_Iso` から EV100 = log2(N² / t) − log2(ISO / 100)。
+    Automatic / Automatic Histogram / Curve Mapping は画面の明るさで決まるので、`limitMax` で近似して警告に出す（室内の照明や日中の外光では、自動露出はふつう上限で止まる）。
+    どれも `compensation` を引く。`mode` が上書きされていなければ（HDRP の既定のプロファイル次第で分からない）倍率は 1。
+  - 選択ダイアログの Scenes の「Also Import」の **Exposure**（既定 ON）で切り替える。シーンごとに決め、レポートにシーンごとの EV100 と倍率を出し、
+    シーンの Collection のカスタムプロパティ `unity_exposure_ev100` / `unity_exposure_mode` / `unity_light_scale` に残す。
+  - UnityJapanOffice の NoonA / NightA は自動露出（EV 2〜7、補正 0）なので、ライトに約 4.45 倍（+2.15 段）を掛ける。
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
 **Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、マテリアルの上書きの件数を警告に出す（Issue #31）。マテリアルの上書きがすべて同じ target を指し、モデルのメッシュが 1 つなら、その Renderer に当てる（上記「Renderer が 1 つのモデルの中への上書き」。Issue #109）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
@@ -795,7 +812,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。
 - URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。 同じスクリプトが出す `synthetic_urp_standard`（マテリアルのシェーダーだけを Built-in の Standard にしたもの）を `tests/expectations_synthetic_urp_standard.json` で確かめ、ライトの追加データから URP として換算し、食い違いを警告することを見る（Issue #120）。
-- HDRP は、`tests/make_synthetic_hdrp_package.py` の合成パッケージを `tests/expectations_synthetic_hdrp.json` で確認する（Issue #119。ライトの単位が HDRP になるので別のパッケージにしてある）。どの .mat にも互換用の `_Color`（黒）/ `_MainTex` と Standard の `_Mode` / `_Glossiness` を残し、マスクマップと Remap（Principled の Metallic と Roughness がつながり、倍率とオフセットが入ること）、ノーマルマップ、両面、Specular Color、半透明、HDRP/Unlit、LayeredLit のレイヤー 0、シーンの平行光源（lux）・点光源（candela）・面光源（nits。#129）の換算を見る。単体テストは `tests/test_profiles_hdrp.py`。
+- HDRP は、`tests/make_synthetic_hdrp_package.py` の合成パッケージを `tests/expectations_synthetic_hdrp.json` で確認する（Issue #119。ライトの単位が HDRP になるので別のパッケージにしてある）。どの .mat にも互換用の `_Color`（黒）/ `_MainTex` と Standard の `_Mode` / `_Glossiness` を残し、マスクマップと Remap（Principled の Metallic と Roughness がつながり、倍率とオフセットが入ること）、ノーマルマップ、両面、Specular Color、半透明、HDRP/Unlit、LayeredLit のレイヤー 0、シーンの平行光源（lux）・点光源（candela）・面光源（nits。#129）の換算と、グローバルな Volume の固定露出の分をライトに掛け、Blender の露出は変えないこと（優先度の高いローカルな Volume は使わない。#130）を見る。単体テストは `tests/test_profiles_hdrp.py`。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/unitypackages/` のサンプルをインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - CI（`.github/workflows/tests.yml`。PR と main / release ブランチへの push）: 単体テストを Python 3.11 / 3.13（Blender 4.5 / 5.2 に同梱の版）で回す。合成パッケージ（`tests/make_synthetic_*.py`）を Blender 5.2 で 1 回だけ生成し、統合テストを Blender 4.5 LTS と 5.2 LTS で回す（4.5 は 5.2 で保存した .blend を読める）。実在アセットを使うテストは CI では回さない。
