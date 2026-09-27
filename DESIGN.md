@@ -298,6 +298,34 @@ URP Lit は Built-in Standard とは別のプロファイルで読む。URP の 
   系統は `urp` になるが、ライトのパイプラインの判定には使わない（下記）。
 - 保存済みの中間表現に `blend_mode` が無いとき（1.9.x まで）は `alpha`、`specular_color` が無いときは None（Blender の既定の IOR 1.5）として読む。
 
+**HDRP のプロファイル（`core/profiles/hdrp.py`、Issue #119）**
+
+HDRP の Lit / LitTessellation / LayeredLit / LayeredLitTessellation / Unlit は、Built-in Standard とは別のプロファイルで読む。
+HDRP のシェーダーは互換用に `_Color` / `_MainTex` を宣言していて、Standard から変換したマテリアルにはそれらや `_Mode` / `_Glossiness` が残っている
+（#118。UnityJapanOffice の LayeredLit の Beam などが、残った黒い `_Color` で黒くなった）。HDRP の名前だけを読み、Standard の残りは見ない。
+値の意味は HDRP 17.6 の `Lit.shader` / `LitDataIndividualLayer.hlsl` / `Unlit.shader` / `MaterialBlendModeEnum.cs` / `MaterialExtension.cs` に合わせた。
+
+| HDRP/Lit | NormalizedMaterial |
+|---|---|
+| `_BaseColorMap` / `_BaseColor` | base_color_tex / base_color |
+| `_NormalMap` / `_NormalScale` | normal_tex / normal_strength |
+| マスクマップ `_MaskMap`（R = Metallic、G = AO、B = Detail マスク、A = Smoothness）があれば、Metallic = `_MetallicRemapMin`〜`Max` を R で、Smoothness = `_SmoothnessRemapMin`〜`Max` を A で補間（`_Metallic` / `_Smoothness` は使わない）。無ければ `_Metallic` / `_Smoothness` | metallic_tex / metallic_remap / smoothness_offset・smoothness_scale（= Max − Min）/ metallic / roughness |
+| `_SurfaceType`（1 = 半透明）、`_AlphaCutoffEnable`（1 なら cutout）、`_AlphaCutoff` | alpha_mode / alpha_cutoff |
+| `_BlendMode`（0 Alpha / 1 Additive / 4 Premultiply。半透明のときだけ） | blend_mode（Additive は警告） |
+| `_DoubleSidedEnable`（無ければ `_CullMode`） | cull_backface |
+| `_EmissiveColor` / `_EmissiveColorMap`（下の「発光」） | emission_color / emission_tex |
+| `_MaterialID` が Specular Color（4）: 非金属で、F0 = `_SpecularColor`（× `_SpecularColorMap`）。マップの A は Smoothness ではない | specular_color / specular_tex |
+| `_MaterialID` のほかの種類（Subsurface Scattering / Anisotropy / Iridescence / Translucent）、AO の Remap、Detail / Height / Coat | extras["hdrp"]（組み立てには使わない） |
+
+- LayeredLit / LayeredLitTessellation はレイヤーごとの名前（`_BaseColor0`〜`3`、`_BaseColorMap0`〜、`_NormalMap0`〜、`_MaskMap0`〜、`_Metallic0`〜 など）を持つ。
+  レイヤーを重ねる処理（`_LayerMaskMap` など）は再現せず、レイヤー 0 を上の表と同じ規則で読む。レイヤー数は extras["hdrp"]["layer_count"]。
+- HDRP/Unlit は `_UnlitColorMap` / `_UnlitColor`、透明度、両面、発光だけを読む（`lighting: unlit`）。
+- 表に無いシェーダーは、HDRP にしか無い `_SurfaceType` と HDRP/Lit の名前のベース画像 `_BaseColorMap` を持てば HDRP/Lit として読む。
+  `_MaskMap` だけでは決めない（Shader Graph が自分の名前として `_MaskMap` を持ち、ベース画像は `_MainTex` で読むことがある。UnityJapanOffice の BaseMapTiling など）。
+  パッケージに定義がある Shader Graph は、先に #118 の規則で宣言していないプロパティを外してから判定する。
+- シェーダー表の HDRP の項目は、Unity 6000.6 に同梱の HDRP の `.shader.meta` で GUID を確かめた。
+- 保存済みの中間表現に `metallic_remap` / `smoothness_offset` が無いとき（1.9.x まで）は (0, 1) / 0 として読む。
+
 Built-in Standard のプロファイルの透明度は、Built-in Standard の `_Mode`（0 不透明 / 1 Cutout / 2 Fade / 3 Transparent）、`_Surface` / `_AlphaClip`、
 HDRP Lit の `_SurfaceType` / `_AlphaCutoffEnable` の順に見る。
 
@@ -428,7 +456,8 @@ unitypackage_loader/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
 │   │   ├─ standard.py           # Built-in Standard / HDRP Lit
-│   │   ├─ urp.py                # URP Lit（#116）
+│   │   ├─ urp.py                # URP Lit / Simple Lit / Unlit / Baked Lit（#116 / #117）
+│   │   ├─ hdrp.py               # HDRP Lit / LayeredLit / Unlit（#119）
 │   │   ├─ mtoon.py              # VRM MToon（Phase 2）
 │   │   ├─ poiyomi.py            # Phase 2
 │   │   ├─ vrchat_mobile.py      # VRChat SDK Mobile（Quest 向け）シェーダー
@@ -580,6 +609,7 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 2. プロパティ指紋（GUID 未登録のシェーダー向け）
    - lilToon: `_BaseMap` と `_MatCapTex` と `_UseShadow` がある
    - URP Lit: `_WorkflowMode` か `_Surface` がある（Standard の残りを持つことが多いので Standard より先に判定する）
+   - HDRP/Lit: `_SurfaceType` と `_BaseColorMap` がある（同じく Standard より先）
    - Standard: `_MainTex` or `_BaseMap` と `_Glossiness`/`_Smoothness` と `_Metallic`、かつ `_ShadowStrength` が無い
    - MToon: `_ShadeTexture` `_ShadeColor`
    - Poiyomi: `_MainTex` と `_Poi...` 系プロパティ
@@ -629,7 +659,7 @@ Built-in の Standard と URP Lit は `_EMISSION` キーワードが有効なと
 （Issue #52。発光を切った白い `_EmissionColor` が残った電柱が真っ白になっていた）。キーワードの記述が無い .mat は従来どおり色で判断する。
 キーワードで発光を切り替えないシェーダー（Poiyomi の `_EnableEmission` など）には、この条件を当てない。
 
-HDRP（HDRP/Lit と HDRP 向け Shader Graph。`_EmissiveColor` を持つかで判定）は、発光しなくても `_EmissionColor` を白で持っている
+HDRP（HDRP のプロファイルと、`_EmissiveColor` を持つ HDRP 向け Shader Graph）は、発光しなくても `_EmissionColor` を白で持っている
 （ベイク向けの互換用）ので、`_EmissionColor` は使わない。発光は `_EmissiveColor`（線形の HDR 色。`_UseEmissiveIntensity` なら
 `_EmissiveColorLDR` × `_EmissiveIntensity`）と `_EmissiveColorMap` で決め、`_EmissiveColor` が黒なら光らせない。
 HDRP の強度は物理単位（nits / EV100）で Blender の Emission Strength と対応しないため、発光色は最大成分で割った色味、
@@ -754,6 +784,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。
 - URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。
+- HDRP は、`tests/make_synthetic_hdrp_package.py` の合成パッケージを `tests/expectations_synthetic_hdrp.json` で確認する（Issue #119。ライトの単位が HDRP になるので別のパッケージにしてある）。どの .mat にも互換用の `_Color`（黒）/ `_MainTex` と Standard の `_Mode` / `_Glossiness` を残し、マスクマップと Remap（Principled の Metallic と Roughness がつながり、倍率とオフセットが入ること）、ノーマルマップ、両面、Specular Color、半透明、HDRP/Unlit、LayeredLit のレイヤー 0、シーンの平行光源（lux）と点光源（lumen）の換算を見る。単体テストは `tests/test_profiles_hdrp.py`。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/unitypackages/` のサンプルをインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - CI（`.github/workflows/tests.yml`。PR と main / release ブランチへの push）: 単体テストを Python 3.11 / 3.13（Blender 4.5 / 5.2 に同梱の版）で回す。合成パッケージ（`tests/make_synthetic_*.py`）を Blender 5.2 で 1 回だけ生成し、統合テストを Blender 4.5 LTS と 5.2 LTS で回す（4.5 は 5.2 で保存した .blend を読める）。実在アセットを使うテストは CI では回さない。
