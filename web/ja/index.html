@@ -191,7 +191,7 @@
           <img src="../assets/use-props.webp" width="1200" height="800" alt="Unity 向けの室内アセットを Blender でレンダリングした画像。木のテーブルに観葉植物、マグカップ、テレビのリモコンが置かれ、横でランプが灯っている" loading="lazy">
           <div class="body">
             <h3>小物やワールド素材にも</h3>
-            <p>Standard や URP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物、ワールド素材も、<a href="#scenes">シーンの配置ごと</a>読み込めます。</p>
+            <p>Standard・URP・HDRP のマテリアルは Blender の標準的なシェーダーに変換します。Unity 向けの家具や小物、ワールド素材も、<a href="#scenes">シーンの配置ごと</a>読み込めます。</p>
           </div>
         </article>
       </div>
@@ -204,7 +204,7 @@
       <div class="section-head">
         <span class="eyebrow">シーンの読み込み</span>
         <h2>Unity のシーンを、<wbr>並べたそのままで</h2>
-        <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。</p>
+        <p>パッケージに入っているシーン（<code>.unity</code>）を選ぶと、建物や家具、小物が Unity で置かれた位置・向き・大きさのまま Blender に並びます。ライトとカメラも一緒に入るので、読み込んだらすぐにレンダリングを試せます。昼と夜のように同じ場所のシーンがいくつも入っているパッケージでは、ダイアログは最初のシーンだけを選んだ状態で開くので、見たいシーンに付け替えてください。</p>
       </div>
       <figure class="shot">
         <div class="frame"><img src="../assets/scene-street.webp" width="1502" height="845" alt="Blender に読み込んだ日本の街並みのシーン。ビルや電柱が並ぶ画面の左下に、読み込むものを選ぶダイアログが開き、Scenes のタブで 1879 の配置を持つシーンにチェックが入っている" loading="lazy"></div>
@@ -215,7 +215,7 @@
         <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
         <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
       </div>
-      <p class="modes-note">ライトの明るさは EEVEE で近い見た目になるように換算しますが、Unity とまったく同じにはなりません。</p>
+      <p class="modes-note">ライトの明るさは、Built-in・URP・HDRP それぞれの明るさの決まり（HDRP はシーンの露出も）に合わせて、EEVEE で近い見た目になるように換算します。それでも Unity とまったく同じにはならないので、仕上げは Blender で調整してください。</p>
     </div>
   </section>
 
@@ -252,10 +252,10 @@
           <div class="shader"><span class="tag tag-full">専用</span><div><b>MToon</b><span>VRM のトゥーンシェーダー。シェード色と MatCap を含む</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>Poiyomi</b><span>影の強さを含むトゥーン設定、エミッションの有効判定、反射設定に応じたメタリック、アウトライン</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>Standard</b><span>ビルトインの PBR。アルベド、メタリック、スムースネス、ノーマル、エミッション</span></div></div>
-          <div class="shader"><span class="tag tag-full">専用</span><div><b>URP Lit</b><span>Standard と同じ PBR の対応付けに加え、Surface Type と Alpha Clip を判定</span></div></div>
-          <div class="shader"><span class="tag tag-full">専用</span><div><b>HDRP Lit</b><span>Standard と同じ PBR の対応付けに加え、Surface Type を判定</span></div></div>
+          <div class="shader"><span class="tag tag-full">専用</span><div><b>URP</b><span>Lit・Simple Lit・Unlit・Baked Lit。Metallic と Specular の両方の設定、透過と切り抜き、Standard から移したときに残った古い設定は読まない</span></div></div>
+          <div class="shader"><span class="tag tag-full">専用</span><div><b>HDRP</b><span>Lit・LayeredLit（1 層目）・Unlit。マスクマップのメタリックとスムースネス、Specular Color、透過と切り抜き、エミッション</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>VRChat Mobile</b><span>Quest 向け: Toon Lit、Standard Lite、Toon Standard、Bumped Specular、MatCap Lit</span></div></div>
-          <div class="shader"><span class="tag tag-generic">汎用</span><div><b>その他のシェーダー</b><span>一般的なプロパティ名から可能な範囲で変換。独自シェーダー用の GUID 表も登録できます。</span></div></div>
+          <div class="shader"><span class="tag tag-generic">汎用</span><div><b>その他のシェーダー</b><span>一般的なプロパティ名から可能な範囲で変換。Shader Graph などのシェーダーがパッケージに入っていれば、そのシェーダーが使わない古い設定は読みません。独自シェーダー用の GUID 表も登録できます。</span></div></div>
         </div>
         <div class="legend">
           <span><span class="tag tag-full">専用</span>シェーダーごとに作った専用の対応付け</span>
@@ -272,7 +272,7 @@
           <div class="section-head">
             <span class="eyebrow">見た目の切り替え</span>
             <h2>EEVEE ではトゥーンのまま、<wbr>Cycles では PBR で</h2>
-            <p>lilToon などのトゥーン系は EEVEE 向けのトゥーンの見た目で、Standard や URP は Blender 標準の Principled BSDF で読み込みます。Cycles でレンダリングしたくなったら、あとからサイドバーで切り替えられます。元のパッケージは要りません。</p>
+            <p>lilToon などのトゥーン系は EEVEE 向けのトゥーンの見た目で、Standard・URP・HDRP は Blender 標準の Principled BSDF で読み込みます。Cycles でレンダリングしたくなったら、あとからサイドバーで切り替えられます。元のパッケージは要りません。</p>
           </div>
           <div class="modes">
             <div class="mode default"><span class="name">自動（おすすめ）</span><span>シェーダーを見て、トゥーン・PBR・Unlit のどれにするかをマテリアルごとに選びます</span></div>
