@@ -362,6 +362,11 @@ class UnityPackage:
             raise PackageError(f"cannot read {entry.pathname or target} from {self.path.name}: {exc}") from exc
         raise KeyError(f"{target} not found in {self.path.name}")
 
+    def cached_asset(self, guid: str) -> bytes | None:
+        """走査で読み込んだ実体（.mat / .prefab / .unity など）。キャッシュに無ければ再走査せずに None。"""
+        entry = self.get(guid)
+        return entry._cache if entry is not None else None
+
     def read_text(self, guid: str) -> str:
         return self.read_asset(guid).decode("utf-8", "replace")
 

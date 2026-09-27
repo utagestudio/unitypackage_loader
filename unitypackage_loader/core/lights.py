@@ -46,6 +46,73 @@ def detect_pipeline(families: Iterable[str]) -> str:
     return PIPELINE_BUILTIN
 
 
+# ライト・カメラに付く、パイプラインの追加データのスクリプト（MonoBehaviour の m_Script）の GUID。
+# Unity 6000.6 に同梱の URP / HDRP 17.6 の .cs.meta で確かめた（#120）
+PIPELINE_SCRIPT_GUIDS = {
+    PIPELINE_URP: (
+        "474bcb49853aa07438625e644c072ee6",  # UniversalAdditionalLightData
+        "a79441f348de89743a2939f4d699eac1",  # UniversalAdditionalCameraData
+    ),
+    PIPELINE_HDRP: (
+        "7a68c43fe1f2a47cfa234b5eeaa98012",  # HDAdditionalLightData
+        "23c1ce4fb46143f46bc5cb5224c934f6",  # HDAdditionalCameraData
+    ),
+}
+
+
+def pipelines_in_assets(datas: Iterable[bytes]) -> dict[str, int]:
+    """シーン・prefab の中身に、URP / HDRP の追加データのスクリプトが現れるアセットの数（パイプラインごと）。
+
+    テキスト形式（YAML）のアセットだけを見る。Force Binary のアセットは GUID がバイト列で入るので数えない。
+    """
+    needles = {pipeline: [g.encode() for g in guids] for pipeline, guids in PIPELINE_SCRIPT_GUIDS.items()}
+    counts = {pipeline: 0 for pipeline in needles}
+    for data in datas:
+        for pipeline, keys in needles.items():
+            if any(key in data for key in keys):
+                counts[pipeline] += 1
+    return {pipeline: count for pipeline, count in counts.items() if count}
+
+
+@dataclass
+class PipelineDecision:
+    pipeline: str
+    source: str  # "lights"（ライト・カメラの追加データ）/ "materials"（シェーダー表で分かったマテリアル）/ "default"
+    warning: str = ""
+
+
+def decide_pipeline(material_families: Iterable[str], script_counts: dict[str, int]) -> PipelineDecision:
+    """ライトの強さの換算に使うパイプラインを決める（#120）。
+
+    ライト・カメラに URP / HDRP の追加データが付いていればそれを使う。マテリアルは Shader Graph ばかりだとシェーダー表で
+    分からず、Built-in の Standard のまま移したアセットもあるので、ライトの手掛かりのほうが確か。無ければ従来どおり
+    シェーダー表で分かったマテリアルの系統で決める。両方の手掛かりが食い違うときは警告を返す。
+    """
+    families = set(material_families)
+    from_materials = detect_pipeline(families)
+    material_evidence = {PIPELINE_HDRP} if "hdrp" in families else set()
+    material_evidence |= {PIPELINE_URP} if "urp" in families else set()
+    material_evidence |= {PIPELINE_BUILTIN} if families & {"standard", "legacy"} else set()
+
+    found = [p for p in (PIPELINE_HDRP, PIPELINE_URP) if script_counts.get(p)]
+    if not found:
+        return PipelineDecision(from_materials, "materials" if material_evidence - {PIPELINE_BUILTIN} else "default")
+    if len(found) == 1:
+        pipeline = found[0]
+    else:
+        # URP と HDRP の両方のシーンを含むパッケージ。マテリアルが示す方、無ければ多い方にする
+        agreed = [p for p in found if p in material_evidence]
+        pipeline = agreed[0] if agreed else max(found, key=lambda p: script_counts[p])
+    warning = ""
+    if len(found) > 1:
+        warning = (f"render pipeline: scenes/prefabs carry both URP and HDRP light data; "
+                   f"converting light intensities as {pipeline}")
+    elif material_evidence and pipeline not in material_evidence:
+        warning = (f"render pipeline: light data says {pipeline} but the materials say "
+                   f"{'/'.join(sorted(material_evidence))}; converting light intensities as {pipeline}")
+    return PipelineDecision(pipeline, "lights", warning)
+
+
 def _srgb_to_linear(c: float) -> float:
     c = min(max(c, 0.0), 1e6)
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
