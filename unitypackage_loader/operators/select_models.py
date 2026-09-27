@@ -413,8 +413,8 @@ def register() -> None:
         name="Exposure",
         default=True,
         description=(
-            "Set the Blender scene's exposure (Color Management) from the HDRP scene's Volume exposure, "
-            "so the physical light units look as bright as in Unity. Automatic exposure is approximated with its upper limit"
+            "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
+            "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
         ),
     ))
     setattr(wm, _LODS_PROP, BoolProperty(

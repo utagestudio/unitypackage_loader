@@ -1,8 +1,10 @@
-"""HDRP の Volume の露出（Exposure）から、Blender のシーンの露出（Color Management の Exposure）を決める。bpy 非依存（#130）。
+"""HDRP の Volume の露出（Exposure）から、HDRP のライトの強さに掛ける倍率を決める。bpy 非依存（#130）。
 
 HDRP の表示は 画素 = 輝度（nits）× 1 / (1.2 × 2^EV100)（core の ``PhysicalCamera.hlsl`` の ``ConvertEV100ToExposure``）。
-アドオンは HDRP のライトを 683 lm/W でワットにしている（``core/lights.py``）ので、Blender の画素 = 輝度 ÷ 683。
-同じ見た目にするには、Blender の露出（段）= log2(683 / 1.2) − EV100。
+アドオンは HDRP のライトを 683 lm/W でワットにしている（``core/lights.py``）ので、Blender（露出 0）の画素 = 輝度 ÷ 683。
+同じ見た目にするには、露出の差 log2(683 / 1.2) − EV100 段ぶんをライトの強さに掛ける。Blender のシーンの露出
+（Color Management）は変えない。パッケージやパイプラインの違うシーンを 1 つの Blender のシーンに混ぜても、それぞれの
+明るさが崩れないようにするため。
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from dataclasses import dataclass
 from .unity_yaml import UnityDocument, to_float
 
 __all__ = ["VOLUME_SCRIPT_GUID", "EXPOSURE_SCRIPT_GUID", "GlobalVolume", "SceneExposure", "global_volumes",
-           "exposure_settings", "scene_exposure", "blender_exposure"]
+           "exposure_settings", "scene_exposure"]
 
 # Unity 6000.6 に同梱の core / HDRP 17.6 の .cs.meta
 VOLUME_SCRIPT_GUID = "172515602e62fb746b5d573b38a5fe58"  # UnityEngine.Rendering.Volume
@@ -24,8 +26,8 @@ EXPOSURE_SCRIPT_GUID = "2d08ce26990eb1a4a9177b860541e702"  # UnityEngine.Renderi
 MODE_FIXED, MODE_AUTOMATIC, MODE_CURVE_MAPPING, MODE_PHYSICAL_CAMERA, MODE_AUTOMATIC_HISTOGRAM = 0, 1, 2, 3, 4
 _MODE_NAMES = {0: "fixed", 1: "automatic", 2: "curve mapping", 3: "physical camera", 4: "automatic histogram"}
 
-BLENDER_EXPOSURE_AT_EV0 = math.log2(683.0 / 1.2)  # ≈ 9.15
-_EXPOSURE_LIMIT = 32.0  # Blender の view_settings.exposure の範囲（-32〜32）
+STOPS_AT_EV0 = math.log2(683.0 / 1.2)  # ≈ 9.15。EV100 0 のときにライトに掛ける段数
+_STOPS_LIMIT = 32.0  # 壊れた値で倍率が発散しないように抑える段数
 
 
 @dataclass
@@ -38,9 +40,14 @@ class GlobalVolume:
 @dataclass
 class SceneExposure:
     ev100: float
-    exposure: float  # Blender の view_settings.exposure（段）
+    stops: float  # HDRP のライトに掛ける段数（log2(683 / 1.2) − EV100）
     mode: str
     approximate: bool  # 自動露出を上限で近似したなど
+
+    @property
+    def light_scale(self) -> float:
+        """HDRP のライトの強さ（ワット）に掛ける倍率。"""
+        return 2.0 ** self.stops
 
 
 def _script_guid(body: dict) -> str | None:
@@ -88,7 +95,7 @@ def exposure_settings(documents: Iterable[UnityDocument]) -> dict[str, float] | 
 
 
 def scene_exposure(settings: dict[str, float], camera: dict | None = None) -> SceneExposure | None:
-    """Exposure の値から EV100 と Blender の露出を決める。モードが上書きされていなければ None（HDRP の既定のプロファイル次第で分からない）。
+    """Exposure の値から EV100 と、ライトに掛ける段数を決める。モードが上書きされていなければ None（HDRP の既定のプロファイル次第で分からない）。
 
     - Fixed: ``fixedExposure``
     - Use Physical Camera: カメラの絞り・シャッター・ISO から EV100 = log2(N² / t) − log2(ISO / 100)
@@ -110,12 +117,8 @@ def scene_exposure(settings: dict[str, float], camera: dict | None = None) -> Sc
         ev = settings.get("limitMax", 14.0)  # HDRP の Exposure の既定の上限
         approximate = True
     ev -= settings.get("compensation", 0.0)
-    exposure = max(-_EXPOSURE_LIMIT, min(_EXPOSURE_LIMIT, BLENDER_EXPOSURE_AT_EV0 - ev))
-    return SceneExposure(ev, exposure, _MODE_NAMES.get(mode, str(mode)), approximate)
-
-
-def blender_exposure(ev100: float) -> float:
-    return BLENDER_EXPOSURE_AT_EV0 - ev100
+    stops = max(-_STOPS_LIMIT, min(_STOPS_LIMIT, STOPS_AT_EV0 - ev))
+    return SceneExposure(ev, stops, _MODE_NAMES.get(mode, str(mode)), approximate)
 
 
 def _camera_ev100(camera: dict | None) -> float | None:

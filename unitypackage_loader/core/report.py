@@ -45,7 +45,7 @@ class ImportReport:
     split_slots: int = 0  # prefab の割り当てに従って差し替えた（スロットが無ければ作って入れた）マテリアルスロット数
     lights: int = 0  # シーンから作ったライト
     cameras: int = 0  # シーンから作ったカメラ
-    exposure: str = ""  # シーンの露出を HDRP の Volume から設定したとき、その内容（#130）
+    exposures: list[str] = field(default_factory=list)  # HDRP の Volume の露出をライトに反映したシーンごとの内容（#130）
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -77,8 +77,6 @@ class ImportReport:
             parts.append(f"{self.outlines} outlines")
         if self.lights or self.cameras:
             parts.append(f"{self.lights} lights, {self.cameras} cameras")
-        if self.exposure:
-            parts.append(self.exposure)
         text = ", ".join(parts)
         problems = [f"{len(self.errors)} error(s)"] if self.errors else []
         if self.warnings:
@@ -112,8 +110,9 @@ class ImportReport:
         lines += [f"    - {i}" for i in self.images]
         if self.lights or self.cameras:
             lines.append(f"  lights: {self.lights}, cameras: {self.cameras}")
-        if self.exposure:
-            lines.append(f"  {self.exposure}")
+        if self.exposures:
+            lines.append(f"  exposure ({len(self.exposures)}):")
+            lines += [f"    - {e}" for e in self.exposures]
         if self.warnings:
             lines.append(f"  warnings ({len(self.warnings)}):")
             lines += [f"    ! {w}" for w in self.warnings]

@@ -90,7 +90,7 @@ class ImportOptions:
     scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）
     scene_lights: bool = True  # シーンのライトを読み込む
     scene_cameras: bool = True  # シーンのカメラを読み込む
-    scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、Blender のシーンの露出に反映する（#130）
+    scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、そのシーンの HDRP のライトの強さに反映する（#130）
     hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
@@ -813,7 +813,6 @@ class _ImportSession:
 
         # --- パッケージ用コレクション ---
         self.scene = self.context.scene
-        self.applied_exposure: float | None = None  # HDRP の Volume から設定したシーンの露出（#130）
         self.collection = bpy.data.collections.new(package_path.stem)
         self.scene.collection.children.link(self.collection)
         self.staging = bpy.data.collections.new(f"{package_path.stem} (importing)")  # 読み込み中だけ使う作業用のコレクション
@@ -1104,11 +1103,14 @@ class _ImportSession:
                 hidden += 1
         return hidden
 
-    def apply_exposure(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> None:
-        """HDRP のシーンのグローバルな Volume の露出を、Blender のシーンの露出（Color Management の Exposure）にする（#130）。
+    def light_scale(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> float:
+        """HDRP のシーンのグローバルな Volume の露出から、そのシーンの HDRP のライトに掛ける倍率を決める（#130）。
 
-        複数のシーンを読み込むときは最初のシーンの値を使い、違う値のシーンがあれば警告する。
+        Blender のシーンの露出は変えない。シーンごとに決めるので、パッケージやパイプラインの違うシーンを混ぜても崩れない。
+        決められなければ 1。
         """
+        if not (self.opts.scene_exposure and self.prepared.pipeline == PIPELINE_HDRP):
+            return 1.0
         pathname = scene_summary.pathname
         try:
             documents = parse_documents(self.pkg.read_text(scene_summary.guid))
@@ -1122,27 +1124,23 @@ class _ImportSession:
                 result = scene_exposure(settings, camera) if settings else None
                 if result is not None:
                     break
-        except Exception as exc:  # noqa: BLE001 - 露出は補助的な設定なので、読めなければ変えずに続ける（#69）
+        except Exception as exc:  # noqa: BLE001 - 露出は補助的な設定なので、読めなければ倍率 1 で続ける（#69）
             self.report.warn(f"scene {pathname}: could not read the HDRP exposure: {exc}")
             _log_exception(f"could not read the HDRP exposure of {pathname}")
-            return
+            return 1.0
         if result is None:
-            return
+            return 1.0
         target["unity_exposure_ev100"] = result.ev100
         target["unity_exposure_mode"] = result.mode
+        target["unity_light_scale"] = result.light_scale
         if result.approximate:
             self.report.warn(
                 f"scene {pathname}: HDRP {result.mode} exposure is approximated with its upper limit (EV100 {result.ev100:g})"
             )
-        if self.applied_exposure is None:
-            self.applied_exposure = result.exposure
-            self.scene.view_settings.exposure = result.exposure
-            self.report.exposure = f"exposure {result.exposure:+.2f} (HDRP {result.mode}, EV100 {result.ev100:g})"
-        elif abs(self.applied_exposure - result.exposure) > 1e-3:
-            self.report.warn(
-                f"scene {pathname}: HDRP exposure (EV100 {result.ev100:g}) differs from the first scene; "
-                f"the scene exposure was left at {self.applied_exposure:+.2f}"
-            )
+        self.report.exposures.append(
+            f"{scene_summary.name}: HDRP {result.mode} exposure EV100 {result.ev100:g}, lights ×{result.light_scale:.3g}"
+        )
+        return result.light_scale
 
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
@@ -1227,6 +1225,7 @@ class _ImportSession:
             hidden_lods += hidden.hidden_lods
 
         # --- ライト・カメラ ---
+        light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
         baked_lights = 0
         light_notes: set[str] = set()
         wanted = ([CLASS_LIGHT] if self.opts.scene_lights else []) + ([CLASS_CAMERA] if self.opts.scene_cameras else [])
@@ -1240,10 +1239,13 @@ class _ImportSession:
                 local = Matrix(unity_to_blender(node.local))
             if component.class_id == CLASS_LIGHT:
                 values = convert_light(component.body, self.prepared.pipeline)
+                values.energy *= light_scale  # HDRP の露出の分（#130）
                 obj = make_light(component.name, values)
                 obj["unity_light"] = json_text(component.body)
                 obj["unity_render_pipeline"] = self.prepared.pipeline
                 obj["unity_render_pipeline_source"] = self.prepared.pipeline_source
+                if light_scale != 1.0:
+                    obj["unity_light_scale"] = light_scale
                 baked_lights += values.baked_only
                 light_notes.update(values.notes)
                 self.report.lights += 1
@@ -1259,8 +1261,6 @@ class _ImportSession:
             obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
             if not component.active:
                 defer_hide(obj, self.hidden_objects)
-        if self.opts.scene_exposure and self.prepared.pipeline == PIPELINE_HDRP:
-            self.apply_exposure(scene_summary, target)
         for message in scene_warnings(
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
             hidden_unused=hidden_unused, hidden_lods=hidden_lods,

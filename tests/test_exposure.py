@@ -5,7 +5,7 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.exposure import (
-    BLENDER_EXPOSURE_AT_EV0,
+    STOPS_AT_EV0,
     exposure_settings,
     global_volumes,
     scene_exposure,
@@ -53,12 +53,13 @@ class VolumeTests(unittest.TestCase):
 
 
 class SceneExposureTests(unittest.TestCase):
-    def test_blender_exposure_matches_hdrp(self):
-        # HDRP: 画素 = L / (1.2 · 2^EV)。Blender（光を ÷ 683 した場合）: 画素 = L / 683 · 2^x
+    def test_light_scale_matches_hdrp(self):
+        # HDRP: 画素 = L / (1.2 · 2^EV)。Blender（露出 0、光を ÷ 683 してから倍率を掛けた場合）: 画素 = L / 683 × 倍率
         result = scene_exposure({"mode": 0, "fixedExposure": 9})
         self.assertEqual((result.mode, result.approximate), ("fixed", False))
-        self.assertAlmostEqual(2 ** result.exposure / 683, 1 / (1.2 * 2 ** 9))
-        self.assertAlmostEqual(BLENDER_EXPOSURE_AT_EV0, math.log2(683 / 1.2))
+        self.assertAlmostEqual(result.light_scale / 683, 1 / (1.2 * 2 ** 9))
+        self.assertAlmostEqual(result.stops, math.log2(result.light_scale))
+        self.assertAlmostEqual(STOPS_AT_EV0, math.log2(683 / 1.2))
 
     def test_compensation_is_subtracted(self):
         self.assertAlmostEqual(scene_exposure({"mode": 0, "fixedExposure": 9, "compensation": 1}).ev100, 8)
@@ -67,7 +68,8 @@ class SceneExposureTests(unittest.TestCase):
         # UnityJapanOffice の NoonA: 自動露出 EV 2〜7
         result = scene_exposure({"mode": 1, "limitMin": 2, "limitMax": 7, "compensation": 0})
         self.assertEqual((result.ev100, result.approximate, result.mode), (7, True, "automatic"))
-        self.assertAlmostEqual(result.exposure, math.log2(683 / 1.2) - 7)
+        self.assertAlmostEqual(result.stops, math.log2(683 / 1.2) - 7)
+        self.assertAlmostEqual(result.light_scale, 683 / 1.2 / 2 ** 7)  # ≈ 4.45 倍
         self.assertEqual(scene_exposure({"mode": 4}).ev100, 14)  # 上限が上書きされていなければ HDRP の既定の 14
 
     def test_physical_camera(self):
@@ -80,8 +82,8 @@ class SceneExposureTests(unittest.TestCase):
     def test_mode_not_overridden(self):
         self.assertIsNone(scene_exposure({"fixedExposure": 5}))
 
-    def test_exposure_is_clamped_to_blender_range(self):
-        self.assertEqual(scene_exposure({"mode": 0, "fixedExposure": -100}).exposure, 32)
+    def test_stops_are_clamped(self):
+        self.assertEqual(scene_exposure({"mode": 0, "fixedExposure": -100}).stops, 32)
 
 
 if __name__ == "__main__":
