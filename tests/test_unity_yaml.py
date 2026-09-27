@@ -212,6 +212,11 @@ class ParseTextTests(unittest.TestCase):
         self.assertEqual(importer["userData"], "")
         self.assertEqual(importer["internalIDToNameTable"], [])
 
+    def test_reference_with_infinite_numbers(self):
+        # 壊れた fileID / type が 1e999 のような数に読めても、OverflowError ではなく 0 / None にする（ファズテストで見つけた）
+        ref = parse_text("m_Texture: {fileID: 280001e99900, guid: abc, type: nan}\n")["m_Texture"]
+        self.assertEqual((ref.file_id, ref.guid, ref.type), (0, "abc", None))
+
 
 class FoldedScalarTests(unittest.TestCase):
     """Unity が長い値を次の行に折り返したもの（YAML の複数行スカラー）を 1 つの値につなぐ。"""

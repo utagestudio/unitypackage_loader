@@ -292,14 +292,23 @@ class _FlowParser:
         return items
 
 
+def _finite_int(value: Any) -> int | None:
+    """数値なら整数に。``1e999`` のような無限大・NaN は int() が OverflowError / ValueError になるので None（#69）。"""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return int(value)
+    return None
+
+
 def _maybe_ref(mapping: dict[str, Any]) -> Any:
     if "fileID" in mapping and set(mapping) <= {"fileID", "guid", "type"}:
-        file_id = mapping.get("fileID", 0)
+        file_id = _finite_int(mapping.get("fileID", 0))
         guid = mapping.get("guid")
         return UnityRef(
-            file_id=int(file_id) if isinstance(file_id, (int, float)) else 0,
+            file_id=file_id if file_id is not None else 0,
             guid=str(guid) if guid not in (None, "") else None,
-            type=int(mapping["type"]) if isinstance(mapping.get("type"), (int, float)) else None,
+            type=_finite_int(mapping.get("type")),
         )
     return mapping
 
