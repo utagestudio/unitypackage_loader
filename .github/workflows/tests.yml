@@ -63,6 +63,7 @@ jobs:
           mkdir -p fixtures
           ~/blender/blender -b --factory-startup --python tests/make_synthetic_package.py -- fixtures/synthetic_multi.unitypackage
           ~/blender/blender -b --factory-startup --python tests/make_synthetic_scene_package.py -- fixtures/synthetic_scene.unitypackage
+          ~/blender/blender -b --factory-startup --python tests/make_synthetic_urp_package.py -- fixtures/synthetic_urp.unitypackage
           python3 tests/make_synthetic_broken_packages.py fixtures/synthetic_multi.unitypackage fixtures
           ls -la fixtures
 
@@ -128,6 +129,7 @@ jobs:
           run synthetic_multi.unitypackage expectations_synthetic_prefabs_stack.json
           run synthetic_scene.unitypackage expectations_synthetic_scene.json
           run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs.json
+          run synthetic_urp.unitypackage expectations_synthetic_urp.json
           run synthetic_broken_model.unitypackage expectations_synthetic_broken_model.json
           run synthetic_broken_all.unitypackage expectations_synthetic_broken_all.json
           if [ -n "$failed" ]; then
