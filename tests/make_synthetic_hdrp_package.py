@@ -9,7 +9,7 @@ HDRP の GUID のマテリアルがあるとパッケージ全体のライトが
 - HdrpGlass.fbx（球）: HdrpGlassMat（半透明。残った _Mode は 0）と HdrpUnlitMat（HDRP/Unlit）
 - HdrpLayered.fbx（円錐）: HdrpLayeredMat（HDRP/LayeredLit。レイヤー 0 を読む）
 
-Assets/Synthetic/Scenes/Hdrp.unity に 3 つの FBX を並べ、平行光源と点光源を 1 つずつ置く（HDRP の強さの換算を確かめる）。
+Assets/Synthetic/Scenes/Hdrp.unity に 3 つの FBX を並べ、平行光源・点光源・面光源を 1 つずつ置く（HDRP の強さの換算を確かめる。面光源は #129）。
 ライトには HDRP の追加データ（HDAdditionalLightData）を付ける（#120）。
 """
 
@@ -145,8 +145,13 @@ def main() -> None:
         mono_behaviour(8003, 8000, HDRP_LIGHT_DATA),
         game_object(8100, "Point Light"),
         transform(8101, 8100, pos=(2, 1, 0)),
-        light_doc(8102, 8100, 2, intensity=600, light_range=5),  # lumen
+        light_doc(8102, 8100, 2, intensity=600, light_range=5),  # candela
         mono_behaviour(8103, 8100, HDRP_LIGHT_DATA),
+        # 面光源（#129）。HDRP の m_Intensity は nits
+        game_object(8200, "Area Light"),
+        transform(8201, 8200, pos=(0, 2, 0), rot=(0.7071068, 0, 0, 0.7071068)),
+        light_doc(8202, 8200, 3, intensity=1366, area=(2, 0.5), lightmapping=2, shadow=0),
+        mono_behaviour(8203, 8200, HDRP_LIGHT_DATA),
     ]
     add(scene_path, (HEADER + "".join(docs)).encode(),
         f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
