@@ -460,5 +460,10 @@
       "smoothness_scale": null
     }
   ],
-  "scene_exposure": 0.0
+  "scene_exposure": 0.0,
+  "dialog_selected": {
+    "SCENES": [
+      "Assets/Synthetic/Scenes/Legacy.unity"
+    ]
+  }
 }

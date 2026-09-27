@@ -412,6 +412,18 @@ def main() -> int:
             for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
                 if attr in spec:
                     c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
+    if "dialog_selected" in exp:
+        # 選択ダイアログの候補で、既定でチェックが入るもの（#134: Scenes は最初の読み込めるシーンだけ）
+        from unitypackage_loader.operators import select_models
+
+        prepared = importer.prepare_package(str(package))
+        items = getattr(bpy.context.window_manager, select_models._ITEMS_PROP)
+        items.clear()
+        select_models._add_scene_items(items, prepared)
+        for kind, expected in exp["dialog_selected"].items():
+            actual = sorted(it.pathname for it in items if it.kind == kind and it.selected)
+            c.eq(f"dialog selected {kind}", actual, sorted(expected))
+        items.clear()
     if "scene_exposure" in exp:
         # シーンの露出は変えない（#130。HDRP の露出はライトの強さに掛ける）
         actual = bpy.context.scene.view_settings.exposure
