@@ -83,6 +83,7 @@ class HdrpLitTests(unittest.TestCase):
         n = self.normalize(text)
         self.assertEqual(n.specular_color, (0.2, 0.3, 0.1, 1.0))
         self.assertEqual(n.specular_tex.guid, TEX_S)
+        self.assertFalse(n.smoothness_from_specular)  # HDRP のマップの A は Smoothness ではない
         self.assertEqual((n.metallic, n.metallic_remap), (0.0, (0.0, 0.0)))  # マスクマップの R でも金属にしない
         self.assertEqual(n.extras["hdrp"]["material_type"], "specular_color")
 

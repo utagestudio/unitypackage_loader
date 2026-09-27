@@ -261,7 +261,7 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
         if not norm.smoothness_from_albedo:
             smoothness_out = node.outputs["Alpha"]
     spec_node = _specular(b, bsdf, norm, mapping_out, images, tex_infos, warnings)
-    if smoothness_out is None and spec_node is not None:
+    if smoothness_out is None and spec_node is not None and norm.smoothness_from_specular:
         smoothness_out = spec_node.outputs["Alpha"]  # Specular ワークフロー / Simple Lit のマップの A（#117）
     if smoothness_out is not None:
         # Unity の Smoothness は A × 倍率（URP の _Smoothness / Standard の _GlossMapScale。#112）

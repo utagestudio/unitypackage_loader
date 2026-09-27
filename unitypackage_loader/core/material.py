@@ -263,10 +263,12 @@ class NormalizedMaterial:
     # Smoothness = ``smoothness_offset`` + A × ``smoothness_scale``
     metallic_remap: tuple[float, float] = (0.0, 1.0)
     smoothness_offset: float = 0.0
-    # スペキュラーの色（真上から見た反射率 F0。Unity の Specular ワークフローと Simple Lit の _SpecColor）。None なら Blender の既定（IOR 1.5）。
-    # ``specular_tex`` があれば F0 = その RGB × 色で、Smoothness の元（metallic_tex もアルベドも使わないとき）はその A（#117）
+    # スペキュラーの色（真上から見た反射率 F0。URP の Specular ワークフロー / Simple Lit の _SpecColor、HDRP の _SpecularColor）。
+    # None なら Blender の既定（IOR 1.5）。``specular_tex`` があれば F0 = その RGB × 色（#117 / #119）
     specular_color: Color | None = None
     specular_tex: TexRef | None = None
+    # Smoothness の元を specular_tex の A にする（URP。metallic_tex もアルベドも使わないとき）。HDRP のマップの A は Smoothness ではない
+    smoothness_from_specular: bool = False
     occlusion_tex: TexRef | None = None
     cull_backface: bool = True
     uv_scale: tuple[float, float] = (1.0, 1.0)

@@ -100,6 +100,7 @@ def _surface_inputs(mat: UnityMaterial, n: NormalizedMaterial) -> None:
         n.metallic = 0.0
         n.specular_tex = mat.tex("_SpecGlossMap")
         n.specular_color = (1.0, 1.0, 1.0, 1.0) if n.specular_tex is not None else _rgb(mat.color("_SpecColor", default=_SPEC_LIT))
+        n.smoothness_from_specular = n.specular_tex is not None
         return
     n.metallic = mat.f("_Metallic", 0.0)
     n.metallic_tex = mat.tex("_MetallicGlossMap")
@@ -131,6 +132,7 @@ def _simple_lit(mat: UnityMaterial, n: NormalizedMaterial) -> None:
         return
     n.specular_color = _rgb(mat.color("_SpecColor", default=_SPEC_SIMPLE))
     n.specular_tex = mat.tex("_SpecGlossMap")
+    n.smoothness_from_specular = n.specular_tex is not None
     n.smoothness_from_albedo = (
         int(mat.f("_SmoothnessSource", 0.0)) == 1 and n.alpha_mode == "opaque" and n.base_color_tex is not None
     )
