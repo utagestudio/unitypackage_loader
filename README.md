@@ -87,6 +87,9 @@ Choose the unit at the top, then tick what to import in the list:
   objects stay in the file and keep their level in the `unity_lod` custom property).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
   measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
+  The render pipeline is detected from the URP / HDRP additional data on lights and cameras, and from the materials'
+  shaders. For HDRP scenes, the Volume's exposure is applied to the Blender scene's exposure (Color Management; toggle
+  it with **Exposure** in the dialog; automatic exposure is approximated with its upper limit).
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
   warnings. UI, terrain and meshes that are not in the package (such as Unity's built-in primitives) are not imported
   and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
