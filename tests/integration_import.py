@@ -409,6 +409,10 @@ def main() -> int:
             for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
                 if attr in spec:
                     c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
+    if "scene_exposure" in exp:
+        # HDRP の Volume から設定したシーンの露出（#130）
+        actual = bpy.context.scene.view_settings.exposure
+        c.true("scene exposure", abs(actual - exp["scene_exposure"]) <= 1e-3, f"expected {exp['scene_exposure']}, got {actual}")
     if "scene_camera" in exp:
         camera = bpy.context.scene.camera
         c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])

@@ -165,5 +165,6 @@
         "Specular IOR Level": 0.0
       }
     }
-  ]
+  ],
+  "scene_exposure": 0.0
 }

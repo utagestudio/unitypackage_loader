@@ -459,5 +459,6 @@
       "alpha_mode": "cutout",
       "smoothness_scale": null
     }
-  ]
+  ],
+  "scene_exposure": 0.0
 }

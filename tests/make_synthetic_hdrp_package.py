@@ -11,6 +11,8 @@ HDRP の GUID のマテリアルがあるとパッケージ全体のライトが
 
 Assets/Synthetic/Scenes/Hdrp.unity に 3 つの FBX を並べ、平行光源・点光源・面光源を 1 つずつ置く（HDRP の強さの換算を確かめる。面光源は #129）。
 ライトには HDRP の追加データ（HDAdditionalLightData）を付ける（#120）。
+露出の Volume を 2 つ置く（#130）。グローバルな Volume（Exposure が固定露出 EV 9・補正 1 のプロファイル）と、優先度の高い
+ローカルな Volume（固定露出 EV 3）。使うのはグローバルな方で、Blender の露出は log2(683 / 1.2) − 8 になる。
 """
 
 from __future__ import annotations
@@ -43,6 +45,30 @@ HDRP_LIT = "{fileID: 4800000, guid: 6e4ae4064600d784cac1e41a9e6f2e59, type: 3}"
 HDRP_LAYERED = "{fileID: 4800000, guid: 81d02e8644315b742b154842a3a2f98c, type: 3}"
 HDRP_UNLIT = "{fileID: 4800000, guid: c4edd00ff2db5b24391a4fcb1762e459, type: 3}"
 HDRP_LIGHT_DATA = "7a68c43fe1f2a47cfa234b5eeaa98012"  # HDAdditionalLightData
+VOLUME_SCRIPT = "172515602e62fb746b5d573b38a5fe58"  # Volume
+EXPOSURE_SCRIPT = "2d08ce26990eb1a4a9177b860541e702"  # Exposure
+
+
+def exposure_profile_yaml(name: str, fixed: float, compensation: float) -> str:
+    """Exposure だけを持つ Volume のプロファイル（.asset）。"""
+    def param(key, value):
+        return f"  {key}:\n    m_OverrideState: 1\n    m_Value: {value}\n"
+    return (
+        "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
+        f"--- !u!114 &11400000\nMonoBehaviour:\n  m_Name: {name}\n  components:\n  - {{fileID: 1}}\n"
+        "--- !u!114 &1\nMonoBehaviour:\n  m_Name: Exposure\n"
+        f"  m_Script: {{fileID: 11500000, guid: {EXPOSURE_SCRIPT}, type: 3}}\n  active: 1\n"
+        + param("mode", 0) + param("fixedExposure", fixed) + param("compensation", compensation)
+    )
+
+
+def volume_doc(file_id: int, go: int, profile: str, is_global: int, priority: int) -> str:
+    return (
+        f"--- !u!114 &{file_id}\nMonoBehaviour:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        f"  m_Script: {{fileID: 11500000, guid: {VOLUME_SCRIPT}, type: 3}}\n"
+        f"  m_IsGlobal: {is_global}\n  priority: {priority}\n  weight: 1\n"
+        f"  sharedProfile: {{fileID: 11400000, guid: {profile}, type: 2}}\n"
+    )
 
 
 def hdrp_mat_yaml(name: str, shader: str, *, textures: str, floats: dict, colors: dict) -> str:
@@ -130,6 +156,12 @@ def main() -> None:
         used = {first: mats[first], **({second: mats[second]} if second else {})}
         models[label] = add(model_path, path.read_bytes(), model_meta(guid_of(model_path), used))
 
+    profiles = {}
+    for name, fixed, compensation in (("GlobalExposure", 9, 1), ("LocalExposure", 3, 0)):
+        path = f"Assets/Synthetic/Settings/{name}.asset"
+        profiles[name] = add(path, exposure_profile_yaml(name, fixed, compensation).encode(),
+                             f"fileFormatVersion: 2\nguid: {guid_of(path)}\nNativeFormatImporter:\n  mainObjectFileID: 11400000\n")
+
     scene_path = "Assets/Synthetic/Scenes/Hdrp.unity"
     docs = []
     for index, (label, x) in enumerate((("HdrpLit", 0), ("HdrpGlass", 3), ("HdrpLayered", 6))):
@@ -152,6 +184,12 @@ def main() -> None:
         transform(8201, 8200, pos=(0, 2, 0), rot=(0.7071068, 0, 0, 0.7071068)),
         light_doc(8202, 8200, 3, intensity=1366, area=(2, 0.5), lightmapping=2, shadow=0),
         mono_behaviour(8203, 8200, HDRP_LIGHT_DATA),
+        game_object(8300, "Global Volume"),
+        transform(8301, 8300),
+        volume_doc(8302, 8300, profiles["GlobalExposure"], is_global=1, priority=0),
+        game_object(8400, "Local Volume"),
+        transform(8401, 8400),
+        volume_doc(8402, 8400, profiles["LocalExposure"], is_global=0, priority=10),
     ]
     add(scene_path, (HEADER + "".join(docs)).encode(),
         f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
