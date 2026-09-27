@@ -1,0 +1,24 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "unit": "SCENES" },
+  "errors": 0,
+  "scenes": { "count": 1 },
+  "materials": { "count": 5, "families": ["urp"] },
+  "warnings_max": 2,
+  "warnings_contain": ["URP blend mode 'additive' is approximated as alpha blending"],
+  "light_count": 2,
+  "lights": [
+    { "name": "Directional Light", "type": "SUN", "energy": 6.2832 },
+    { "name": "Point Light", "type": "POINT", "energy": 78.9568, "use_custom_distance": true, "cutoff_distance": 5 }
+  ],
+  "material_checks": [
+    { "name": "UrpLitMat", "mode": "PRINCIPLED", "shader_name": "Universal Render Pipeline/Lit", "alpha_mode": "opaque", "backface_culling": false,
+      "base_image": "UrpColor.png", "normal_image": "UrpNormal.png", "smoothness_scale": 0.3,
+      "normalized": { "base_color": [1.0, 1.0, 1.0, 1.0], "uv_scale": [2.0, 2.0], "metallic": 0.2, "normal_strength": 0.5, "blend_mode": "alpha" } },
+    { "name": "UrpClipMat", "alpha_mode": "cutout", "render_method": "DITHERED", "base_image": "UrpColor.png", "normalized": { "alpha_cutoff": 0.3 } },
+    { "name": "UrpGlassMat", "alpha_mode": "blend", "render_method": "BLENDED", "base_image": "UrpColor.png",
+      "normalized": { "blend_mode": "additive", "base_color": [1.0, 1.0, 1.0, 0.4] } },
+    { "name": "UrpUnlitMat", "mode": "UNLIT", "shader_name": "Universal Render Pipeline/Unlit", "base_image": "UrpColor.png" },
+    { "name": "UrpDerivedMat", "mode": "PRINCIPLED", "shader_name": "", "alpha_mode": "opaque", "base_image": "UrpColor.png",
+      "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25], "normalized": { "family": "urp" } }
+  ]
+}
