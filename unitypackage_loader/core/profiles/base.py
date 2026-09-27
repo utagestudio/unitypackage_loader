@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..material import BLACK, WHITE, AlphaMode, Lighting, NormalizedMaterial, TexRef, UnityMaterial
+from ..shader_source import restrict_to_declared
 
 __all__ = ["ShaderInfo", "ShaderTable", "ShaderProfile", "select_profile", "normalize_material"]
 
@@ -192,6 +193,20 @@ def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tupl
     return generic, info
 
 
-def normalize_material(mat: UnityMaterial, table: ShaderTable | None = None) -> NormalizedMaterial:
+def normalize_material(
+    mat: UnityMaterial, table: ShaderTable | None = None, declared: frozenset[str] | None = None
+) -> NormalizedMaterial:
+    """``declared`` はパッケージに入っているシェーダーの定義が宣言するプロパティ名（``core/shader_source.py``）。
+
+    シェーダー表に無いシェーダーで宣言が分かるときは、宣言されていない（前のシェーダーの残りの）プロパティを読まない（#118）。
+    外した名前は ``extras["undeclared_properties"]`` に残す。表で分かるシェーダーは各プロファイルの読み方に任せる。
+    """
+    table = table or default_table()
+    dropped: list[str] = []
+    if declared and table.lookup(mat) is None:
+        mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
-    return profile.normalize(mat, info)
+    norm = profile.normalize(mat, info)
+    if dropped:
+        norm.extras["undeclared_properties"] = dropped
+    return norm
