@@ -191,7 +191,7 @@
           <img src="assets/use-props.webp" width="1200" height="800" alt="An interior asset made for Unity, rendered in Blender: a potted plant, a mug and a TV remote on a wooden table next to a lit lamp" loading="lazy">
           <div class="body">
             <h3>Props and world assets, too</h3>
-            <p>Standard and URP materials are converted to Blender's standard shader, so furniture, props and world assets sold for Unity can come in <a href="#scenes">with their scene layout intact</a>.</p>
+            <p>Standard, URP and HDRP materials are converted to Blender's standard shader, so furniture, props and world assets made for Unity can come in <a href="#scenes">with their scene layout intact</a>.</p>
           </div>
         </article>
       </div>
@@ -204,7 +204,7 @@
       <div class="section-head">
         <span class="eyebrow">Scene import</span>
         <h2>Unity scenes,<wbr> <span class="nb">laid out as they were</span></h2>
-        <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing.</p>
+        <p>Pick a scene (<code>.unity</code>) in the package and its buildings, furniture and props land in Blender at the position, rotation and scale they had in Unity. Lights and cameras come along too, so you can try a render right after importing. When a package has several scenes of the same place, such as day and night, the dialog opens with only the first scene ticked, so tick the one you want instead.</p>
       </div>
       <figure class="shot">
         <div class="frame"><img src="assets/scene-street.webp" width="1502" height="845" alt="A Japanese street scene imported into Blender, with buildings and utility poles, and the dialog for choosing what to import open at the bottom left, with a scene of 1879 placements ticked on the Scenes tab" loading="lazy"></div>
@@ -215,7 +215,7 @@
         <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
         <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
       </div>
-      <p class="modes-note">Light brightness is converted to look close in EEVEE, but it will not match Unity exactly.</p>
+      <p class="modes-note">Light brightness is converted to look close in EEVEE, following how Built-in, URP and HDRP each define it (and, for HDRP, the scene's exposure). It still will not match Unity exactly, so finish the look in Blender.</p>
     </div>
   </section>
 
@@ -252,10 +252,10 @@
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>MToon</b><span>VRM's toon shader, including shade color and MatCap</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>Poiyomi</b><span>Toon lighting with shadow strength, gated emission, reflection-aware metallic, outlines</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>Standard</b><span>Built-in PBR: albedo, metallic, smoothness, normal, emission</span></div></div>
-          <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP Lit</b><span>Same PBR mapping as Standard, with surface type and alpha clip detected</span></div></div>
-          <div class="shader"><span class="tag tag-full">Profile</span><div><b>HDRP Lit</b><span>Same PBR mapping as Standard, with surface type detected</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP</b><span>Lit, Simple Lit, Unlit and Baked Lit. Both the metallic and specular setups, transparency and alpha clip, ignoring old settings left over from Standard</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>HDRP</b><span>Lit, LayeredLit (first layer) and Unlit. Metallic and smoothness from the mask map, specular color, transparency and alpha clip, emission</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>VRChat Mobile</b><span>Quest shaders: Toon Lit, Standard Lite, Toon Standard, Bumped Specular, MatCap Lit</span></div></div>
-          <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. Add your own GUID table for custom shaders.</span></div></div>
+          <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. When the shader (such as a Shader Graph) is in the package, old settings it does not use are ignored. Add your own GUID table for custom shaders.</span></div></div>
         </div>
         <div class="legend">
           <span><span class="tag tag-full">Profile</span>Dedicated mapping made for that shader</span>
@@ -272,7 +272,7 @@
           <div class="section-head">
             <span class="eyebrow">Switch the look</span>
             <h2>Toon in EEVEE, PBR in Cycles</h2>
-            <p>Toon shaders such as lilToon come in with a toon look made for EEVEE, while Standard and URP come in as Blender's Principled BSDF. Want to render in Cycles? Switch later from the sidebar, no original package needed.</p>
+            <p>Toon shaders such as lilToon come in with a toon look made for EEVEE, while Standard, URP and HDRP come in as Blender's Principled BSDF. Want to render in Cycles? Switch later from the sidebar, no original package needed.</p>
           </div>
           <div class="modes">
             <div class="mode default"><span class="name">Auto (recommended)</span><span>Looks at each material's shader and picks toon, PBR or unlit</span></div>

@@ -410,6 +410,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 | Prefabs | パッケージ内のすべての prefab（pathname 順） | prefab ごとにパッケージのコレクションの子コレクションを作り（`unity_prefab` / `unity_prefab_guid`）、Renderer が使うモデルをその prefab の表だけで読み込む（§0.3 の「読み込む単位 Prefabs」） |
 | Models | パッケージ内のすべてのモデル | 従来どおり。prefab の表は、そのモデルを使う prefab をパス順に先勝ちで統合したもの |
 
+- 既定でチェックを入れるのは、Scenes では一覧の順で最初の読み込めるシーンだけ、Prefabs と Models では読み込めるものすべて（#134。同じ場所の時間違いのシーンが多く、まとめて読むと建物やライトが重なる）。
 - 候補は推測で外さない。読み込めない候補（Renderer がパッケージ内のモデルを使っていない prefab、使うモデルがすべて読み込めない prefab、非対応形式や同梱 .blend OFF のモデル、パッケージ内のモデルを置いていないシーン、読めないシーン）は灰色にして理由を出す（`core/units.py`）。候補が 1 つも無い単位はタブに出さない。
 - 既定の単位は、前回選んだ単位（Preferences の `last_import_unit`）に読み込める候補があればそれ、無ければ Prefabs → Models → Scenes の順。
 - シーンの展開（数 MB の .unity の解析と prefab の展開）は重いので、ダイアログを開いた時点では行わない。タブの件数はパッケージ内のシーン数で出し、

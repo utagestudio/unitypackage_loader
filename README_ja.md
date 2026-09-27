@@ -75,6 +75,7 @@ blender --command extension build --source-dir unitypackage_loader --output-dir 
 
 パッケージに選べるシーン・prefab・モデルが 2 つ以上あると、オプションの後に選択ダイアログが開きます。
 上部で読み込む単位を選び、一覧で読み込むものにチェックを入れます。
+Scenes は、シーンをまとめて読み込むと建物やライトが重なりやすいので、最初の読み込めるシーンだけに既定でチェックが入ります（Prefabs と Models はすべて）。
 
 - **Scenes**: シーン（`.unity`）に置かれたものを、Unity で設定された位置・回転・スケールのまま読み込みます。シーンごとに Collection ができ、
   モデルより上の GameObject は Empty で再現し、非アクティブなものは非表示にします。読み込むのはシーンの内容だけです。
@@ -158,7 +159,15 @@ Unity のシェーダーと Blender のノードは 1:1 に対応しないため
 - **Toon (Node Group)**: ノードグループ `UnityToon` で影色（境界・ぼかし・強さ）、MatCap（Normal / Add / Screen / Multiply）、
   リムライト、エミッション、アルファを再現します。ライティングに Shader to RGB を使うため EEVEE 向けです（Cycles では影が付きません）。
 - **Principled BSDF**: ベースカラー、ノーマル、エミッション、Metallic / Roughness を接続します。
+  URP の Specular ワークフローや Simple Lit、HDRP の Specular Color のスペキュラーの色は、IOR と Specular Tint で近づけます。
+  HDRP のマスクマップは、Remap の範囲を掛けて Metallic と Roughness につなぎます。
 - **Unlit (Emission)**: テクスチャを Emission に直結する、ライティング無しの最も単純な構成です。
+
+シェーダーごとの読み方は、lilToon / Poiyomi / MToon / VRChat Mobile、Built-in の Standard、URP（Lit / Complex Lit / Simple Lit / Unlit / Baked Lit）、
+HDRP（Lit / LayeredLit の 1 層目 / Unlit）に専用のものがあり、それ以外は一般的なプロパティ名から読みます。
+シェーダーを切り替えたマテリアルには前のシェーダーの設定が残っていることがあるので、URP / HDRP ではそのパイプラインの名前だけを読みます。
+パッケージにシェーダーの定義（Shader Graph や `.shader`）が入っているときは、そのシェーダーが宣言していない設定は読みません
+（シェーダーの処理そのものは解釈しないので、独自の名前で色を作るシェーダーは白くなることがあります）。
 
 中間表現そのものはカスタムプロパティ `unity_normalized`（JSON）に、Blender で使わなかった値は `unity_props` に保存されます。
 サイドバーの Tools パネルの "Rebuild in Another Mode" を使うと、元パッケージが無くても選択メッシュのマテリアルを別モードで組み直せます。ダイアログの Force Opaque などの初期値は、インポート時（または前回の組み直し）の設定です。
@@ -205,7 +214,9 @@ GPL-3.0-or-later（[LICENSE](LICENSE)）。Blender の Extension として配布
 
 `unitypackage_loader/core/profiles/shader_guids.json` のシェーダー GUID は、公開リポジトリの
 [lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) と [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)（いずれも MIT License）、
-および公開リポジトリにミラーされている VRChat SDK の Mobile シェーダー（`Sample Assets/Shaders/Mobile`）の
-`.shader.meta` から収集した識別子です。シェーダーのコードは含みません。
+公開リポジトリにミラーされている VRChat SDK の Mobile シェーダー（`Sample Assets/Shaders/Mobile`）、
+および Unity 6000.6 に同梱の URP / HDRP（`com.unity.render-pipelines.universal` / `high-definition` 17.6）の
+`.shader.meta` から収集した識別子です。ライトの追加データや Volume・Exposure のスクリプトの GUID（`core/lights.py` / `core/exposure.py`）も、
+同じ URP / HDRP / core のパッケージの `.cs.meta` から収集した識別子です。シェーダーやスクリプトのコードは含みません。
 lilToon、MToon、Poiyomi、VRChat、Unity などの名称は各権利者の商標または製品名です。
 このアドオンは Unity Technologies、VRChat Inc. および各シェーダー作者とは無関係です。
