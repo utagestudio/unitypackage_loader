@@ -12,7 +12,7 @@ HDRP の GUID のマテリアルがあるとパッケージ全体のライトが
 Assets/Synthetic/Scenes/Hdrp.unity に 3 つの FBX を並べ、平行光源・点光源・面光源を 1 つずつ置く（HDRP の強さの換算を確かめる。面光源は #129）。
 ライトには HDRP の追加データ（HDAdditionalLightData）を付ける（#120）。
 露出の Volume を 2 つ置く（#130）。グローバルな Volume（Exposure が固定露出 EV 9・補正 1 のプロファイル）と、優先度の高い
-ローカルな Volume（固定露出 EV 3）。使うのはグローバルな方で、Blender の露出は log2(683 / 1.2) − 8 になる。
+ローカルな Volume（固定露出 EV 3）。使うのはグローバルな方で、HDRP のライトに 2^(log2(683 / 1.2) − 8) 倍を掛ける（Blender の露出は変えない）。
 """
 
 from __future__ import annotations
