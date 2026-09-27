@@ -20,14 +20,18 @@
     {
       "name": "Directional Light",
       "type": "SUN",
-      "energy": 146.4129
+      "energy": 146.4129,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights"
     },
     {
       "name": "Point Light",
       "type": "POINT",
       "energy": 11.0393,
       "use_custom_distance": true,
-      "cutoff_distance": 5
+      "cutoff_distance": 5,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights"
     }
   ],
   "material_checks": [
