@@ -113,6 +113,7 @@ class UrpLitTests(unittest.TestCase):
         self.assertIsNone(n.metallic_tex)
         self.assertEqual(n.specular_tex.guid, TEX_S)
         self.assertEqual(n.specular_color, (1.0, 1.0, 1.0, 1.0))
+        self.assertTrue(n.smoothness_from_specular)
         self.assertAlmostEqual(n.smoothness_scale, 0.6)
         self.assertEqual(n.warnings, [])
         # マップが無ければ _SpecColor
@@ -147,6 +148,7 @@ class UrpLitTests(unittest.TestCase):
         self.assertEqual(n.metallic, 0.0)  # 残った _Metallic: 0.25 は使わない
         self.assertEqual(n.specular_color, (0.5, 0.25, 0.5, 1.0))  # F0 = マップの RGB × _SpecColor
         self.assertEqual(n.specular_tex.guid, TEX_S)
+        self.assertTrue(n.smoothness_from_specular)
         self.assertAlmostEqual(n.smoothness_scale, 0.6)
         self.assertEqual(n.normal_strength, 1.0)  # Simple Lit は _BumpScale を使わない
         self.assertIsNone(n.metallic_tex)

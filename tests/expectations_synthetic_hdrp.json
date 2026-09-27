@@ -1,0 +1,138 @@
+{
+  "options": {
+    "material_mode": "AUTO",
+    "models": "ALL",
+    "unit": "SCENES"
+  },
+  "errors": 0,
+  "scenes": {
+    "count": 1
+  },
+  "materials": {
+    "count": 5,
+    "families": [
+      "hdrp"
+    ]
+  },
+  "warnings_max": 2,
+  "light_count": 2,
+  "lights": [
+    {
+      "name": "Directional Light",
+      "type": "SUN",
+      "energy": 146.4129
+    },
+    {
+      "name": "Point Light",
+      "type": "POINT",
+      "energy": 11.0393,
+      "use_custom_distance": true,
+      "cutoff_distance": 5
+    }
+  ],
+  "material_checks": [
+    {
+      "name": "HdrpMaskMat",
+      "mode": "PRINCIPLED",
+      "shader_name": "HDRP/Lit",
+      "alpha_mode": "opaque",
+      "backface_culling": false,
+      "base_image": "HdrpColor.png",
+      "normal_image": "HdrpNormal.png",
+      "smoothness_scale": 0.5,
+      "bsdf_inputs": {
+        "Metallic": "linked",
+        "Roughness": "linked"
+      },
+      "normalized": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "uv_scale": [
+          2.0,
+          2.0
+        ],
+        "metallic_remap": [
+          0.1,
+          0.8
+        ],
+        "smoothness_offset": 0.2,
+        "normal_strength": 0.4
+      }
+    },
+    {
+      "name": "HdrpSpecMat",
+      "mode": "PRINCIPLED",
+      "shader_name": "HDRP/Lit",
+      "base_image": "HdrpColor.png",
+      "bsdf_inputs": {
+        "Metallic": 0.0,
+        "IOR": 4.4415,
+        "Specular Tint": "linked",
+        "Roughness": 0.4
+      },
+      "normalized": {
+        "specular_color": [
+          0.4,
+          0.2,
+          0.1,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "HdrpGlassMat",
+      "alpha_mode": "blend",
+      "render_method": "BLENDED",
+      "base_image": "HdrpColor.png",
+      "normalized": {
+        "blend_mode": "alpha",
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          0.3
+        ]
+      }
+    },
+    {
+      "name": "HdrpUnlitMat",
+      "mode": "UNLIT",
+      "shader_name": "HDRP/Unlit",
+      "base_image": "HdrpColor.png",
+      "normalized": {
+        "base_color": [
+          0.5,
+          1.0,
+          0.5,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "HdrpLayeredMat",
+      "mode": "PRINCIPLED",
+      "shader_name": "HDRP/LayeredLit",
+      "base_image": "HdrpColor.png",
+      "bsdf_inputs": {
+        "Metallic": 0.6,
+        "Roughness": 0.75
+      },
+      "normalized": {
+        "base_color": [
+          0.9,
+          0.9,
+          0.9,
+          1.0
+        ],
+        "uv_scale": [
+          5.0,
+          10.0
+        ]
+      }
+    }
+  ]
+}
