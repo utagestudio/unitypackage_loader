@@ -8,6 +8,8 @@ URP Lit の GUID のマテリアルがあるとパッケージ全体のライト
 - UrpLit.fbx（立方体）: UrpLitMat（Metallic マップ・ノーマルマップ・両面。残った _MainTex は別の画像）と UrpClipMat（アルファクリップ）
 - UrpGlass.fbx（球）: UrpGlassMat（半透明・_Blend 2 = Additive。残った _Mode は 0）と UrpUnlitMat（URP Unlit）
 - UrpDerived.fbx（円錐）: UrpDerivedMat（表に無い URP Lit 派生のシェーダー。_EMISSION キーワードで光る）
+- UrpSpec.fbx（トーラス）: UrpSpecMat（Lit の Specular ワークフロー。_SpecColor）と UrpSimpleMat（Simple Lit。スペキュラーマップ × _SpecColor）（#117）
+- UrpBaked.fbx（アイコ球）: UrpBakedMat（Baked Lit。スペキュラー無し）（#117）
 
 Assets/Synthetic/Scenes/Urp.unity に 3 つの FBX を並べ、平行光源と点光源を 1 つずつ置く（URP の強さの換算を確かめる）。
 """
@@ -39,6 +41,8 @@ from tests.make_synthetic_scene_package import (  # noqa: E402
 URP_LIT = "{fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}"
 URP_UNLIT = "{fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}"
 URP_DERIVED = "{fileID: 4800000, guid: 7777777777777777bbbbbbbbbbbbbbbb, type: 3}"
+URP_SIMPLE = "{fileID: 4800000, guid: 8d2bb70cbf9db8d4da26e15b26e74248, type: 3}"
+URP_BAKED = "{fileID: 4800000, guid: 0ca6dca7396eb48e5849247ffd444914, type: 3}"
 
 
 def texture(prop: str, guid: str | None, scale=(1, 1)) -> str:
@@ -47,7 +51,7 @@ def texture(prop: str, guid: str | None, scale=(1, 1)) -> str:
 
 
 def urp_mat_yaml(name: str, shader: str, *, base: str, leftover_main: str, textures: str = "", floats=(), base_color=(1, 1, 1, 1),
-                 emission=(0, 0, 0), keywords=()) -> str:
+                 emission=(0, 0, 0), keywords=(), spec_color=(0.2, 0.2, 0.2, 1)) -> str:
     values = {"_WorkflowMode": 1, "_Surface": 0, "_Blend": 0, "_AlphaClip": 0, "_Cutoff": 0.5, "_Cull": 2, "_Metallic": 0,
               "_Smoothness": 0.5, "_BumpScale": 1, "_Mode": 3, "_Glossiness": 0.9, "_GlossMapScale": 1, **dict(floats)}
     floats_text = "".join(f"    - {k}: {v}\n" for k, v in sorted(values.items()))
@@ -63,6 +67,7 @@ def urp_mat_yaml(name: str, shader: str, *, base: str, leftover_main: str, textu
         f"    - _BaseColor: {{r: {r}, g: {g}, b: {b}, a: {a}}}\n"
         "    - _Color: {r: 0, g: 0, b: 0, a: 1}\n"
         f"    - _EmissionColor: {{r: {emission[0]}, g: {emission[1]}, b: {emission[2]}, a: 1}}\n"
+        f"    - _SpecColor: {{r: {spec_color[0]}, g: {spec_color[1]}, b: {spec_color[2]}, a: {spec_color[3]}}}\n"
     )
 
 
@@ -85,6 +90,7 @@ def main() -> None:
     leftover = add_tex("Leftover.png", (255, 0, 255))
     normal = add_tex("UrpNormal.png", (128, 128, 255), normal=True)
     mask = add_tex("UrpMask.png", (255, 0, 0))
+    spec = add_tex("UrpSpec.png", (255, 128, 64))
 
     materials = {
         # Metallic マップ（R = Metallic、A × _Smoothness = Smoothness）、ノーマルマップ、両面
@@ -103,6 +109,15 @@ def main() -> None:
         # 表に無い URP Lit 派生のシェーダー。_WorkflowMode / _Surface の指紋で URP として読む
         "UrpDerivedMat": urp_mat_yaml("UrpDerivedMat", URP_DERIVED, base=color, leftover_main=leftover,
                                       emission=(1, 0.5, 0.25), keywords=["_EMISSION"]),
+        # Lit の Specular ワークフロー。F0 = _SpecColor（マップが無い）。残った _Metallic: 0.8 は使わない
+        "UrpSpecMat": urp_mat_yaml("UrpSpecMat", URP_LIT, base=color, leftover_main=leftover, spec_color=(0.36, 0.18, 0.09, 1),
+                                   floats={"_WorkflowMode": 0, "_Metallic": 0.8, "_Smoothness": 0.7}, keywords=["_SPECULAR_SETUP"]),
+        # Simple Lit。F0 = マップの RGB × _SpecColor、Smoothness = マップの A × _Smoothness
+        "UrpSimpleMat": urp_mat_yaml("UrpSimpleMat", URP_SIMPLE, base=color, leftover_main=leftover, spec_color=(0.5, 0.5, 0.25, 0.4),
+                                     textures=texture("_SpecGlossMap", spec), floats={"_Smoothness": 0.4, "_SpecularHighlights": 1},
+                                     keywords=["_SPECGLOSSMAP"]),
+        # Baked Lit。ライトマップだけで照らされ、スペキュラーを持たない
+        "UrpBakedMat": urp_mat_yaml("UrpBakedMat", URP_BAKED, base=color, leftover_main=leftover, floats={"_Metallic": 0.8}),
     }
     mats = {}
     for name, text in materials.items():
@@ -114,6 +129,8 @@ def main() -> None:
         ("UrpLit", "cube", "UrpLitMat", "UrpClipMat"),
         ("UrpGlass", "sphere", "UrpGlassMat", "UrpUnlitMat"),
         ("UrpDerived", "cone", "UrpDerivedMat", None),
+        ("UrpSpec", "torus", "UrpSpecMat", "UrpSimpleMat"),
+        ("UrpBaked", "icosphere", "UrpBakedMat", None),
     ):
         path = tmp / f"{label.lower()}.fbx"
         export_model(kind, first, path, name=f"Synthetic{label}", first_used_mat=second)
@@ -123,7 +140,7 @@ def main() -> None:
 
     scene_path = "Assets/Synthetic/Scenes/Urp.unity"
     docs = []
-    for index, (label, x) in enumerate((("UrpLit", 0), ("UrpGlass", 3), ("UrpDerived", 6))):
+    for index, (label, x) in enumerate((("UrpLit", 0), ("UrpGlass", 3), ("UrpDerived", 6), ("UrpSpec", 9), ("UrpBaked", 12))):
         model = models[label]
         docs.append(instance(1000 + index * 10, model, 0, [
             mod(ROOT_TRANSFORM, model, "m_LocalPosition.x", x),

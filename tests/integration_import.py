@@ -270,6 +270,20 @@ def main() -> int:
             inverted = any(n.type == "MATH" and n.label.startswith("Roughness = 1 - Smoothness") for n in nodes)
             scale = next((n.inputs[1].default_value for n in nodes if n.type == "MATH" and n.label.startswith("Smoothness ×")), 1.0)
             c.eq(f"{name}.smoothness_scale", round(scale, 4) if inverted else None, spec["smoothness_scale"])
+        if "bsdf_inputs" in spec:
+            # Principled の入力の値（つながっていれば "linked"。#117）
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            for key, value in spec["bsdf_inputs"].items():
+                sock = bsdf.inputs[key] if bsdf is not None else None
+                if sock is None:
+                    actual = None
+                elif sock.is_linked:
+                    actual = "linked"
+                elif hasattr(sock.default_value, "__len__"):
+                    actual = [round(v, 4) for v in sock.default_value[:3]]
+                else:
+                    actual = round(sock.default_value, 4)
+                c.eq(f"{name}.bsdf.{key}", actual, value)
         for key, value in spec.get("normalized", {}).items():
             # 中間表現（unity_normalized）の値。色は 4 桁に丸めて比べる（#118）
             actual = json.loads(mat.get("unity_normalized", "{}")).get(key)
