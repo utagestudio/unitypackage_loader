@@ -14,8 +14,8 @@
       "hdrp"
     ]
   },
-  "warnings_max": 2,
-  "light_count": 2,
+  "warnings_max": 5,
+  "light_count": 3,
   "lights": [
     {
       "name": "Directional Light",
@@ -30,6 +30,16 @@
       "energy": 11.0393,
       "use_custom_distance": true,
       "cutoff_distance": 5,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights"
+    },
+    {
+      "name": "Area Light",
+      "type": "AREA",
+      "shape": "RECTANGLE",
+      "energy": 6.2832,
+      "size": 2,
+      "size_y": 0.5,
       "pipeline": "HDRP",
       "pipeline_source": "lights"
     }

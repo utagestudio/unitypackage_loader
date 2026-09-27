@@ -10,7 +10,8 @@
 
 Built-in の点光源は逆二乗ではないので、全距離では合わない。d/R が 0.2〜1 の範囲で比の対数の最大を最小にする
 「d = 0.3R で一致」を使う（その範囲で 1.4 倍以内）。URP はどの距離でも一致し、Range は Blender の cutoff に入れる。
-面光源（Unity ではベイク専用）と HDRP（物理単位）は実測していない近似。
+面光源（Unity ではベイク専用）と HDRP（物理単位）は実測していない近似。HDRP の m_Intensity は種類ごとの本来の単位で入っている
+（平行光源は lux、点光源・スポットは candela、面光源は nits。HDRP の LightUnitUtils.GetNativeLightUnit）ので、683 lm/W で割る。
 """
 
 from __future__ import annotations
@@ -181,7 +182,12 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
         result.size_y = max(to_float(area.get("y"), 1.0), 1e-4)
         surface = result.size * result.size_y if light_type == LIGHT_RECTANGLE else math.pi * (result.size / 2) ** 2
         # 面のすぐ近くで、白い拡散面の画素が強さ（線形）になるように合わせる（Blender の面光源は近くで 画素 ≈ P / (面積 · π)。実測）
-        result.energy = linear * surface * math.pi
+        if pipeline == PIPELINE_HDRP:
+            # HDRP の面光源の m_Intensity は nits（LightUnitUtils.GetNativeLightUnit）。ほかの HDRP のライトと同じく 683 lm/W で割る（#129）
+            result.energy = intensity / 683.0 * surface * math.pi
+            result.notes.append("HDRP light intensity converted from nits without measurement")
+        else:
+            result.energy = linear * surface * math.pi
         result.notes.append("area light intensity is an unmeasured approximation (Unity bakes area lights)")
         return result
 
@@ -192,8 +198,8 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
     elif pipeline == PIPELINE_URP:
         result.energy = 4 * math.pi ** 2 * linear
     else:
-        result.energy = intensity / 683.0 * 4 * math.pi  # lumen → W（未計測の近似）
-        result.notes.append("HDRP light intensity converted from lumen without measurement")
+        result.energy = intensity / 683.0 * 4 * math.pi  # candela → lumen（× 4π）→ W（未計測の近似）
+        result.notes.append("HDRP light intensity converted from candela without measurement")
     if light_range > 0:
         result.use_custom_distance = True
         result.cutoff_distance = light_range
