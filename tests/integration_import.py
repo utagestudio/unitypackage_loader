@@ -270,6 +270,12 @@ def main() -> int:
             inverted = any(n.type == "MATH" and n.label.startswith("Roughness = 1 - Smoothness") for n in nodes)
             scale = next((n.inputs[1].default_value for n in nodes if n.type == "MATH" and n.label.startswith("Smoothness ×")), 1.0)
             c.eq(f"{name}.smoothness_scale", round(scale, 4) if inverted else None, spec["smoothness_scale"])
+        for key, value in spec.get("normalized", {}).items():
+            # 中間表現（unity_normalized）の値。色は 4 桁に丸めて比べる（#118）
+            actual = json.loads(mat.get("unity_normalized", "{}")).get(key)
+            if isinstance(actual, list):
+                actual = [round(v, 4) if isinstance(v, float) else v for v in actual]
+            c.eq(f"{name}.normalized.{key}", actual, value)
         if "node_types" in spec:
             c.true(
                 f"{name}.node_types",

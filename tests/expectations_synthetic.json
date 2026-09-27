@@ -1,10 +1,10 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
   "errors": 0,
-  "objects": { "count": 15, "mesh_count": 15, "armature_count": 0 },
-  "materials": { "count": 17, "mapped": 14, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
+  "objects": { "count": 16, "mesh_count": 16, "armature_count": 0 },
+  "materials": { "count": 19, "mapped": 16, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
   "images": { "count": 2 },
-  "warnings_max": 2,
+  "warnings_max": 5,
   "split_slots": 1,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"], "SyntheticNoMat": ["NoMatMat"] },
   "material_checks": [
@@ -19,6 +19,8 @@
     { "name": "BinaryFbxMat", "alpha_mode": "cutout", "shader_name": "Standard", "base_image": "ColorA.png" },
     { "name": "HdrpMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "base_image": "ColorA.png", "emission_strength": 0.0 },
     { "name": "NoMatMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png" },
-    { "name": "HdrpEmissiveMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25] }
+    { "name": "HdrpEmissiveMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25] },
+    { "name": "GraphMat", "mode": "PRINCIPLED", "alpha_mode": "opaque", "base_image": "ColorA.png", "emission_strength": 0.0, "normalized": { "base_color": [1.0, 1.0, 1.0, 1.0], "metallic": 0.0, "roughness": 0.5 } },
+    { "name": "CustomMat", "mode": "PRINCIPLED", "alpha_mode": "opaque", "base_image": null, "normalized": { "base_color": [0.2, 0.6, 0.4, 1.0], "metallic": 0.0 } }
   ]
 }

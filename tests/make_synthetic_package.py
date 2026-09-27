@@ -13,12 +13,14 @@ Renderer を持つ prefab と、そのマテリアルを上書きした Prefab V
 バイナリ形式（Asset Serialization が Force Binary）の .mat と、それを割り当てるバイナリの prefab（Binary）。
 HDRP/Lit の .mat 2 つ（白い _EmissionColor を持つが光らないものと、_EmissiveColor で光るもの）を割り当てた Hdrp。
 CylinderMat は m_ShaderKeywords が次の行に折り返されている（Unity が長い値を折り返して保存する形）。
+パッケージに入っている Shader Graph と自作 .shader の .mat（前のシェーダーの値が残ったもの）を割り当てた ShaderSrc。
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
+import json
 import struct
 import sys
 import tarfile
@@ -93,6 +95,76 @@ Material:
     m_Colors:
     - _Color: {{r: {color[0]}, g: {color[1]}, b: {color[2]}, a: 1}}
     - _EmissionColor: {{r: 0, g: 0, b: 0, a: 1}}
+"""
+
+
+TINT_SHADER = """Shader "Synthetic/Tint" {
+    Properties {
+        _Color ("Color", Color) = (1, 1, 1, 1)
+    }
+    SubShader {
+        Tags { "Queue" = "Geometry" }
+        Pass { CGPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment frag
+            #include "UnityCG.cginc"
+            fixed4 _Color;
+            fixed4 frag (v2f_img i) : SV_Target { return _Color; }
+        ENDCG }
+    }
+}
+"""
+
+
+def shader_graph_json(names: list[str]) -> str:
+    """新しい形式の Shader Graph（JSON のオブジェクトを並べたもの）の、プロパティの宣言だけを持つもの。"""
+    objects = [{"m_SGVersion": 3, "m_Type": "UnityEditor.ShaderGraph.GraphData", "m_ObjectId": "graph",
+                "m_Properties": [{"m_Id": f"p{i}"} for i in range(len(names))]}]
+    for i, name in enumerate(names):
+        objects.append({"m_SGVersion": 0, "m_Type": "UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty",
+                        "m_ObjectId": f"p{i}", "m_Name": name.strip("_"), "m_DefaultReferenceName": f"Texture2D_{i}",
+                        "m_OverrideReferenceName": name})
+    return "\n\n".join(json.dumps(o, indent=4) for o in objects)
+
+
+def shader_meta(pathname: str) -> str:
+    return f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nScriptedImporter:\n  userData:\n"
+
+
+def leftover_mat_yaml(name: str, shader: str, *, main_tex: str, base_map: str | None, color, surface_type: int = 0) -> str:
+    """HDRP/Lit や Standard から切り替えたマテリアル。前のシェーダーの値（_BaseColorMap、_Metallic、_Mode など）が残っている。"""
+    base_ref = f"{{fileID: 2800000, guid: {base_map}, type: 3}}" if base_map else "{fileID: 0}"
+    return f"""%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_Name: {name}
+  m_Shader: {shader}
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_CustomRenderQueue: -1
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _BaseColorMap:
+        m_Texture: {base_ref}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    - _MainTex:
+        m_Texture: {{fileID: 2800000, guid: {main_tex}, type: 3}}
+        m_Scale: {{x: 1, y: 1}}
+        m_Offset: {{x: 0, y: 0}}
+    m_Floats:
+    - _Glossiness: 1
+    - _Metallic: 1
+    - _Mode: 3
+    - _Smoothness: 1
+    - _SurfaceType: {surface_type}
+    m_Colors:
+    - _BaseColor: {{r: 0, g: 0, b: 0, a: 1}}
+    - _Color: {{r: {color[0]}, g: {color[1]}, b: {color[2]}, a: 1}}
+    - _EmissionColor: {{r: 1, g: 1, b: 1, a: 1}}
 """
 
 
@@ -503,6 +575,28 @@ def main() -> None:
     export_model("cube", "HdrpMat", path, name="SyntheticHdrp", first_used_mat="HdrpEmissiveMat")
     hdrp_model_path = "Assets/Synthetic/Models/Hdrp.fbx"
     add(hdrp_model_path, path.read_bytes(), model_meta(guid_of(hdrp_model_path), hdrp_mats))
+
+    # パッケージに入っている Shader Graph と自作 .shader（Issue #118）。どちらのマテリアルにも前のシェーダーの値が残っている。
+    # GraphMat のグラフは _MainTex だけを宣言する（残った黒い _Color / _BaseColor、_Metallic: 1、_Mode: 3 を読まない）。
+    # CustomMat の .shader は _Color だけを宣言する（残った _MainTex と _SurfaceType: 1 を読まない）
+    graph_path = "Assets/Synthetic/Shaders/Tiling.shadergraph"
+    graph = add(graph_path, shader_graph_json(["_MainTex"]).encode(), shader_meta(graph_path))
+    shader_path = "Assets/Synthetic/Shaders/Tint.shader"
+    shader = add(shader_path, TINT_SHADER.encode(), shader_meta(shader_path))
+    source_mats = {}
+    for name, text in (
+        ("GraphMat", leftover_mat_yaml("GraphMat", f"{{fileID: -6465566751694194690, guid: {graph}, type: 3}}",
+                                       main_tex=tex_a, base_map=tex_n, color=(0, 0, 0))),
+        ("CustomMat", leftover_mat_yaml("CustomMat", f"{{fileID: 4800000, guid: {shader}, type: 3}}",
+                                        main_tex=tex_n, base_map=None, color=(0.2, 0.6, 0.4), surface_type=1)),
+    ):
+        mat_path = f"Assets/Synthetic/Materials/{name}.mat"
+        source_mats[name] = add(mat_path, text.encode(),
+                                f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    path = tmp / "shader_src.fbx"
+    export_model("icosphere", "GraphMat", path, name="SyntheticShaderSrc", first_used_mat="CustomMat")
+    source_model_path = "Assets/Synthetic/Models/ShaderSrc.fbx"
+    add(source_model_path, path.read_bytes(), model_meta(guid_of(source_model_path), source_mats))
 
     write_package(out, entries)
 
