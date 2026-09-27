@@ -2,10 +2,10 @@
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
   "result": "FINISHED",
   "errors": 1,
-  "objects": { "count": 14, "mesh_count": 14, "armature_count": 0 },
-  "materials": { "count": 16, "mapped": 14, "families": ["hdrp", "standard", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
+  "objects": { "count": 15, "mesh_count": 15, "armature_count": 0 },
+  "materials": { "count": 18, "mapped": 16, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
   "images": { "count": 2 },
-  "warnings_max": 2,
+  "warnings_max": 5,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"] },
   "material_checks": [
     { "name": "CubeMat", "alpha_mode": "opaque", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png", "normal_image": "Normal.png" },

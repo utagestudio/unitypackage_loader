@@ -16,6 +16,7 @@ from tests import test_material as tm
 from tests import test_prefab as tp
 from tests import test_profiles_toon as tpt
 from tests import test_profiles_vrchat_mobile as tpv
+from tests import test_shader_source as tss
 from tests.test_unity_binary import legacy_material
 from unitypackage_loader.core.hierarchy import (
     Expander,
@@ -30,6 +31,7 @@ from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
 from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
+from unitypackage_loader.core.shader_source import declared_properties
 from unitypackage_loader.core.unity_binary import load_documents
 
 SEED = 20260915
@@ -152,6 +154,13 @@ def run_material(data) -> None:
     normalize_material(parse_material(data, "f" * 32, "Assets/Fuzz.mat"))
 
 
+def run_shader_source(ext: str):
+    def run(text) -> None:
+        declared = declared_properties(text, ext)
+        normalize_material(parse_material(tss.GRAPH_MAT), declared=declared)
+    return run
+
+
 def run_meta(text) -> None:
     ModelImporterInfo.from_meta(text)
     TextureImporterInfo.from_meta(text)
@@ -205,6 +214,12 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_binary_material(self):
         self.fuzz("binary material", run_material, legacy_material(), mutate_bytes)
+
+    def test_shader_source(self):
+        # パッケージに入っているシェーダーの定義（#118）
+        self.fuzz("shader", run_shader_source(".shader"), tss.SHADERLAB, mutate_text)
+        for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color")):
+            self.fuzz("shader graph", run_shader_source(".shadergraph"), graph, mutate_text)
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
