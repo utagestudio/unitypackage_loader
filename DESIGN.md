@@ -112,7 +112,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     `unity_render_pipeline` / `unity_render_pipeline_source` に残す。
   - 手元の実パッケージでは、Shibuya（URP）の 6 つ、UnityJapanOffice（HDRP）の 7 つのシーン・prefab に追加データがあり、Built-in のもの（Japanese Street / Apartment、
     Gothic Lights）には無い。
-  - URP の物理ライト単位（Unity の 2026 年の方針で予定）は、URP 17.6 にはまだ無い。入ったら、単位ごとに換算を分ける（#120 で保留）
+  - URP の物理ライト単位（Unity の 2026 年の方針で予定）は、URP 17.6 にはまだ無い。入ったら、単位ごとに換算を分ける（#128）
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
 **Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で名前に結び付けられないため読まず、マテリアルの上書きの件数を警告に出す（Issue #31）。マテリアルの上書きがすべて同じ target を指し、モデルのメッシュが 1 つなら、その Renderer に当てる（上記「Renderer が 1 つのモデルの中への上書き」。Issue #109）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
