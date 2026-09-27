@@ -171,8 +171,17 @@ Unity shaders and Blender nodes do not map 1:1, so conversion happens in two sta
 
 - **Toon (Node Group)**: the `UnityToon` node group reproduces shadow color (border, blur, strength), MatCap (Normal / Add / Screen / Multiply),
   rim light, emission, and alpha. It uses Shader to RGB for lighting, so it is intended for EEVEE (no shading in Cycles).
-- **Principled BSDF**: connects base color, normal, emission, and Metallic / Roughness.
+- **Principled BSDF**: connects base color, normal, emission, and Metallic / Roughness. The specular color of URP's
+  specular workflow and Simple Lit, and of HDRP's Specular Color, is approximated with IOR and Specular Tint. HDRP's
+  mask map is wired into Metallic and Roughness with its remap ranges applied.
 - **Unlit (Emission)**: the simplest setup, wiring the texture straight into Emission with no lighting.
+
+There are dedicated rules for lilToon / Poiyomi / MToon / VRChat Mobile, Built-in Standard, URP (Lit / Complex Lit /
+Simple Lit / Unlit / Baked Lit) and HDRP (Lit / the first layer of LayeredLit / Unlit); other shaders are read from
+common property names. A material whose shader was switched can keep the previous shader's settings, so URP and HDRP
+materials are read only by that pipeline's names. When the shader's source (a Shader Graph or `.shader`) is in the
+package, settings the shader does not declare are ignored (the shader's logic itself is not interpreted, so shaders
+that build their color from custom names may come in white).
 
 The intermediate representation itself is stored in the custom property `unity_normalized` (JSON), and values not used by
 Blender are stored in `unity_props`. "Rebuild in Another Mode" in the sidebar's Tools panel rebuilds the materials of the
@@ -220,7 +229,9 @@ GPL-3.0-or-later ([LICENSE](LICENSE)), in line with the requirements for distrib
 
 The shader GUIDs in `unitypackage_loader/core/profiles/shader_guids.json` are identifiers collected from the `.shader.meta`
 files of the public repositories [lilxyzw/lilToon](https://github.com/lilxyzw/lilToon) and [vrm-c/UniVRM](https://github.com/vrm-c/UniVRM)
-(both MIT License), and from the VRChat SDK's Mobile shaders (`Sample Assets/Shaders/Mobile`) as mirrored in public repositories.
-No shader code is included.
+(both MIT License), from the VRChat SDK's Mobile shaders (`Sample Assets/Shaders/Mobile`) as mirrored in public repositories,
+and from URP / HDRP (`com.unity.render-pipelines.universal` / `high-definition` 17.6) as bundled with Unity 6000.6. The
+GUIDs of the light additional-data, Volume and Exposure scripts (`core/lights.py` / `core/exposure.py`) are identifiers
+collected from the `.cs.meta` files of the same URP / HDRP / core packages. No shader or script code is included.
 lilToon, MToon, Poiyomi, VRChat, Unity, and other names are trademarks or product names of their respective owners.
 This add-on is not affiliated with Unity Technologies, VRChat Inc., or any of the shader authors.
