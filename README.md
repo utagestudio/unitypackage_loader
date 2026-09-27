@@ -75,7 +75,9 @@ material, textures used, and warnings). A Collection named after the package is 
 ### Choosing what to import
 
 When the package has more than one scene, prefab or model to choose from, a selection dialog opens after the options.
-Choose the unit at the top, then tick what to import in the list:
+Choose the unit at the top, then tick what to import in the list. In Scenes only the first importable scene is ticked
+by default, since importing several scenes at once tends to overlap buildings and lights (Prefabs and Models are all
+ticked):
 
 - **Scenes**: imports what a scene (`.unity`) places, at the positions, rotations and scales set in Unity. Each scene
   gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.

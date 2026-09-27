@@ -101,9 +101,14 @@ def _unit_items(self, context):
 
 
 def _add_scene_items(items, prepared) -> None:
-    """シーンを展開して候補に加える（加え済みなら何もしない）。"""
+    """シーンを展開して候補に加える（加え済みなら何もしない）。
+
+    既定でチェックを入れるのは、一覧の順で最初の読み込めるシーンだけ（#134）。シーンをまとめて読み込むことはほとんど無く、
+    同じ場所の時間違いのシーンが多いので、まとめて読むと建物やライトが重なる。候補はすべて出す。
+    """
     if any(it.kind == UNIT_SCENES for it in items):
         return
+    chosen = False
     for s in prepared.scenes:
         item = items.add()
         item.kind = UNIT_SCENES
@@ -115,7 +120,8 @@ def _add_scene_items(items, prepared) -> None:
         else:
             item.detail_text = _short_reason(s.skip_reason)
         item.supported = s.supported
-        item.selected = s.supported
+        item.selected = s.supported and not chosen
+        chosen = chosen or s.supported
 
 
 def _on_unit_changed(self, context):
