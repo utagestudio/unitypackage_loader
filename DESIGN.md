@@ -249,6 +249,9 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 Metallic = _Metallic, Roughness = 1 − Smoothness（URP は _Smoothness、Built-in Standard は _Glossiness）
 [TexImage _MetallicGlossMap] ─(R)─▶ Metallic
                              ─(A)─▶ [Math × 倍率]* ─▶ [1 − x] ─▶ Roughness   *倍率 ≠ 1 のときだけ
+スペキュラーの色 F0（URP の Specular ワークフロー / Simple Lit のときだけ）: IOR = (1 + √f) / (1 − √f)（f = F0 の最大成分、0.9 まで）、
+[TexImage _SpecGlossMap] ─(Color)─▶ [Mix: Multiply, F0 / f] ─▶ Specular Tint（マップが無ければ F0 / f を値で）
+                         ─(A)─▶ Smoothness の元（Metallic マップもアルベドも使わないとき）
 _MainTex_ST の scale/offset ≠ (1,1,0,0) なら [TexCoord]→[Mapping] を挿入
 ```
 
@@ -276,11 +279,24 @@ URP Lit は Built-in Standard とは別のプロファイルで読む。URP の 
 | `_Cull` | cull_backface |
 | `_OcclusionMap`（組み立てには使わない）、`_OcclusionStrength`、`_AlphaToMask`、`_ReceiveShadows`、Detail / Parallax / Clear Coat のキーワード | occlusion_tex、extras["urp"] |
 
-- Specular ワークフロー（`_WorkflowMode: 0`）は #117 まで非金属として読み、警告する（`_SpecColor` / `_SpecGlossMap` は extras["urp"]["specular"]）。
-- シェーダー表で `urp` の Unlit / Simple Lit もこのプロファイルで読む（読み方の見直しは #117）。
+- Specular ワークフロー（`_WorkflowMode: 0`）は非金属で、F0（真上から見た反射率）はマップ（`_SpecGlossMap`）があればその RGB（`_SpecColor` は掛けない）、
+  無ければ `_SpecColor`。中間表現の `specular_color` / `specular_tex`（#117）。
+- Blender の Specular IOR Level は 0〜1（F0 を最大 2 倍）で、Unity の値（Lit の Specular は既定で 0.2）に届かないので、強さを IOR、色味を Specular Tint で表す（§3.2）。
+  Unity の Specular ワークフローも拡散を `1 − F0` だけ弱めるので、Principled の IOR を上げたときの振る舞いと近い。
+
+シェーダー表の名前で読み方を分ける（URP 17.6 の各シェーダーの `Properties` / `*Input.hlsl` / ShaderGUI に合わせた。#117）。
+
+| シェーダー | 読み方 |
+|---|---|
+| Lit / Complex Lit | 上の表。Complex Lit の Clear Coat は extras["urp"] に残すだけ |
+| Simple Lit | Blinn-Phong。Metallic は無い（0）。F0 = `_SpecColor`（マップがあれば マップの RGB × `_SpecColor`）、`_SpecularHighlights` が 0 なら F0 = 0。Smoothness は `_Smoothness` を、マップの A か `_SmoothnessSource` = 1 で不透明ならベース画像の A に掛ける（GUI が `_SpecColor` / `_BaseColor` の A に同じ値を書き写す）。ノーマルの倍率は使わない。GGX の Roughness = 1 − Smoothness で近似し、Blinn-Phong に無い環境の反射は Blender では映る |
+| Unlit | 色・透明度・両面だけ（`lighting: unlit`）。前のシェーダーの発光やノーマルは読まない |
+| Baked Lit | ライトマップとライトプローブだけで照らされるので、非金属・スペキュラー無し（F0 = 0）・Roughness 1 で、ノーマルマップ（倍率なし）だけ読む |
+
+シェーダー表の URP の項目（Lit / Complex Lit / Simple Lit / Unlit / Baked Lit）は、Unity 6000.6 に同梱の URP の `.shader.meta` で GUID を確かめた。
 - 表に無い URP Lit 派生のシェーダーは、URP Lit にしか無い `_WorkflowMode` / `_Surface` の指紋で選ぶ（Standard より先に判定する）。
   系統は `urp` になるが、ライトのパイプラインの判定には使わない（下記）。
-- 保存済みの中間表現に `blend_mode` が無いとき（1.9.x まで）は `alpha` として読む。
+- 保存済みの中間表現に `blend_mode` が無いとき（1.9.x まで）は `alpha`、`specular_color` が無いときは None（Blender の既定の IOR 1.5）として読む。
 
 Built-in Standard のプロファイルの透明度は、Built-in Standard の `_Mode`（0 不透明 / 1 Cutout / 2 Fade / 3 Transparent）、`_Surface` / `_AlphaClip`、
 HDRP Lit の `_SurfaceType` / `_AlphaCutoffEnable` の順に見る。
@@ -737,7 +753,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
 - 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。
-- URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。単体テストは `tests/test_profiles_urp.py`。
+- URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。
 - `tests/integration_import.py`（`blender -b --factory-startup --python`。symlink 先ではなくリポジトリの実体を直接 register する）: `_local/unitypackages/` のサンプルをインポートし、`_local/expectations.json` に書いた期待値（オブジェクト数、マテリアル数、各マテリアルの接続テクスチャとカラースペース、render method）と照合する。期待値ファイルもサンプルも gitignore 対象で、リポジトリにはスキーマ説明（`tests/expectations.schema.md`）だけを置く。
 - CI（`.github/workflows/tests.yml`。PR と main / release ブランチへの push）: 単体テストを Python 3.11 / 3.13（Blender 4.5 / 5.2 に同梱の版）で回す。合成パッケージ（`tests/make_synthetic_*.py`）を Blender 5.2 で 1 回だけ生成し、統合テストを Blender 4.5 LTS と 5.2 LTS で回す（4.5 は 5.2 で保存した .blend を読める）。実在アセットを使うテストは CI では回さない。
