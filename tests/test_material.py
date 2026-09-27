@@ -259,8 +259,8 @@ class NormalizeTests(unittest.TestCase):
         self.assertFalse(any("unverified" in w for w in n.warnings))  # URP Lit は実パッケージで GUID 確認済み
 
     def test_unverified_table_entry_warns(self):
-        n = normalize_material(parse_material(URP_TRANSPARENT.replace("933532a4fcc9baf4fa0491de14d08ed7", "6e4ae4064600d784cac1e41a9e6f2e59")))
-        self.assertEqual(n.family, "hdrp")
+        n = normalize_material(parse_material(URP_TRANSPARENT.replace("933532a4fcc9baf4fa0491de14d08ed7", "584dc70fbb9834e48beb29e3206e3ca0")))
+        self.assertEqual(n.family, "vrchat_mobile")
         self.assertTrue(any("unverified" in w for w in n.warnings))
 
     def test_unknown_toon_hint(self):

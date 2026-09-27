@@ -1,9 +1,10 @@
-"""Unity Built-in Standard / HDRP Lit、および未知シェーダー向けの一般規則（URP Lit は urp.py）。"""
+"""Unity Built-in Standard、および未知シェーダー向けの一般規則（URP は urp.py、HDRP は hdrp.py）。"""
 
 from __future__ import annotations
 
 from ..material import BLACK, NormalizedMaterial, UnityMaterial
 from .base import ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, cull_backface, is_black, texture_transform
+from .hdrp import hdrp_emission
 
 # Standard シェーダーの _Mode
 MODE_OPAQUE, MODE_CUTOUT, MODE_FADE, MODE_TRANSPARENT = 0, 1, 2, 3
@@ -16,7 +17,7 @@ _EMISSION_KEYWORD_FAMILIES = ("standard", "urp")
 
 class StandardProfile(ShaderProfile):
     family = "standard"
-    aliases = ("hdrp", "legacy")
+    aliases = ("legacy",)
     lighting = "pbr"
 
     def matches(self, mat: UnityMaterial) -> bool:
@@ -33,7 +34,7 @@ class StandardProfile(ShaderProfile):
             n.normal_strength = mat.f("_BumpScale", mat.f("_NormalScale", 1.0))
 
         if mat.has("_EmissiveColor"):
-            _hdrp_emission(mat, n)
+            hdrp_emission(mat, n)  # HDRP 向けの Shader Graph など
         else:
             read_emission(mat, n)
 
@@ -101,31 +102,6 @@ def _smoothness(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     n.roughness = max(0.0, min(1.0, 1.0 - smoothness))
     n.smoothness_scale = max(0.0, min(1.0, n.smoothness_scale))
     n.smoothness_from_albedo = int(mat.f("_SmoothnessTextureChannel", 0.0)) == 1 and n.base_color_tex is not None
-
-
-def _hdrp_emission(mat: UnityMaterial, n: NormalizedMaterial) -> None:
-    """HDRP（HDRP/Lit と HDRP 向け Shader Graph）の発光。
-
-    HDRP の発光は ``_EmissiveColor``（線形の HDR 色。``_UseEmissiveIntensity`` なら ``_EmissiveColorLDR`` × 強度）と
-    ``_EmissiveColorMap`` で決まり、色が黒なら光らない。HDRP のマテリアルは発光しなくても ``_EmissionColor`` を
-    白で持っている（ベイク向けの互換用）ので、そちらは使わない。
-
-    強度は物理単位（nits / EV100）で Blender の Emission Strength とは対応しないため、色は最大成分で割った色味だけを使い、
-    強さは 1.0 にする。元の値は ``extras["hdrp_emissive"]`` に残す。
-    """
-    color = tuple(max(0.0, c) for c in mat.color("_EmissiveColor", default=BLACK)[:3])
-    peak = max(color)
-    if not 0.0 < peak < float("inf"):
-        return
-    n.emission_color = (color[0] / peak, color[1] / peak, color[2] / peak, 1.0)
-    n.emission_tex = mat.tex("_EmissiveColorMap")
-    n.emission_strength = 1.0
-    n.extras["hdrp_emissive"] = {
-        "color": list(color),
-        "intensity": mat.f("_EmissiveIntensity", 1.0),
-        "unit": "ev100" if int(mat.f("_EmissiveIntensityUnit", 0.0)) == 1 else "nits",
-        "use_intensity": mat.flag("_UseEmissiveIntensity"),
-    }
 
 
 class GenericProfile(StandardProfile):

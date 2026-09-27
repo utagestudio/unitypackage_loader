@@ -259,6 +259,10 @@ class NormalizedMaterial:
     # Unity は Smoothness = A × 倍率（URP は _Smoothness、Built-in Standard は _GlossMapScale）。元が無ければ ``roughness`` を使う（#112）
     smoothness_scale: float = 1.0
     smoothness_from_albedo: bool = False  # _SmoothnessTextureChannel = 1（Smoothness をアルベドの A から取る）
+    # マップの値の読み替え（HDRP のマスクマップの Remap。#119）: Metallic = min + R × (max − min)、
+    # Smoothness = ``smoothness_offset`` + A × ``smoothness_scale``
+    metallic_remap: tuple[float, float] = (0.0, 1.0)
+    smoothness_offset: float = 0.0
     # スペキュラーの色（真上から見た反射率 F0。Unity の Specular ワークフローと Simple Lit の _SpecColor）。None なら Blender の既定（IOR 1.5）。
     # ``specular_tex`` があれば F0 = その RGB × 色で、Smoothness の元（metallic_tex もアルベドも使わないとき）はその A（#117）
     specular_color: Color | None = None
@@ -313,7 +317,7 @@ class NormalizedMaterial:
                 )
             elif key in _TOON_TYPES:
                 kwargs[key] = _toon_value(_TOON_TYPES[key], value)
-            elif key in ("base_color", "emission_color", "uv_scale", "uv_offset"):
+            elif key in ("base_color", "emission_color", "uv_scale", "uv_offset", "metallic_remap"):
                 kwargs[key] = tuple(value)
             elif key == "specular_color":
                 kwargs[key] = None if value is None else tuple(value)

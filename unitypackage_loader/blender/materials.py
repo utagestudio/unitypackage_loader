@@ -247,7 +247,17 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
             b.link(mapping_out, node.inputs["Vector"])
         sep = b.add("ShaderNodeSeparateColor", 2, label="Metallic R")
         b.link(node.outputs["Color"], sep.inputs["Color"])
-        b.link(sep.outputs["Red"], bsdf.inputs["Metallic"])
+        metallic_out = sep.outputs["Red"]
+        low, high = norm.metallic_remap
+        if abs(low) > 1e-4 or abs(high - 1.0) > 1e-4:
+            # HDRP のマスクマップの Remap（#119）
+            remap = b.add("ShaderNodeMath", 2, label=f"Metallic Remap {low:g}–{high:g}")
+            remap.operation = "MULTIPLY_ADD"
+            remap.inputs[1].default_value = high - low
+            remap.inputs[2].default_value = low
+            b.link(metallic_out, remap.inputs[0])
+            metallic_out = remap.outputs[0]
+        b.link(metallic_out, bsdf.inputs["Metallic"])
         if not norm.smoothness_from_albedo:
             smoothness_out = node.outputs["Alpha"]
     spec_node = _specular(b, bsdf, norm, mapping_out, images, tex_infos, warnings)
@@ -255,7 +265,15 @@ def _build_principled(b, norm, out, color_out, alpha_out, mapping_out, images, t
         smoothness_out = spec_node.outputs["Alpha"]  # Specular ワークフロー / Simple Lit のマップの A（#117）
     if smoothness_out is not None:
         # Unity の Smoothness は A × 倍率（URP の _Smoothness / Standard の _GlossMapScale。#112）
-        if abs(norm.smoothness_scale - 1.0) > 1e-4:
+        if abs(norm.smoothness_offset) > 1e-4:
+            # HDRP のマスクマップの Remap: offset + A × (max − min)（#119）
+            mul = b.add("ShaderNodeMath", 2, label=f"Smoothness × {norm.smoothness_scale:g} + {norm.smoothness_offset:g}")
+            mul.operation = "MULTIPLY_ADD"
+            mul.inputs[1].default_value = norm.smoothness_scale
+            mul.inputs[2].default_value = norm.smoothness_offset
+            b.link(smoothness_out, mul.inputs[0])
+            smoothness_out = mul.outputs[0]
+        elif abs(norm.smoothness_scale - 1.0) > 1e-4:
             mul = b.add("ShaderNodeMath", 2, label=f"Smoothness × {norm.smoothness_scale:g}")
             mul.operation = "MULTIPLY"
             mul.inputs[1].default_value = norm.smoothness_scale
