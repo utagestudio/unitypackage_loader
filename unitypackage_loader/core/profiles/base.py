@@ -164,14 +164,16 @@ def _profile_list() -> tuple[tuple[ShaderProfile, ...], ShaderProfile]:
     global _profiles
     if _profiles is None:
         # 各プロファイルのモジュールがこのモジュールを import するので、ここで初めて import する
-        from . import liltoon, mtoon, poiyomi, standard, vrchat_mobile
+        from . import liltoon, mtoon, poiyomi, standard, urp, vrchat_mobile
 
-        # 指紋判定の順序: VRChat Mobile は Standard の残骸プロパティを持つことが多いので Standard より先に置く
+        # 指紋判定の順序: VRChat Mobile は Standard の残骸プロパティを持つことが多いので Standard より先に置く。
+        # URP Lit も、Standard から変換したときの _MainTex / _Glossiness などを持つので Standard より先に置く（#116）
         ordered = (
             liltoon.LilToonProfile(),
             mtoon.MToonProfile(),
             poiyomi.PoiyomiProfile(),
             vrchat_mobile.VRChatMobileProfile(),
+            urp.UrpLitProfile(),
             standard.StandardProfile(),
         )
         _profiles = (ordered, standard.GenericProfile())

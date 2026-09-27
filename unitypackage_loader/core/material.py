@@ -13,6 +13,7 @@ __all__ = ["TexRef", "UnityMaterial", "NormalizedMaterial", "parse_material", "M
 
 Color = tuple[float, float, float, float]
 AlphaMode = Literal["opaque", "cutout", "blend"]
+BlendMode = Literal["alpha", "premultiply", "additive", "multiply"]
 Lighting = Literal["pbr", "toon", "unlit"]
 
 WHITE: Color = (1.0, 1.0, 1.0, 1.0)
@@ -244,6 +245,8 @@ class NormalizedMaterial:
     alpha_mode: AlphaMode = "opaque"
     alpha_cutoff: float = 0.5
     alpha_from_texture: bool = True  # False なら base_color.a だけを使う
+    # 半透明の合成の仕方（URP の _Blend）。Blender ではどれも通常のアルファ合成で組む（#116）
+    blend_mode: BlendMode = "alpha"
     normal_tex: TexRef | None = None
     normal_strength: float = 1.0
     emission_tex: TexRef | None = None

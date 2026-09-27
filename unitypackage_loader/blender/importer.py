@@ -368,7 +368,9 @@ def prepare_package(
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
         prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
-        pipeline=detect_pipeline(n.family for n in normalized.values()),
+        # シェーダー表で分かったものだけで決める。指紋で URP / HDRP と読んだ表に無いシェーダーは、
+        # パッケージのパイプラインの手掛かりにしない（#116。以前は Standard の系統として読んでいた）
+        pipeline=detect_pipeline(n.family for n in normalized.values() if n.shader_name),
     )
 
 

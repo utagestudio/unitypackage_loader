@@ -101,6 +101,8 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/unit
 blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/unitypackages/ に出る）
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_prefabs.json  # 読み込む単位 Prefabs（LODGroup の非表示）
+blender -b --factory-startup --python tests/make_synthetic_urp_package.py     # URP Lit 用の合成パッケージ（ライトが URP の単位になるので別にする）
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_urp.unitypackage tests/expectations_synthetic_urp.json             # URP Lit の読み方と URP のライト
 python3 tests/make_synthetic_broken_packages.py                                                           # 読み込みに失敗するモデルを含む合成パッケージ
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_model.unitypackage tests/expectations_synthetic_broken_model.json  # 1 つ失敗しても残りを読む
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_all.unitypackage tests/expectations_synthetic_broken_all.json      # 全部失敗したら何も残さない
