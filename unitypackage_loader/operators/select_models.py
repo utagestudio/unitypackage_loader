@@ -176,6 +176,7 @@ _UNIT_PROP = "unitypkg_select_unit"
 _ARRANGE_PROP = "unitypkg_select_arrange"
 _LIGHTS_PROP = "unitypkg_select_lights"
 _CAMERAS_PROP = "unitypkg_select_cameras"
+_EXPOSURE_PROP = "unitypkg_select_exposure"
 _LODS_PROP = "unitypkg_select_hide_lods"
 
 
@@ -276,6 +277,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             row = split.row(align=True)
             row.prop(wm, _LIGHTS_PROP, toggle=True, icon="LIGHT")
             row.prop(wm, _CAMERAS_PROP, toggle=True, icon="CAMERA_DATA")
+            row.prop(wm, _EXPOSURE_PROP, toggle=True, icon="LIGHT_SUN")
 
         if unit in (UNIT_PREFABS, UNIT_SCENES):
             # LODGroup を持つ prefab・シーンだけに効く。タブを切り替えても高さが変わらないよう、両方に出す
@@ -324,6 +326,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts.arrange = arrange
         opts.scene_lights = getattr(wm, _LIGHTS_PROP)
         opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
+        opts.scene_exposure = getattr(wm, _EXPOSURE_PROP)
         opts.hide_lods = getattr(wm, _LODS_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
         if unit == UNIT_SCENES:
@@ -406,6 +409,14 @@ def register() -> None:
     setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
     setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
     setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))
+    setattr(wm, _EXPOSURE_PROP, BoolProperty(
+        name="Exposure",
+        default=True,
+        description=(
+            "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
+            "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
+        ),
+    ))
     setattr(wm, _LODS_PROP, BoolProperty(
         name="Hide Distant Levels",
         default=True,
@@ -417,7 +428,7 @@ def register() -> None:
 
 
 def unregister() -> None:
-    for prop in (_LODS_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
+    for prop in (_LODS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
         if hasattr(bpy.types.WindowManager, prop):
             delattr(bpy.types.WindowManager, prop)
     for cls in reversed(_classes):

@@ -14,20 +14,37 @@
       "hdrp"
     ]
   },
-  "warnings_max": 2,
-  "light_count": 2,
+  "warnings_max": 5,
+  "light_count": 3,
   "lights": [
     {
       "name": "Directional Light",
       "type": "SUN",
-      "energy": 146.4129
+      "energy": 325.5209,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights",
+      "light_scale": 2.2233
     },
     {
       "name": "Point Light",
       "type": "POINT",
-      "energy": 11.0393,
+      "energy": 24.5438,
       "use_custom_distance": true,
-      "cutoff_distance": 5
+      "cutoff_distance": 5,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights",
+      "light_scale": 2.2233
+    },
+    {
+      "name": "Area Light",
+      "type": "AREA",
+      "shape": "RECTANGLE",
+      "energy": 13.9695,
+      "size": 2,
+      "size_y": 0.5,
+      "pipeline": "HDRP",
+      "pipeline_source": "lights",
+      "light_scale": 2.2233
     }
   ],
   "material_checks": [
@@ -134,5 +151,6 @@
         ]
       }
     }
-  ]
+  ],
+  "scene_exposure": 0.0
 }

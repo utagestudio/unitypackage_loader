@@ -26,9 +26,11 @@ from ..core.hierarchy import (
     summarize,
 )
 from ..core.hierarchy import components as scene_components
-from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light, detect_pipeline
+from ..core.exposure import exposure_settings, global_volumes, scene_exposure
+from ..core.lights import LIGHT_CAMERA_BASIS, PIPELINE_HDRP, convert_camera, convert_light, decide_pipeline, pipelines_in_assets
 from ..core.fbx_units import read_unit_scale
 from ..core.transform import unity_to_blender
+from ..core.unity_yaml import parse_documents
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
@@ -88,6 +90,7 @@ class ImportOptions:
     scene_paths: list[str] | None = None  # 明示的に選ばれたシーンの pathname（ダイアログ経由）
     scene_lights: bool = True  # シーンのライトを読み込む
     scene_cameras: bool = True  # シーンのカメラを読み込む
+    scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、そのシーンの HDRP のライトの強さに反映する（#130）
     hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
@@ -158,7 +161,8 @@ class PreparedPackage:
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
-    pipeline: str = "BUILTIN"  # マテリアルから判定したレンダーパイプライン（ライトの強さの換算に使う）
+    pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
+    pipeline_source: str = "default"  # lights（ライト・カメラの追加データ）/ materials / default
     _scenes: list[SceneSummary] | None = field(default=None, repr=False)
     _expander: Expander | None = field(default=None, repr=False)  # prefab の展開結果を持つ（シーンの展開で使い回す）
 
@@ -364,14 +368,29 @@ def prepare_package(
         if tables:
             prefab_tables[entry.pathname] = tables
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
+    # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
+    # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
+    pipeline = decide_pipeline(
+        (n.family for n in normalized.values() if n.shader_name),
+        pipelines_in_assets(_asset_bytes(pkg, pkg.scenes() + pkg.prefabs())),
+    )
+    if pipeline.warning:
+        warnings.append(pipeline.warning)
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
         prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
-        # シェーダー表で分かったものだけで決める。指紋で URP / HDRP と読んだ表に無いシェーダーは、
-        # パッケージのパイプラインの手掛かりにしない（#116。以前は Standard の系統として読んでいた）
-        pipeline=detect_pipeline(n.family for n in normalized.values() if n.shader_name),
+        pipeline=pipeline.pipeline,
+        pipeline_source=pipeline.source,
     )
+
+
+def _asset_bytes(pkg: UnityPackage, entries: list[AssetEntry]):
+    """走査でメモリに読んだアセットの中身。手掛かりを探すだけなので、キャッシュに無いもののために再走査はしない。"""
+    for entry in entries:
+        data = pkg.cached_asset(entry.guid)
+        if data is not None:
+            yield data
 
 
 def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str, dict[int, str]]]:
@@ -1084,6 +1103,45 @@ class _ImportSession:
                 hidden += 1
         return hidden
 
+    def light_scale(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> float:
+        """HDRP のシーンのグローバルな Volume の露出から、そのシーンの HDRP のライトに掛ける倍率を決める（#130）。
+
+        Blender のシーンの露出は変えない。シーンごとに決めるので、パッケージやパイプラインの違うシーンを混ぜても崩れない。
+        決められなければ 1。
+        """
+        if not (self.opts.scene_exposure and self.prepared.pipeline == PIPELINE_HDRP):
+            return 1.0
+        pathname = scene_summary.pathname
+        try:
+            documents = parse_documents(self.pkg.read_text(scene_summary.guid))
+            volumes = global_volumes(documents)
+            profiles = self.pkg.read_assets(v.profile_guid for v in volumes)
+            camera = next((d.body for d in documents if d.class_id == CLASS_CAMERA), None)
+            result = None
+            for volume in volumes:  # priority の高い順
+                data = profiles.get(volume.profile_guid)
+                settings = exposure_settings(parse_documents(data.decode("utf-8", "replace"))) if data else None
+                result = scene_exposure(settings, camera) if settings else None
+                if result is not None:
+                    break
+        except Exception as exc:  # noqa: BLE001 - 露出は補助的な設定なので、読めなければ倍率 1 で続ける（#69）
+            self.report.warn(f"scene {pathname}: could not read the HDRP exposure: {exc}")
+            _log_exception(f"could not read the HDRP exposure of {pathname}")
+            return 1.0
+        if result is None:
+            return 1.0
+        target["unity_exposure_ev100"] = result.ev100
+        target["unity_exposure_mode"] = result.mode
+        target["unity_light_scale"] = result.light_scale
+        if result.approximate:
+            self.report.warn(
+                f"scene {pathname}: HDRP {result.mode} exposure is approximated with its upper limit (EV100 {result.ev100:g})"
+            )
+        self.report.exposures.append(
+            f"{scene_summary.name}: HDRP {result.mode} exposure EV100 {result.ev100:g}, lights ×{result.light_scale:.3g}"
+        )
+        return result.light_scale
+
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
@@ -1167,6 +1225,7 @@ class _ImportSession:
             hidden_lods += hidden.hidden_lods
 
         # --- ライト・カメラ ---
+        light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
         baked_lights = 0
         light_notes: set[str] = set()
         wanted = ([CLASS_LIGHT] if self.opts.scene_lights else []) + ([CLASS_CAMERA] if self.opts.scene_cameras else [])
@@ -1180,9 +1239,13 @@ class _ImportSession:
                 local = Matrix(unity_to_blender(node.local))
             if component.class_id == CLASS_LIGHT:
                 values = convert_light(component.body, self.prepared.pipeline)
+                values.energy *= light_scale  # HDRP の露出の分（#130）
                 obj = make_light(component.name, values)
                 obj["unity_light"] = json_text(component.body)
                 obj["unity_render_pipeline"] = self.prepared.pipeline
+                obj["unity_render_pipeline_source"] = self.prepared.pipeline_source
+                if light_scale != 1.0:
+                    obj["unity_light_scale"] = light_scale
                 baked_lights += values.baked_only
                 light_notes.update(values.notes)
                 self.report.lights += 1

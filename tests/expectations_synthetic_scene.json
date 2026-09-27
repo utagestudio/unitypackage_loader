@@ -328,7 +328,9 @@
         -0.766
       ],
       "use_shadow": true,
-      "hidden": false
+      "hidden": false,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     },
     {
       "name": "Point Light",
@@ -342,7 +344,9 @@
       "use_custom_distance": true,
       "cutoff_distance": 5,
       "use_temperature": true,
-      "temperature": 3863
+      "temperature": 3863,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     },
     {
       "name": "Spot Light",
@@ -354,7 +358,9 @@
         -1
       ],
       "spot_size": 1.0472,
-      "spot_blend": 0.33333
+      "spot_blend": 0.33333,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     },
     {
       "name": "Area Light",
@@ -368,12 +374,16 @@
         0,
         -1
       ],
-      "use_shadow": false
+      "use_shadow": false,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     },
     {
       "name": "Disabled Light",
       "type": "POINT",
-      "hidden": true
+      "hidden": true,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     },
     {
       "name": "Lamp",
@@ -384,7 +394,9 @@
         0,
         2
       ],
-      "hidden": false
+      "hidden": false,
+      "pipeline": "BUILTIN",
+      "pipeline_source": "default"
     }
   ],
   "cameras": [
@@ -447,5 +459,6 @@
       "alpha_mode": "cutout",
       "smoothness_scale": null
     }
-  ]
+  ],
+  "scene_exposure": 0.0
 }

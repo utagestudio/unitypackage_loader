@@ -405,6 +405,17 @@ def main() -> int:
                        f"expected {spec['location']}, got {[round(v, 4) for v in obj.matrix_world.translation]}")
             if "hidden" in spec:
                 c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+            if "light_scale" in spec:  # HDRP の露出の分としてライトに掛けた倍率（#130）
+                actual = obj.get("unity_light_scale", 1.0)
+                c.true(f"{label}.light_scale", abs(actual - spec["light_scale"]) <= 1e-3 * spec["light_scale"], f"expected {spec['light_scale']}, got {actual}")
+            # 強さの換算に使ったパイプラインと、その根拠（#120）
+            for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
+    if "scene_exposure" in exp:
+        # シーンの露出は変えない（#130。HDRP の露出はライトの強さに掛ける）
+        actual = bpy.context.scene.view_settings.exposure
+        c.true("scene exposure", abs(actual - exp["scene_exposure"]) <= 1e-3, f"expected {exp['scene_exposure']}, got {actual}")
     if "scene_camera" in exp:
         camera = bpy.context.scene.camera
         c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])

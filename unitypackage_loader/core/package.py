@@ -362,6 +362,41 @@ class UnityPackage:
             raise PackageError(f"cannot read {entry.pathname or target} from {self.path.name}: {exc}") from exc
         raise KeyError(f"{target} not found in {self.path.name}")
 
+    def cached_asset(self, guid: str) -> bytes | None:
+        """走査で読み込んだ実体（.mat / .prefab / .unity など）。キャッシュに無ければ再走査せずに None。"""
+        entry = self.get(guid)
+        return entry._cache if entry is not None else None
+
+    def read_assets(self, guids: Iterable[str]) -> dict[str, bytes]:
+        """小さなアセットの実体をまとめて読む。キャッシュに無いものは 1 回の再走査で読む（#130: Volume のプロファイル）。
+
+        無い GUID と ``_READ_ASSET_MAX_SIZE`` を超えるものは結果に入れない。
+        """
+        result: dict[str, bytes] = {}
+        wanted: set[str] = set()
+        for guid in guids:
+            entry = self.get(guid)
+            if entry is None or not entry.has_asset or entry.size > _READ_ASSET_MAX_SIZE:
+                continue
+            if entry._cache is not None:
+                result[entry.guid] = entry._cache
+            else:
+                wanted.add(entry.guid)
+        if not wanted:
+            return result
+        try:
+            with tarfile.open(self.path, "r:*") as tar:
+                for member in tar:
+                    split = _split_member(member.name)
+                    if split and split[1] == "asset" and split[0] in wanted and member.size <= _READ_ASSET_MAX_SIZE:
+                        result[split[0]] = tar.extractfile(member).read()
+                        wanted.discard(split[0])
+                        if not wanted:
+                            break
+        except (tarfile.TarError, EOFError, OSError) as exc:
+            raise PackageError(f"cannot read assets from {self.path.name}: {exc}") from exc
+        return result
+
     def read_text(self, guid: str) -> str:
         return self.read_asset(guid).decode("utf-8", "replace")
 

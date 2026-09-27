@@ -10,7 +10,8 @@
 
 Built-in の点光源は逆二乗ではないので、全距離では合わない。d/R が 0.2〜1 の範囲で比の対数の最大を最小にする
 「d = 0.3R で一致」を使う（その範囲で 1.4 倍以内）。URP はどの距離でも一致し、Range は Blender の cutoff に入れる。
-面光源（Unity ではベイク専用）と HDRP（物理単位）は実測していない近似。
+面光源（Unity ではベイク専用）と HDRP（物理単位）は実測していない近似。HDRP の m_Intensity は種類ごとの本来の単位で入っている
+（平行光源は lux、点光源・スポットは candela、面光源は nits。HDRP の LightUnitUtils.GetNativeLightUnit）ので、683 lm/W で割る。
 """
 
 from __future__ import annotations
@@ -44,6 +45,73 @@ def detect_pipeline(families: Iterable[str]) -> str:
     if "urp" in found:
         return PIPELINE_URP
     return PIPELINE_BUILTIN
+
+
+# ライト・カメラに付く、パイプラインの追加データのスクリプト（MonoBehaviour の m_Script）の GUID。
+# Unity 6000.6 に同梱の URP / HDRP 17.6 の .cs.meta で確かめた（#120）
+PIPELINE_SCRIPT_GUIDS = {
+    PIPELINE_URP: (
+        "474bcb49853aa07438625e644c072ee6",  # UniversalAdditionalLightData
+        "a79441f348de89743a2939f4d699eac1",  # UniversalAdditionalCameraData
+    ),
+    PIPELINE_HDRP: (
+        "7a68c43fe1f2a47cfa234b5eeaa98012",  # HDAdditionalLightData
+        "23c1ce4fb46143f46bc5cb5224c934f6",  # HDAdditionalCameraData
+    ),
+}
+
+
+def pipelines_in_assets(datas: Iterable[bytes]) -> dict[str, int]:
+    """シーン・prefab の中身に、URP / HDRP の追加データのスクリプトが現れるアセットの数（パイプラインごと）。
+
+    テキスト形式（YAML）のアセットだけを見る。Force Binary のアセットは GUID がバイト列で入るので数えない。
+    """
+    needles = {pipeline: [g.encode() for g in guids] for pipeline, guids in PIPELINE_SCRIPT_GUIDS.items()}
+    counts = {pipeline: 0 for pipeline in needles}
+    for data in datas:
+        for pipeline, keys in needles.items():
+            if any(key in data for key in keys):
+                counts[pipeline] += 1
+    return {pipeline: count for pipeline, count in counts.items() if count}
+
+
+@dataclass
+class PipelineDecision:
+    pipeline: str
+    source: str  # "lights"（ライト・カメラの追加データ）/ "materials"（シェーダー表で分かったマテリアル）/ "default"
+    warning: str = ""
+
+
+def decide_pipeline(material_families: Iterable[str], script_counts: dict[str, int]) -> PipelineDecision:
+    """ライトの強さの換算に使うパイプラインを決める（#120）。
+
+    ライト・カメラに URP / HDRP の追加データが付いていればそれを使う。マテリアルは Shader Graph ばかりだとシェーダー表で
+    分からず、Built-in の Standard のまま移したアセットもあるので、ライトの手掛かりのほうが確か。無ければ従来どおり
+    シェーダー表で分かったマテリアルの系統で決める。両方の手掛かりが食い違うときは警告を返す。
+    """
+    families = set(material_families)
+    from_materials = detect_pipeline(families)
+    material_evidence = {PIPELINE_HDRP} if "hdrp" in families else set()
+    material_evidence |= {PIPELINE_URP} if "urp" in families else set()
+    material_evidence |= {PIPELINE_BUILTIN} if families & {"standard", "legacy"} else set()
+
+    found = [p for p in (PIPELINE_HDRP, PIPELINE_URP) if script_counts.get(p)]
+    if not found:
+        return PipelineDecision(from_materials, "materials" if material_evidence - {PIPELINE_BUILTIN} else "default")
+    if len(found) == 1:
+        pipeline = found[0]
+    else:
+        # URP と HDRP の両方のシーンを含むパッケージ。マテリアルが示す方、無ければ多い方にする
+        agreed = [p for p in found if p in material_evidence]
+        pipeline = agreed[0] if agreed else max(found, key=lambda p: script_counts[p])
+    warning = ""
+    if len(found) > 1:
+        warning = (f"render pipeline: scenes/prefabs carry both URP and HDRP light data; "
+                   f"converting light intensities as {pipeline}")
+    elif material_evidence and pipeline not in material_evidence:
+        warning = (f"render pipeline: light data says {pipeline} but the materials say "
+                   f"{'/'.join(sorted(material_evidence))}; converting light intensities as {pipeline}")
+    return PipelineDecision(pipeline, "lights", warning)
 
 
 def _srgb_to_linear(c: float) -> float:
@@ -114,7 +182,12 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
         result.size_y = max(to_float(area.get("y"), 1.0), 1e-4)
         surface = result.size * result.size_y if light_type == LIGHT_RECTANGLE else math.pi * (result.size / 2) ** 2
         # 面のすぐ近くで、白い拡散面の画素が強さ（線形）になるように合わせる（Blender の面光源は近くで 画素 ≈ P / (面積 · π)。実測）
-        result.energy = linear * surface * math.pi
+        if pipeline == PIPELINE_HDRP:
+            # HDRP の面光源の m_Intensity は nits（LightUnitUtils.GetNativeLightUnit）。ほかの HDRP のライトと同じく 683 lm/W で割る（#129）
+            result.energy = intensity / 683.0 * surface * math.pi
+            result.notes.append("HDRP light intensity converted from nits without measurement")
+        else:
+            result.energy = linear * surface * math.pi
         result.notes.append("area light intensity is an unmeasured approximation (Unity bakes area lights)")
         return result
 
@@ -125,8 +198,8 @@ def convert_light(body: dict, pipeline: str) -> BlenderLight:
     elif pipeline == PIPELINE_URP:
         result.energy = 4 * math.pi ** 2 * linear
     else:
-        result.energy = intensity / 683.0 * 4 * math.pi  # lumen → W（未計測の近似）
-        result.notes.append("HDRP light intensity converted from lumen without measurement")
+        result.energy = intensity / 683.0 * 4 * math.pi  # candela → lumen（× 4π）→ W（未計測の近似）
+        result.notes.append("HDRP light intensity converted from candela without measurement")
     if light_range > 0:
         result.use_custom_distance = True
         result.cutoff_distance = light_range

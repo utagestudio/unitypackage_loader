@@ -11,7 +11,11 @@ URP Lit の GUID のマテリアルがあるとパッケージ全体のライト
 - UrpSpec.fbx（トーラス）: UrpSpecMat（Lit の Specular ワークフロー。_SpecColor）と UrpSimpleMat（Simple Lit。スペキュラーマップ × _SpecColor）（#117）
 - UrpBaked.fbx（アイコ球）: UrpBakedMat（Baked Lit。スペキュラー無し）（#117）
 
-Assets/Synthetic/Scenes/Urp.unity に 3 つの FBX を並べ、平行光源と点光源を 1 つずつ置く（URP の強さの換算を確かめる）。
+Assets/Synthetic/Scenes/Urp.unity に FBX を並べ、平行光源と点光源を 1 つずつ置く（URP の強さの換算を確かめる）。ライトには
+URP の追加データ（UniversalAdditionalLightData）を付ける（#120）。
+
+synthetic_urp_standard.unitypackage は、同じ中身でマテリアルのシェーダーだけを Built-in の Standard にしたもの。マテリアルからは
+Built-in に見えるが、ライトの追加データから URP として換算し、食い違いを警告することを確かめる（#120）。
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from tests.make_synthetic_scene_package import (  # noqa: E402
     instance,
     light_doc,
     mod,
+    mono_behaviour,
     transform,
 )
 
@@ -43,6 +48,8 @@ URP_UNLIT = "{fileID: 4800000, guid: 650dd9526735d5b46b79224bc6e94025, type: 3}"
 URP_DERIVED = "{fileID: 4800000, guid: 7777777777777777bbbbbbbbbbbbbbbb, type: 3}"
 URP_SIMPLE = "{fileID: 4800000, guid: 8d2bb70cbf9db8d4da26e15b26e74248, type: 3}"
 URP_BAKED = "{fileID: 4800000, guid: 0ca6dca7396eb48e5849247ffd444914, type: 3}"
+STANDARD = "{fileID: 46, guid: 0000000000000000f000000000000000, type: 0}"
+URP_LIGHT_DATA = "474bcb49853aa07438625e644c072ee6"  # UniversalAdditionalLightData
 
 
 def texture(prop: str, guid: str | None, scale=(1, 1)) -> str:
@@ -74,6 +81,11 @@ def urp_mat_yaml(name: str, shader: str, *, base: str, leftover_main: str, textu
 def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     out = Path(argv[0]) if argv else REPO_ROOT / "_local" / "unitypackages" / "synthetic_urp.unitypackage"
+    build(out)
+    build(out.with_name(out.stem + "_standard" + out.suffix), standard=True)
+
+
+def build(out: Path, standard: bool = False) -> None:
     tmp = Path(tempfile.mkdtemp(prefix="synthetic_urp_"))
     entries: dict[str, tuple[str, bytes | None, str | None]] = {}
 
@@ -119,6 +131,9 @@ def main() -> None:
         # Baked Lit。ライトマップだけで照らされ、スペキュラーを持たない
         "UrpBakedMat": urp_mat_yaml("UrpBakedMat", URP_BAKED, base=color, leftover_main=leftover, floats={"_Metallic": 0.8}),
     }
+    if standard:
+        for shader in (URP_LIT, URP_UNLIT, URP_DERIVED, URP_SIMPLE, URP_BAKED):
+            materials = {name: text.replace(shader, STANDARD) for name, text in materials.items()}
     mats = {}
     for name, text in materials.items():
         path = f"Assets/Synthetic/Materials/{name}.mat"
@@ -150,9 +165,11 @@ def main() -> None:
         game_object(8000, "Directional Light"),
         transform(8001, 8000, pos=(0, 3, 0), rot=(0.40821788, -0.23456968, 0.10938163, 0.8754261)),
         light_doc(8002, 8000, 1, intensity=2),
+        mono_behaviour(8003, 8000, URP_LIGHT_DATA),
         game_object(8100, "Point Light"),
         transform(8101, 8100, pos=(2, 1, 0)),
         light_doc(8102, 8100, 2, intensity=2, light_range=5),
+        mono_behaviour(8103, 8100, URP_LIGHT_DATA),
     ]
     add(scene_path, (HEADER + "".join(docs)).encode(),
         f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")

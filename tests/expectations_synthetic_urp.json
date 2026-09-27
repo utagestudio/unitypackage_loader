@@ -23,14 +23,18 @@
     {
       "name": "Directional Light",
       "type": "SUN",
-      "energy": 6.2832
+      "energy": 6.2832,
+      "pipeline": "URP",
+      "pipeline_source": "lights"
     },
     {
       "name": "Point Light",
       "type": "POINT",
       "energy": 78.9568,
       "use_custom_distance": true,
-      "cutoff_distance": 5
+      "cutoff_distance": 5,
+      "pipeline": "URP",
+      "pipeline_source": "lights"
     }
   ],
   "material_checks": [
@@ -161,5 +165,6 @@
         "Specular IOR Level": 0.0
       }
     }
-  ]
+  ],
+  "scene_exposure": 0.0
 }
