@@ -236,5 +236,12 @@ GPL-3.0-or-later（[LICENSE](LICENSE)）。Blender の Extension として配布
 および Unity 6000.6 に同梱の URP / HDRP（`com.unity.render-pipelines.universal` / `high-definition` 17.6）の
 `.shader.meta` から収集した識別子です。ライトの追加データや Volume・Exposure のスクリプトの GUID（`core/lights.py` / `core/exposure.py`）も、
 同じ URP / HDRP / core のパッケージの `.cs.meta` から収集した識別子です。シェーダーやスクリプトのコードは含みません。
+
+バイナリ形式の `.mat` / `.prefab` の読み方（`unitypackage_loader/core/unity_binary.py`）は、公開されている
+[K0lb3/UnityPy](https://github.com/K0lb3/UnityPy)（Copyright (c) 2019-2026 K0lb3）と
+[Perfare/AssetStudio](https://github.com/Perfare/AssetStudio)（Copyright (c) 2016 Radu, Copyright (c) 2016-2020 Perfare）の記述に基づいています。
+いずれも MIT License で、同ファイルの共通文字列の表（Unity の型名・フィールド名の一覧）は両プロジェクトが公開している表と同じものです。
+コードは取り込んでいません。
+
 lilToon、MToon、Poiyomi、VRChat、Unity などの名称は各権利者の商標または製品名です。
 このアドオンは Unity Technologies、VRChat Inc. および各シェーダー作者とは無関係です。

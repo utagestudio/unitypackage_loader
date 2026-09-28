@@ -251,5 +251,12 @@ files of the public repositories [lilxyzw/lilToon](https://github.com/lilxyzw/li
 and from URP / HDRP (`com.unity.render-pipelines.universal` / `high-definition` 17.6) as bundled with Unity 6000.6. The
 GUIDs of the light additional-data, Volume and Exposure scripts (`core/lights.py` / `core/exposure.py`) are identifiers
 collected from the `.cs.meta` files of the same URP / HDRP / core packages. No shader or script code is included.
+
+Reading binary `.mat` / `.prefab` files (`unitypackage_loader/core/unity_binary.py`) follows the descriptions in the public
+projects [K0lb3/UnityPy](https://github.com/K0lb3/UnityPy) (Copyright (c) 2019-2026 K0lb3) and
+[Perfare/AssetStudio](https://github.com/Perfare/AssetStudio) (Copyright (c) 2016 Radu, Copyright (c) 2016-2020 Perfare), both under the MIT License.
+The common string table in that file (a list of Unity type and field names) is the same table both projects publish.
+No code from them is included.
+
 lilToon, MToon, Poiyomi, VRChat, Unity, and other names are trademarks or product names of their respective owners.
 This add-on is not affiliated with Unity Technologies, VRChat Inc., or any of the shader authors.
