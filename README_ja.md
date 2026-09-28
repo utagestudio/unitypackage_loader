@@ -12,6 +12,36 @@ Unity 側のマテリアル設定とテクスチャを反映した状態で配�
 
 ## インストール
 
+入手先は次の 3 つで、中身は同じです。**どれか 1 つから入れてください**（理由は下の「入手先を変えるとき」）。
+
+**Extension Repository として登録（推奨）**
+
+GitHub Pages で配布しています。Blender の Preferences > Get Extensions > Repositories の「+」から
+"Add Remote Repository" を選び、次の URL を登録すると、一覧からインストール・更新できます。
+新しい版が出ると、Blender の拡張機能の画面から更新できます。
+
+```
+https://utagestudio.github.io/unitypackage_loader/index.json
+```
+
+[同じページ](https://utagestudio.github.io/unitypackage_loader/ja/)（`index.json` を除いた URL。日本語版は `ja/`）に登録用 URL と zip のリンクを載せています。
+
+**extensions.blender.org（掲載の審査中）**
+
+Blender 公式の拡張機能サイトへの掲載を申請しています。掲載されたら、Preferences > Get Extensions で
+「Unitypackage」と検索してインストールできるようになります。
+
+**zip から入れる**
+
+紹介ページの zip を Blender の画面にドラッグ＆ドロップするか、Preferences > Get Extensions の右上のメニューにある
+"Install from Disk" で読み込みます。この方法で入れた場合は、新しい版が出ても自動では更新されません。
+
+**入手先を変えるとき**
+
+Blender は入手先（リポジトリ）ごとに別の拡張機能として扱うため、同じアドオンを 2 か所から入れると両方が有効になり、
+互いの機能を上書きして正しく動かなくなります。入手先を変えるときは、今入っているものを Preferences > Get Extensions で
+先にアンインストールしてから入れ直してください。Preferences の設定は入手先ごとに保存されるので、引き継がれません。
+
 **開発中（リポジトリを直接使う）**
 
 ```sh
@@ -19,29 +49,17 @@ ln -s "$PWD/unitypackage_loader" ~/.config/blender/5.2/extensions/user_default/u
 ```
 
 Blender の Preferences > Get Extensions で右上メニューから "Refresh Local" を実行し、
-"Unitypackage Importer" を有効にします。
+"Unitypackage Importer" を有効にします。ほかの入手先から入れたものがあれば、先にアンインストールしてください。
 
-**Extension Repository として登録（推奨）**
-
-GitHub Pages で配布しています。Blender の Preferences > Get Extensions > Repositories の「+」から
-"Add Remote Repository" を選び、次の URL を登録すると、一覧からインストール・更新できます。
-
-```
-https://utagestudio.github.io/unitypackage_loader/index.json
-```
-
-[同じページ](https://utagestudio.github.io/unitypackage_loader/ja/)（`index.json` を除いた URL。日本語版は `ja/`）に登録用 URL と zip のリンクを載せています。
-サイトは `.github/workflows/pages.yml` が main への push ごとに生成します（Blender の
-`extension build` と `extension server-generate` を CI 上で実行）。初回のみ、リポジトリの
-Settings > Pages > Source を "GitHub Actions" にしてください。
-
-**配布用 zip**
+配布用の zip は次のコマンドで作ります。
 
 ```sh
 blender --command extension build --source-dir unitypackage_loader --output-dir dist
 ```
 
-生成された zip を Preferences > Get Extensions > "Install from Disk" で読み込みます。
+紹介ページと Extension Repository は、`.github/workflows/pages.yml` が main への push ごとに生成します（Blender の
+`extension build` と `extension server-generate` を CI 上で実行）。初回のみ、リポジトリの
+Settings > Pages > Source を "GitHub Actions" にしてください。
 
 ## 使い方
 
