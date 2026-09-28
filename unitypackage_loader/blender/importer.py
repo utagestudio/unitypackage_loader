@@ -485,7 +485,7 @@ def _remove_created(before: dict[str, set[str]]) -> None:
 
 def _is_removed(datablock) -> bool:
     try:
-        datablock.name
+        _ = datablock.name
     except ReferenceError:
         return True
     return False

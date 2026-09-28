@@ -262,7 +262,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                         context,
                         path,
                         opts,
-                        progress=lambda f, msg: wm.progress_update(int((base + span * f) * 100)),
+                        progress=lambda f, msg, base=base, span=span: wm.progress_update(int((base + span * f) * 100)),
                         prepared=prepared,
                     )
                     reports.append(report)

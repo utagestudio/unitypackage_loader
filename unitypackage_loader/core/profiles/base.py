@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..material import BLACK, WHITE, AlphaMode, Lighting, NormalizedMaterial, TexRef, UnityMaterial
+from ..material import AlphaMode, Lighting, NormalizedMaterial, TexRef, UnityMaterial
 from ..shader_source import restrict_to_declared
 
 __all__ = ["ShaderInfo", "ShaderTable", "ShaderProfile", "select_profile", "normalize_material"]
