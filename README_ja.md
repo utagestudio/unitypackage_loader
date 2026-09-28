@@ -35,6 +35,7 @@ Blender 公式の拡張機能サイトへの掲載を申請しています。掲
 
 紹介ページの zip を Blender の画面にドラッグ＆ドロップするか、Preferences > Get Extensions の右上のメニューにある
 "Install from Disk" で読み込みます。この方法で入れた場合は、新しい版が出ても自動では更新されません。
+同じ zip を [BOOTH](https://utagestudio.booth.pm/items/8910607) でも無料で配布しています（中身が同じ応援版もあります）。
 
 **入手先を変えるとき**
 
