@@ -48,7 +48,7 @@ unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
-tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、スクリーンショット撮影（shoot_screenshots.py）
+tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、extensions.blender.org の featured image とアイコンの元（listing_card.html）、BOOTH の商品画像の元（booth_card.html）、スクリーンショット撮影（shoot_screenshots.py）
 web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
 .github/workflows/        Pages への Extension Repository 公開（pages.yml）と、単体テスト・Blender 4.5 / 5.2 での統合テスト（tests.yml）
 _local/                   検証用データ置き場（gitignore。詳細は CLAUDE.local.md）
@@ -129,6 +129,9 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 - extensions.blender.org にも同じ `id`・同じ `version` で出す（2026-09-28 に掲載の方針を決めた。手順と審査の要件は `_local/publish_extensions_blender_org.md`）。
   main にマージしたら、`extension build` で作った zip を掲載ページから新しいバージョンとしてアップロードする。
   同じアドオンを 2 つの入手先から入れると両方が有効になってクラスを上書きし合うので、README と紹介ページには「どれか 1 つから入れる」と書いておく。
+- BOOTH（https://utagestudio.booth.pm/items/8910607 、2026-09-28 公開）にも同じ zip を置いている（無料版と、中身が同じ応援版 300 円・1,000 円）。
+  minor 以上のリリースのときに全バリエーションの zip を差し替え、説明文の「現在のバージョン」と「更新履歴」も直す（fix 版では差し替えなくてよい）。
+  説明文の元と手順は `_local/booth/description.txt` と `_local/publish_booth.md`。商品画像は `tools/booth_card.html` から書き出す。
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
   Google Tag Manager は、環境変数 `GTM_ID`（無ければリポジトリ直下の `.env`。gitignore 対象）に `GTM-XXXX` 形式の ID があるときだけ埋め込む。
   公開時はリポジトリの Settings > Secrets and variables > Actions > Variables の `GTM_ID` を `pages.yml` が渡す（未設定なら埋め込まない）。
