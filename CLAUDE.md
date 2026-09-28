@@ -126,6 +126,9 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 
 - バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
+- extensions.blender.org にも同じ `id`・同じ `version` で出す（2026-09-28 に掲載の方針を決めた。手順と審査の要件は `_local/publish_extensions_blender_org.md`）。
+  main にマージしたら、`extension build` で作った zip を掲載ページから新しいバージョンとしてアップロードする。
+  同じアドオンを 2 つの入手先から入れると両方が有効になってクラスを上書きし合うので、README と紹介ページには「どれか 1 つから入れる」と書いておく。
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
   Google Tag Manager は、環境変数 `GTM_ID`（無ければリポジトリ直下の `.env`。gitignore 対象）に `GTM-XXXX` 形式の ID があるときだけ埋め込む。
   公開時はリポジトリの Settings > Secrets and variables > Actions > Variables の `GTM_ID` を `pages.yml` が渡す（未設定なら埋め込まない）。
