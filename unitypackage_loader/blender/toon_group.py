@@ -66,7 +66,6 @@ def _build(tree: bpy.types.ShaderNodeTree) -> None:
     tree.interface.new_socket(name="Shader", in_out="OUTPUT", socket_type="NodeSocketShader")
 
     nodes, links = tree.nodes, tree.links
-    col = 0
 
     def add(bl_idname, x, y, label=None):
         node = nodes.new(bl_idname)
