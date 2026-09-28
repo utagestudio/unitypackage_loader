@@ -35,6 +35,7 @@ search for "Unitypackage" in Preferences > Get Extensions and install it from th
 
 Drag the zip from the website onto the Blender window, or load it with "Install from Disk" in the menu at the
 upper right of Preferences > Get Extensions. Installed this way, the extension is not updated automatically.
+The same zip is also available for free on [BOOTH](https://utagestudio.booth.pm/items/8910607), with optional support versions that contain the same file.
 
 **Switching sources**
 

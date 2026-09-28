@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!-- BOOTH の商品画像（1200×1200、正方形）の元。?p=1 がサムネイル、2〜4 が説明の画像。ローカルの Chrome でレンダリングする:
+     for p in 1 2 3 4; do google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,1200 --screenshot=_local/booth/image$p.png "file://$PWD/tools/booth_card.html?p=$p"; done
+     リポジトリのルートで実行すること（画像は web/assets/ を相対パスで読む）。フォントは Google Fonts から読むので、オンラインで実行すること。
+     デザインは tools/og_card.html に揃えてある。購入アセットが写る画像（use-render / use-props / scene-street）は BOOTH では使わない。 -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&family=Zen+Maru+Gothic:wght@700;900&display=swap">
+<style>
+  html, body { margin: 0; width: 1200px; height: 1200px; overflow: hidden; }
+  body { background: #ffffff; color: #3a322c; font-family: "Zen Maru Gothic", "Nunito", system-ui, sans-serif; position: relative; }
+  .blob { position: absolute; border-radius: 50%; pointer-events: none; }
+  .b1 { width: 900px; height: 900px; right: -300px; top: -380px; background: radial-gradient(closest-side, #ffe3cc, rgba(255,227,204,0) 72%); }
+  .b2 { width: 560px; height: 560px; left: -160px; bottom: -300px; background: radial-gradient(closest-side, #ffd2b0, rgba(255,210,176,0) 72%); }
+  .page { position: absolute; inset: 0; padding: 64px 60px 56px; display: none; flex-direction: column; box-sizing: border-box; }
+  .page.on { display: flex; }
+  .logo { display: flex; align-items: center; gap: 16px; font-family: "Nunito", system-ui, sans-serif; font-weight: 800; font-size: 30px; }
+  .logo svg { width: 56px; height: 56px; }
+  .logo .free { margin-left: auto; background: #f07f2a; color: #3a322c; font-family: "Zen Maru Gothic", sans-serif; font-weight: 900; font-size: 30px; padding: 8px 26px; border-radius: 999px; }
+  h1 { margin: 34px 0 0; font-size: 76px; line-height: 1.28; font-weight: 900; }
+  h2 { margin: 40px 0 0; font-size: 68px; line-height: 1.3; font-weight: 900; }
+  em { font-style: normal; background: linear-gradient(90deg, #ad5410, #f07f2a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .nb { white-space: nowrap; }
+  p { margin: 20px 0 0; font-size: 34px; line-height: 1.5; color: #72665d; font-weight: 700; }
+  .frame { position: relative; margin-top: auto; border-radius: 36px; overflow: hidden; background: #393939; box-shadow: 0 40px 80px -40px rgba(58,50,44,.55); }
+  .frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .credit { margin-top: 14px; text-align: right; font-family: "Nunito", system-ui, sans-serif; font-size: 20px; color: #9a8e85; font-weight: 700; }
+  .tag { position: absolute; top: 22px; font-size: 30px; font-weight: 900; line-height: 1.3; padding: 8px 22px; border-radius: 999px; }
+  .tag.l { left: 22px; background: rgba(35,29,25,.82); color: #fff; }
+  .tag.r { right: 22px; background: #f07f2a; color: #3a322c; }
+
+  /* p=1: 前後比較（紹介ページのスライダーと同じく真ん中で分ける） */
+  .split { height: 700px; }
+  .split img { position: absolute; inset: 0; object-position: 50% 12%; }
+  .split img.after { clip-path: inset(0 0 0 50%); }
+  .split .line { position: absolute; top: 0; bottom: 0; left: 50%; width: 6px; margin-left: -3px; background: #fff; }
+  .split .knob { position: absolute; top: 50%; left: 50%; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; background: #f07f2a; border: 6px solid #fff; box-sizing: border-box; display: grid; place-items: center; }
+  .split .knob svg { width: 40px; height: 40px; }
+  .page:not([data-p="1"]) { justify-content: center; }
+  .page:not([data-p="1"]) .frame { margin-top: 56px; }
+  .page:not([data-p="1"]) h2 { margin-top: 0; }
+  .wide { height: 610px; flex: none; }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+
+  <section class="page" data-p="1">
+    <div class="logo">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc26a"/><stop offset="1" stop-color="#f07f2a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="16" fill="url(#g)"/><path d="M32 22v20M24 34l8 8 8-8" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="14" r="7" fill="#4fc4a8"/></svg>
+      Unitypackage Importer
+      <span class="free">無料</span>
+    </div>
+    <h1><span class="nb">.unitypackage を、</span><br><em class="nb">テクスチャ付きで</em><span class="nb"> Blender へ。</span></h1>
+    <div class="frame split">
+      <img src="../web/assets/hero-before.webp" alt="">
+      <img class="after" src="../web/assets/hero-after.webp" alt="">
+      <span class="line"></span>
+      <span class="knob"><svg viewBox="0 0 24 24" fill="none" stroke="#3a322c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 7-5 5 5 5M15 7l5 5-5 5"/></svg></span>
+      <span class="tag l">FBX だけ</span>
+      <span class="tag r">このアドオン</span>
+    </div>
+    <div class="credit">Model: Tohoku Zunko © SSS LLC.</div>
+  </section>
+
+  <section class="page" data-p="2">
+    <h2>ドラッグ＆ドロップで<br><em>そのまま読み込み</em></h2>
+    <p>.unitypackage を Blender の画面に落として、Import を押すだけ。Unity は要りません。</p>
+    <div class="frame wide"><img src="../web/assets/demo-poster.webp" alt=""></div>
+    <div class="credit">Model: Tohoku Zunko © SSS LLC.</div>
+  </section>
+
+  <section class="page" data-p="3">
+    <h2>トゥーンでも、<em>PBR でも</em></h2>
+    <p>lilToon・Poiyomi・MToon などの設定を読んで、トゥーン調か PBR に組み直します。あとから切り替えもできます。</p>
+    <div class="frame wide">
+      <img src="../web/assets/shot-modes.webp" alt="">
+      <span class="tag l">自動（トゥーン）</span>
+      <span class="tag r">PBR に切り替え</span>
+    </div>
+    <div class="credit">Model: Tohoku Zunko © SSS LLC.</div>
+  </section>
+
+  <section class="page" data-p="4">
+    <h2>改変の前に、<em>形をじっくり確認</em></h2>
+    <p>ボーンやシェイプキーも入るので、編集モードで網目を見たり、ポーズや表情を付けたりできます。</p>
+    <div class="frame wide"><img src="../web/assets/use-edit.webp" alt=""></div>
+    <div class="credit">Model: Tohoku Zunko © SSS LLC.</div>
+  </section>
+
+  <script>
+    var p = new URLSearchParams(location.search).get("p") || "1";
+    var page = document.querySelector('.page[data-p="' + p + '"]') || document.querySelector(".page");
+    page.classList.add("on");
+  </script>
+</body>
+</html>

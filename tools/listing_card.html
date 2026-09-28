@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<!-- extensions.blender.org の featured image（1920×1080、16:9）の元。ローカルの Chrome でレンダリングする:
+     google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1920,1080 --screenshot=_local/listing/featured.png "file://$PWD/tools/listing_card.html"
+     アイコン（256×256 の PNG、背景は透明）は同じファイルの ?icon で出す:
+     google-chrome --headless=new --hide-scrollbars --default-background-color=00000000 --window-size=256,256 --screenshot=_local/listing/icon.png "file://$PWD/tools/listing_card.html?icon"
+     リポジトリのルートで実行すること（前後比較は web/assets/hero-*.webp を相対パスで読む）。
+     フォントは Google Fonts から読むので、オンラインで実行すること。デザインは tools/og_card.html に揃えてある。
+     掲載ページの画像に Blender のロゴを使ってはいけない（ToS）。 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap">
+<style>
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+  body { background: #ffffff; color: #3a322c; font-family: "Nunito", system-ui, sans-serif; position: relative; }
+  .blob { position: absolute; border-radius: 50%; pointer-events: none; }
+  .b1 { width: 1300px; height: 1300px; right: -420px; top: -520px; background: radial-gradient(closest-side, #ffe3cc, rgba(255,227,204,0) 72%); }
+  .b2 { width: 720px; height: 720px; left: -200px; bottom: -380px; background: radial-gradient(closest-side, #ffd2b0, rgba(255,210,176,0) 72%); }
+  .card { position: absolute; inset: 0; padding: 90px 120px 90px 132px; display: grid; grid-template-columns: minmax(0, 1fr) 640px; align-items: center; gap: 80px; }
+  .logo { display: flex; align-items: center; gap: 26px; font-weight: 800; font-size: 44px; margin-bottom: 48px; }
+  .logo svg { width: 88px; height: 88px; }
+  h1 { margin: 0 0 40px; font-size: 92px; line-height: 1.1; font-weight: 800; letter-spacing: -0.015em; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, #ad5410, #f07f2a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p { margin: 0; font-size: 38px; line-height: 1.45; color: #72665d; max-width: 1040px; font-weight: 700; }
+  .pills { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 48px; }
+  .pill { display: inline-flex; align-items: center; gap: 14px; background: #fff5ec; color: #ad5410; font-weight: 800; font-size: 34px; padding: 14px 32px; border-radius: 999px; }
+  .pill::before { content: ""; width: 18px; height: 18px; border-radius: 50%; background: #f07f2a; }
+
+  /* before / after, split in the middle like the slider on the website */
+  .art { display: grid; gap: 16px; justify-items: center; }
+  .frame { position: relative; width: 640px; height: 800px; border-radius: 48px; overflow: hidden; background: #393939; box-shadow: 0 50px 100px -50px rgba(58,50,44,.55); }
+  .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .frame img.after { clip-path: inset(0 0 0 50%); }
+  .frame .line { position: absolute; top: 0; bottom: 0; left: 50%; width: 6px; margin-left: -3px; background: #fff; }
+  .frame .knob { position: absolute; top: 50%; left: 50%; width: 88px; height: 88px; margin: -44px 0 0 -44px; border-radius: 50%; background: #f07f2a; border: 6px solid #fff; box-sizing: border-box; display: grid; place-items: center; }
+  .frame .knob svg { width: 44px; height: 44px; }
+  .tag { position: absolute; top: 26px; font-size: 30px; font-weight: 800; line-height: 1.3; padding: 8px 22px; border-radius: 999px; }
+  .tag.before { left: 26px; background: rgba(35,29,25,.82); color: #fff; }
+  .tag.after { right: 26px; background: #f07f2a; color: #3a322c; }
+  .credit { font-size: 22px; color: #9a8e85; font-weight: 700; }
+
+  /* ?icon: 256×256 のアイコン（紹介ページのロゴをそのまま拡大） */
+  html.icon, html.icon body { width: 256px; height: 256px; background: transparent; }
+  html.icon .blob, html.icon .card { display: none; }
+  .icon-only { display: none; }
+  html.icon .icon-only { display: block; width: 256px; height: 256px; }
+</style>
+</head>
+<body>
+  <svg class="icon-only" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="gi" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc26a"/><stop offset="1" stop-color="#f07f2a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="16" fill="url(#gi)"/><path d="M32 22v20M24 34l8 8 8-8" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="14" r="7" fill="#4fc4a8"/></svg>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="card">
+    <div>
+      <div class="logo">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc26a"/><stop offset="1" stop-color="#f07f2a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="16" fill="url(#g)"/><path d="M32 22v20M24 34l8 8 8-8" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="14" r="7" fill="#4fc4a8"/></svg>
+        Unitypackage Importer
+      </div>
+      <h1>Import .unitypackage files, <em>materials and textures included.</em></h1>
+      <p>Drop a package onto the viewport. No Unity needed.</p>
+      <div class="pills">
+        <span class="pill">lilToon · Poiyomi · MToon</span>
+        <span class="pill">Standard · URP · HDRP</span>
+        <span class="pill">Whole scenes</span>
+      </div>
+    </div>
+    <div class="art">
+      <div class="frame">
+        <img src="../web/assets/hero-before.webp" alt="">
+        <img class="after" src="../web/assets/hero-after.webp" alt="">
+        <span class="line"></span>
+        <span class="knob"><svg viewBox="0 0 24 24" fill="none" stroke="#3a322c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 7-5 5 5 5M15 7l5 5-5 5"/></svg></span>
+        <span class="tag before">Plain FBX</span>
+        <span class="tag after">This add-on</span>
+      </div>
+      <span class="credit">Model: Tohoku Zunko © SSS LLC.</span>
+    </div>
+  </div>
+  <script>
+    if (new URLSearchParams(location.search).has("icon")) document.documentElement.classList.add("icon");
+  </script>
+</body>
+</html>
