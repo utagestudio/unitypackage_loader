@@ -242,6 +242,11 @@ unitypackage_loader/         The Extension itself
 tests/                       Unit tests, integration tests, synthetic package generation
 ```
 
+## Feedback and bug reports
+
+Bug reports, requests, and questions can be sent through the [contact form](https://tally.so/r/KYqY78?product=Unitypackage%20Importer) (no account required).
+If you have a GitHub account, [Issues](https://github.com/utagestudio/unitypackage_loader/issues) works as well.
+
 ## License
 
 GPL-3.0-or-later ([LICENSE](LICENSE)), in line with the requirements for distribution as a Blender Extension.
