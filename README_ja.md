@@ -229,7 +229,7 @@ tests/                       単体テスト、統合テスト、合成パッケ
 
 ## お問い合わせ・不具合の報告
 
-不具合の報告、要望、質問は[お問い合わせフォーム](https://tally.so/r/kdVdDR?product=unitypackage-importer)から送れます（アカウントの登録は要りません）。
+不具合の報告、要望、質問は[お問い合わせフォーム](https://tally.so/r/kdVdDR?product=Unitypackage%20Importer)から送れます（アカウントの登録は要りません）。
 GitHub のアカウントをお持ちなら、[Issues](https://github.com/utagestudio/unitypackage_loader/issues) に書いていただいてもかまいません。
 
 ## ライセンス

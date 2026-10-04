@@ -244,7 +244,7 @@ tests/                       Unit tests, integration tests, synthetic package ge
 
 ## Feedback and bug reports
 
-Bug reports, requests, and questions can be sent through the [contact form](https://tally.so/r/KYqY78?product=unitypackage-importer) (no account required).
+Bug reports, requests, and questions can be sent through the [contact form](https://tally.so/r/KYqY78?product=Unitypackage%20Importer) (no account required).
 If you have a GitHub account, [Issues](https://github.com/utagestudio/unitypackage_loader/issues) works as well.
 
 ## License
