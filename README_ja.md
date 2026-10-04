@@ -227,6 +227,11 @@ unitypackage_loader/         Extension 本体
 tests/                       単体テスト、統合テスト、合成パッケージ生成
 ```
 
+## お問い合わせ・不具合の報告
+
+不具合の報告、要望、質問は[お問い合わせフォーム](https://tally.so/r/kdVdDR?product=unitypackage-importer)から送れます（アカウントの登録は要りません）。
+GitHub のアカウントをお持ちなら、[Issues](https://github.com/utagestudio/unitypackage_loader/issues) に書いていただいてもかまいません。
+
 ## ライセンス
 
 GPL-3.0-or-later（[LICENSE](LICENSE)）。Blender の Extension として配布するための要件に合わせています。
