@@ -131,7 +131,9 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
   同じアドオンを 2 つの入手先から入れると両方が有効になってクラスを上書きし合うので、README と紹介ページには「どれか 1 つから入れる」と書いておく。
 - お問い合わせ先は Tally のフォーム（日本語 https://tally.so/r/kdVdDR 、英語 https://tally.so/r/KYqY78 。2026-10-04 に追加）と GitHub の Issues の併記。
   リンクの `product` と `version` がフォームの「対象のサービス・ソフト」「バージョン」の初期値になる。紹介ページは `{{VERSION}}` で自動だが、
-  extensions.blender.org の掲載ページと BOOTH の説明文は `version=` を手で書いているので、それぞれを更新するときに直す（BOOTH は minor 以上、掲載ページは毎回）。
+  BOOTH の説明文は `version=` を手で書いているので、minor 以上のリリースで説明文を更新するときに直す。
+  extensions.blender.org の掲載ページの「Report Issues / Support」は GitHub の Issues（https://github.com/utagestudio/unitypackage_loader/issues ）にする。
+  審査で公開のバグトラッカーを指すよう求められたためで、フォームは他の人から報告が見えないのでこの欄には使えない（2026-10-05 に Tally から変更）。
 - BOOTH（https://utagestudio.booth.pm/items/8910607 、2026-09-28 公開）にも同じ zip を置いている（無料版と、中身が同じ応援版 300 円・1,000 円）。
   minor 以上のリリースのときに全バリエーションの zip を差し替え、説明文の「現在のバージョン」と「更新履歴」も直す（fix 版では差し替えなくてよい）。
   説明文の元と手順は `_local/booth/description.txt` と `_local/publish_booth.md`。商品画像は `tools/booth_card.html` から書き出す。
