@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "unitypackage_loader"
-version = "1.11.4"
+version = "1.11.5-dev.1"
 name = "Unitypackage Importer"
 tagline = "Import meshes, materials and textures from .unitypackage files"
 maintainer = "utagestudio"
 type = "add-on"
 website = "https://utagestudio.github.io/unitypackage_loader/"
 
-tags = ["Import-Export", "Material"]
+tags = ["Import-Export"]
 blender_version_min = "4.5.0"
 license = ["SPDX:GPL-3.0-or-later"]
 copyright = ["2026 utagestudio"]
