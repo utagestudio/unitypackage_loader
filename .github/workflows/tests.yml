@@ -130,6 +130,8 @@ jobs:
           run synthetic_multi.unitypackage expectations_synthetic_prefabs_stack.json
           run synthetic_scene.unitypackage expectations_synthetic_scene.json
           run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs.json
+          run synthetic_scene.unitypackage expectations_synthetic_scene_keep_unused.json
+          run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs_keep_unused.json
           run synthetic_urp.unitypackage expectations_synthetic_urp.json
           run synthetic_urp_standard.unitypackage expectations_synthetic_urp_standard.json
           run synthetic_hdrp.unitypackage expectations_synthetic_hdrp.json

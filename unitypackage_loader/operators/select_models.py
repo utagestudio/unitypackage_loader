@@ -184,6 +184,7 @@ _LIGHTS_PROP = "unitypkg_select_lights"
 _CAMERAS_PROP = "unitypkg_select_cameras"
 _EXPOSURE_PROP = "unitypkg_select_exposure"
 _LODS_PROP = "unitypkg_select_hide_lods"
+_UNUSED_PROP = "unitypkg_select_skip_unused"
 
 
 def _items(context):
@@ -290,6 +291,10 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             split = layout.split(factor=0.2)
             split.label(text="LODs")
             split.prop(wm, _LODS_PROP, toggle=True, icon="MOD_DECIM")
+            # prefab・シーンが FBX の一部のメッシュだけを使うときに機能する（#152）
+            split = layout.split(factor=0.2)
+            split.label(text="Unused Parts")
+            split.prop(wm, _UNUSED_PROP, toggle=True, icon="TRASH")
 
         col = layout.column(align=True)
         col.label(text=self.summary_materials, icon="MATERIAL")
@@ -334,6 +339,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
         opts.scene_exposure = getattr(wm, _EXPOSURE_PROP)
         opts.hide_lods = getattr(wm, _LODS_PROP)
+        opts.skip_unused_parts = getattr(wm, _UNUSED_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
         if unit == UNIT_SCENES:
             opts.scene_paths = [s.pathname for s in prepared.scenes if s.guid in chosen]
@@ -431,10 +437,19 @@ def register() -> None:
             "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
         ),
     ))
+    setattr(wm, _UNUSED_PROP, BoolProperty(
+        name="Skip Unused Parts",
+        default=True,
+        description=(
+            "Do not import the parts of a model file that the Unity prefabs or scene do not use, "
+            "such as the other pieces of a model file that bundles many props. "
+            "Turn off to import them hidden, as before"
+        ),
+    ))
 
 
 def unregister() -> None:
-    for prop in (_LODS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
+    for prop in (_UNUSED_PROP, _LODS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
         if hasattr(bpy.types.WindowManager, prop):
             delattr(bpy.types.WindowManager, prop)
     for cls in reversed(_classes):

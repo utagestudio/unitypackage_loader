@@ -1,0 +1,35 @@
+{
+  "options": {
+    "material_mode": "AUTO",
+    "models": "ALL",
+    "unit": "PREFABS",
+    "skip_unused_parts": false
+  },
+  "collections": {
+    "Partial": {
+      "prefab": "Assets/Synthetic/Prefabs/Partial.prefab",
+      "objects": 5,
+      "parts": {
+        "Spike.001": {
+          "hidden": false
+        },
+        "Child.001": {
+          "hidden": true
+        },
+        "Skinned.001": {
+          "hidden": true
+        }
+      }
+    },
+    "Unpacked": {
+      "prefab": "Assets/Synthetic/Prefabs/Unpacked.prefab",
+      "objects": 5
+    }
+  },
+  "warnings_contain": [
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
+  ],
+  "warnings_exclude": [
+    "were not imported"
+  ]
+}

@@ -424,6 +424,12 @@ class UnusedPartsTests(unittest.TestCase):
         objects = [("Body", True), ("Body.002", True), ("Door.001", True), ("Window", True), ("Armature", False)]
         self.assertEqual(unused_parts(table, objects), {"Window"})  # メッシュでないものは対象にしない
 
+    def test_numbered_node_names_renamed_by_blender(self):
+        # FBX のノード名が「Base-Ring.001」で、2 回目の読み込みで Blender が「Base-Ring.002」に付け替えた
+        table = {"Base-Ring.001": RendererMaterials("Base-Ring.001", [MAT_A])}
+        objects = [("Base-Ring.002", True), ("Chain-Link.002", True)]
+        self.assertEqual(unused_parts(table, objects), {"Chain-Link.002"})
+
     def test_models_placed_whole(self):
         # Renderer からだけ使う prefab では、FBX の部品は表の分しか Unity に無い
         h = expand(BASE, {BASE: PREFAB})

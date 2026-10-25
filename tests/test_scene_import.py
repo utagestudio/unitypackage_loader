@@ -2,7 +2,15 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelPlacement, Node, PlacedRenderer, SceneContents
-from unitypackage_loader.core.scene_import import parts_to_hide, prefab_warnings, scene_warnings, unused_warning
+from unitypackage_loader.core.scene_import import (
+    parts_to_hide,
+    parts_to_remove,
+    prefab_warnings,
+    removed_warning,
+    scene_warnings,
+    unused_in_placement,
+    unused_warning,
+)
 from unitypackage_loader.core.transform import IDENTITY
 from unitypackage_loader.core.unity_ids import mesh_file_id
 
@@ -17,11 +25,15 @@ def renderer(name: str, visible: bool = True, mesh_id: int = 0, lod: int = 0) ->
     return PlacedRenderer(name, [], CLASS_MESH_RENDERER, visible, mesh_id, lod)
 
 
+def placed(*renderers: PlacedRenderer, active: bool = True, model_root: bool = False):
+    h = Hierarchy({1: node(1, MODEL if model_root else None)})
+    placement = ModelPlacement(MODEL, 1, IDENTITY, active, {r.name: r for r in renderers})
+    return h, placement
+
+
 class PartsToHideTests(unittest.TestCase):
     def placement(self, *renderers: PlacedRenderer, active: bool = True, model_root: bool = False):
-        h = Hierarchy({1: node(1, MODEL if model_root else None)})
-        placement = ModelPlacement(MODEL, 1, IDENTITY, active, {r.name: r for r in renderers})
-        return h, placement
+        return placed(*renderers, active=active, model_root=model_root)
 
     def hidden(self, *args, **kwargs):
         result = parts_to_hide(*args, **kwargs)
@@ -87,6 +99,44 @@ class LodPartsTests(unittest.TestCase):
         self.assertEqual(result.lods, {"Bike_LOD0": 0, "Bike_LOD1": 1})
 
 
+class UnusedInPlacementTests(unittest.TestCase):
+    def test_same_parts_as_hidden(self):
+        h, placement = placed(renderer("Body"), renderer("RenamedDoor", mesh_id=mesh_file_id("Door")))
+        objects = [("Body.001", True), ("Door.002", True), ("Window", True), ("Armature", False)]
+        self.assertEqual(unused_in_placement(h, placement, objects), {"Window"})
+        h, whole = placed(renderer("Body"), model_root=True)
+        self.assertEqual(unused_in_placement(h, whole, objects), set())
+
+
+class PartsToRemoveTests(unittest.TestCase):
+    """使われていない部品を読み込まないときに消すもの（#152）。"""
+
+    def test_leaf_parts_and_emptied_containers(self):
+        objects = [
+            ("Spike", None, "MESH"),  # 使う
+            ("Group", None, "EMPTY"),  # 使われていない Child だけを持つ入れ物
+            ("Child", "Group", "MESH"),
+            ("Armature", None, "ARMATURE"),  # 使われていない Skinned だけを持つ
+            ("Skinned", "Armature", "MESH"),
+            ("Marker", None, "EMPTY"),  # もともと子の無い Empty は残す
+        ]
+        self.assertEqual(parts_to_remove(objects, {"Child", "Skinned"}), {"Group", "Child", "Armature", "Skinned"})
+
+    def test_unused_parent_of_a_used_part_is_kept(self):
+        objects = [
+            ("Frame", None, "MESH"),  # 使われていないが、使う Door の親
+            ("Door", "Frame", "MESH"),
+            ("Glass", "Frame", "MESH"),
+            ("Rig", None, "ARMATURE"),  # 使う Body が残るので残す
+            ("Body", "Rig", "MESH"),
+            ("Extra", "Rig", "MESH"),
+        ]
+        self.assertEqual(parts_to_remove(objects, {"Frame", "Glass", "Extra"}), {"Glass", "Extra"})
+
+    def test_nothing_unused(self):
+        self.assertEqual(parts_to_remove([("Body", None, "MESH"), ("Group", None, "EMPTY")], set()), set())
+
+
 class SceneWarningsTests(unittest.TestCase):
     def test_messages_in_order(self):
         contents = SceneContents([], unresolved_overrides=2, missing_sources=1, other_renderers=3)
@@ -113,6 +163,12 @@ class PrefabWarningsTests(unittest.TestCase):
         self.assertEqual(messages[0], unused_warning(53))
         self.assertTrue(messages[0].startswith("53 object(s) from model files are not used"))
         self.assertTrue(messages[1].startswith("2 object(s) are lower LOD levels"))
+
+    def test_removed_parts(self):
+        messages = prefab_warnings(removed_unused=53, hidden_unused=1)
+        self.assertEqual(messages, [removed_warning(53), unused_warning(1)])
+        self.assertIn("were not imported", messages[0])
+        self.assertEqual(scene_warnings("S", SceneContents([]), removed_unused=4), ["scene S: " + removed_warning(4)])
 
 
 if __name__ == "__main__":

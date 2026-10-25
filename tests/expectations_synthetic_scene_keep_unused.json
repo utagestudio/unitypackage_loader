@@ -1,0 +1,32 @@
+{
+  "options": {
+    "material_mode": "AUTO",
+    "models": "ALL",
+    "unit": "SCENES",
+    "skip_unused_parts": false
+  },
+  "placed_objects": [
+    {
+      "top": "Partial",
+      "object": "Spike",
+      "hidden": false
+    },
+    {
+      "top": "Partial",
+      "object": "Child",
+      "hidden": true
+    },
+    {
+      "top": "Partial",
+      "object": "Skinned",
+      "hidden": true
+    }
+  ],
+  "warnings_contain": [
+    "scene Assets/Synthetic/Scenes/Probe.unity: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
+    "scene Assets/Synthetic/Scenes/Legacy.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
+  ],
+  "warnings_exclude": [
+    "were not imported"
+  ]
+}

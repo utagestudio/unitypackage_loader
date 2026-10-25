@@ -89,10 +89,17 @@ def models_placed_whole(h: Hierarchy, placed: list[ModelPlacement]) -> set[str]:
 def unused_parts(table: dict[str, RendererMaterials], objects: Iterable[tuple[str, bool]]) -> set[str]:
     """表の Renderer が使っていないメッシュのオブジェクト名（読み込む単位 Prefabs で隠すもの。#151）。
 
-    ``objects`` は (Blender のオブジェクト名, メッシュか)。照合は ``find_renderer`` と同じ（名前 → 連番を外した形 →
-    メッシュ参照の fileID）。FBX を丸ごと置いたモデル（``models_placed_whole``）には使わない。
+    ``objects`` は (Blender のオブジェクト名, メッシュか)。照合は ``find_renderer``（名前 → 連番を外した形 → メッシュ参照の
+    fileID）に加えて、表の名前の連番も外して比べる（Scenes 単位の ``scene_import.unused_in_placement`` と同じ）。
+    FBX のノード名がもともと「Base-Ring.001」のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が
+    「Base-Ring.002」に付け替えるので、片側だけ外したのでは使っている部品まで隠して（消して）しまう。
+    FBX を丸ごと置いたモデル（``models_placed_whole``）には使わない。
     """
-    return {name for name, is_mesh in objects if is_mesh and find_renderer(table, name) is None}
+    stripped = {strip_numeric_suffix(n) for n in table}
+    return {
+        name for name, is_mesh in objects
+        if is_mesh and strip_numeric_suffix(name) not in stripped and find_renderer(table, name) is None
+    }
 
 
 def merge_prefab_tables(tables: list[dict[str, RendererMaterials]]) -> dict[str, RendererMaterials]:
