@@ -99,6 +99,22 @@ class LodPartsTests(unittest.TestCase):
         self.assertEqual(result.lods, {"Bike_LOD0": 0, "Bike_LOD1": 1})
 
 
+class NumberedNodeNameTests(unittest.TestCase):
+    """FBX のノード名がもともと連番付きで、Blender が付け替えたオブジェクト（#155）。"""
+
+    def test_lod_level_and_disabled_renderer(self):
+        h, placement = placed(renderer("Lamp_LOD1.001", lod=1), renderer("Glass.001", visible=False), renderer("Base.001"))
+        result = parts_to_hide(h, placement, [("Lamp_LOD1.003", True), ("Glass.002", True), ("Base.002", True)])
+        self.assertEqual(result.lods, {"Lamp_LOD1.003": 1, "Glass.002": 0, "Base.002": 0})  # 隠さない LOD0 も入る
+        self.assertEqual(result.names, {"Lamp_LOD1.003", "Glass.002"})
+        self.assertEqual((result.unused, result.hidden_lods), (0, 1))
+
+    def test_ambiguous_names_are_not_matched(self):
+        h, placement = placed(renderer("Arm.001", lod=1), renderer("Arm.002", visible=False))
+        result = parts_to_hide(h, placement, [("Arm.003", True)])
+        self.assertEqual((result.names, result.lods), (set(), {}))
+
+
 class UnusedInPlacementTests(unittest.TestCase):
     def test_same_parts_as_hidden(self):
         h, placement = placed(renderer("Body"), renderer("RenamedDoor", mesh_id=mesh_file_id("Door")))

@@ -410,6 +410,20 @@ class FindRendererTests(unittest.TestCase):
         self.assertEqual(find_renderer(table, "Door.001").materials, [MAT_B])  # メッシュ参照のハッシュ
         self.assertIsNone(find_renderer(table, "Window"))
 
+    def test_numbered_node_names_renamed_by_blender(self):
+        from unitypackage_loader.core.prefab import find_renderer
+
+        # FBX のノード名が「Base-Ring.001」で、2 回目の読み込みで Blender が「Base-Ring.002」に付け替えた（#155）
+        table = {"Base-Ring.001": RendererMaterials("Base-Ring.001", [MAT_A]), "Body": RendererMaterials("Body", [MAT_B])}
+        self.assertEqual(find_renderer(table, "Base-Ring.002").materials, [MAT_A])
+        self.assertEqual(find_renderer(table, "Base-Ring.001").materials, [MAT_A])  # 完全一致が先
+        # 連番を外すと同じになる行が複数あれば、どれか決められないので引かない
+        both = {"Body": RendererMaterials("Body", [MAT_A]), "Body.001": RendererMaterials("Body.001", [MAT_B])}
+        self.assertEqual(find_renderer(both, "Body.001").materials, [MAT_B])
+        self.assertEqual(find_renderer(both, "Body.002").materials, [MAT_A])  # 連番を外した「Body」と完全一致
+        ambiguous = {"Arm.001": RendererMaterials("Arm.001", [MAT_A]), "Arm.002": RendererMaterials("Arm.002", [MAT_B])}
+        self.assertIsNone(find_renderer(ambiguous, "Arm.003"))
+
 
 class UnusedPartsTests(unittest.TestCase):
     """読み込む単位 Prefabs で、prefab が使っていない FBX の部品を見分ける（#151）。"""
