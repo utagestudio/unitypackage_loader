@@ -120,7 +120,8 @@ ticked):
 - **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
   Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
   them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
-  `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, as scenes do.
+  `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, and parts of a model file that the prefab
+  does not use are hidden, as scenes do.
 - **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
   [Matching meshes to materials](#matching-meshes-to-materials).
 
