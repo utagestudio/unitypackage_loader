@@ -275,19 +275,21 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     """``names`` のオブジェクトを消し、残ったオブジェクトを返す（使われていない部品を読み込まないとき。#152）。
 
     消したオブジェクトだけが使っていたメッシュ・アーマチュアのデータも消す（読み込んだばかりで、ほかに使う人はいない）。
+    データの ``users`` は当てにしない。FBX の読み込み直後は、複数のオブジェクトが共有するメッシュでも 1 のことがあり、
+    それを見て消すと、データと一緒に共有していたほかのオブジェクトまで消える。オブジェクトを先にすべて消し、
+    残したオブジェクトが使っていないデータだけを消す。
     """
-    kept: list[bpy.types.Object] = []
-    for obj in objects:
-        if obj.name not in names:
-            kept.append(obj)
-            continue
-        data = obj.data
+    kept = [obj for obj in objects if obj.name not in names]
+    gone = [obj for obj in objects if obj.name in names]
+    used = {obj.data for obj in kept if obj.data is not None}
+    orphans = {obj.data for obj in gone if obj.data is not None} - used
+    for obj in gone:
         bpy.data.objects.remove(obj)
-        if data is not None and data.users == 0:
-            if isinstance(data, bpy.types.Mesh):
-                bpy.data.meshes.remove(data)
-            elif isinstance(data, bpy.types.Armature):
-                bpy.data.armatures.remove(data)
+    for data in orphans:
+        if isinstance(data, bpy.types.Mesh):
+            bpy.data.meshes.remove(data)
+        elif isinstance(data, bpy.types.Armature):
+            bpy.data.armatures.remove(data)
     return kept
 
 
