@@ -271,6 +271,26 @@ def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec
     return False
 
 
+def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.types.Object]:
+    """``names`` のオブジェクトを消し、残ったオブジェクトを返す（使われていない部品を読み込まないとき。#152）。
+
+    消したオブジェクトだけが使っていたメッシュ・アーマチュアのデータも消す（読み込んだばかりで、ほかに使う人はいない）。
+    """
+    kept: list[bpy.types.Object] = []
+    for obj in objects:
+        if obj.name not in names:
+            kept.append(obj)
+            continue
+        data = obj.data
+        bpy.data.objects.remove(obj)
+        if data is not None and data.users == 0:
+            if isinstance(data, bpy.types.Mesh):
+                bpy.data.meshes.remove(data)
+            elif isinstance(data, bpy.types.Armature):
+                bpy.data.armatures.remove(data)
+    return kept
+
+
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
     """レンダリングからはすぐ外し、ビューポートの非表示は ``hidden`` に積んで読み込みの後で当てる。
 

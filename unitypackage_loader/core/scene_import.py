@@ -9,7 +9,17 @@ from .hierarchy import Hierarchy, ModelPlacement, SceneContents, built_from_rend
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
-__all__ = ["HiddenParts", "lod_warning", "parts_to_hide", "prefab_warnings", "scene_warnings", "unused_warning"]
+__all__ = [
+    "HiddenParts",
+    "lod_warning",
+    "parts_to_hide",
+    "parts_to_remove",
+    "prefab_warnings",
+    "removed_warning",
+    "scene_warnings",
+    "unused_in_placement",
+    "unused_warning",
+]
 
 
 class HiddenParts(NamedTuple):
@@ -21,6 +31,60 @@ class HiddenParts(NamedTuple):
     hidden_lods: int = 0  # そのうち遠景用 LOD として隠した数
 
 
+def unused_in_placement(h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]]) -> set[str]:
+    """配置で読み込んだメッシュのうち、Unity で使われていないもの（#58）。``objects`` は (Blender のオブジェクト名, メッシュか)。
+
+    展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、FBX にしかない
+    メッシュ（prefab が使っていない LOD や別のノード）は使われていない。FBX 由来の名前に「.002」が付いていることもあるので、
+    表の名前は連番を外した形でも照合し、名前で引けなければ Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
+    （表で名前を引けない新しい形式のモデル）。FBX を丸ごと置いた配置では空。
+    """
+    if not built_from_renderers(h, placement):
+        return set()
+    used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
+    mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
+    result: set[str] = set()
+    for obj_name, is_mesh in objects:
+        name = strip_numeric_suffix(obj_name)
+        if (
+            is_mesh and obj_name not in used and name not in used
+            and mesh_file_id(obj_name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
+        ):
+            result.add(obj_name)
+    return result
+
+
+def parts_to_remove(objects: Iterable[tuple[str, str | None, str]], unused: set[str]) -> set[str]:
+    """使われていない部品を読み込まないとき（#152）に、消すオブジェクトの名前。
+
+    ``objects`` は (Blender のオブジェクト名, 親の名前, オブジェクトの種類)。``unused`` は使われていないメッシュ。
+
+    - 使われていないメッシュは、子孫に残すものが無ければ消す。残すものがあれば、親子関係と位置を保つため残す
+      （隠すのは今までどおり ``parts_to_hide`` が行う）
+    - Empty とアーマチュアは、子がすべて消えたら消す（使われていない部品の入れ物だったもの）。もともと子の無いものは残す
+    """
+    objects = list(objects)
+    kinds = {name: kind for name, _, kind in objects}
+    children: dict[str, list[str]] = {}
+    for name, parent, _ in objects:
+        if parent in kinds:
+            children.setdefault(parent, []).append(name)
+    removed: set[str] = set()
+
+    def visit(name: str) -> bool:
+        kids = children.get(name, [])
+        all_gone = all([visit(kid) for kid in kids])  # 子はすべてたどる（短絡させない）
+        gone = all_gone and (name in unused or (bool(kids) and kinds[name] in ("EMPTY", "ARMATURE")))
+        if gone:
+            removed.add(name)
+        return gone
+
+    for name, parent, _ in objects:
+        if parent not in kinds:
+            visit(name)
+    return removed
+
+
 def parts_to_hide(
     h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]], hide_lods: bool = True
 ) -> HiddenParts:
@@ -29,16 +93,12 @@ def parts_to_hide(
     ``objects`` は (Blender のオブジェクト名, メッシュか)。
 
     - 配置が非アクティブならすべて、Renderer が無効ならそのオブジェクトを隠す
-    - 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、FBX にしかない
-      メッシュ（prefab が使っていない LOD や別のノード）も隠す（#58）。FBX 由来の名前に「.002」が付いていることもあるので、
-      表の名前は連番を外した形でも照合し、名前で引けなければ Renderer のメッシュの fileID をオブジェクト名のハッシュと照合する
-      （表で名前を引けない新しい形式のモデル）
+    - Unity で使われていないメッシュ（``unused_in_placement``）も隠す（#58）
     - ``hide_lods`` なら、LODGroup の遠景用の段（LOD1 以降）の Renderer を隠す（#104）
     """
-    from_renderers = built_from_renderers(h, placement)
+    objects = list(objects)
+    unused_names = unused_in_placement(h, placement, objects)
     disabled = {name for name, r in placement.renderers.items() if not r.visible}
-    used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
-    mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
     levels = {name: r.lod_level for name, r in placement.renderers.items()}
     by_mesh_id = {r.mesh_file_id: r.lod_level for r in placement.renderers.values() if r.mesh_file_id}
     hide: set[str] = set()
@@ -46,10 +106,7 @@ def parts_to_hide(
     unused_count = lod_count = 0
     for obj_name, is_mesh in objects:
         name = strip_numeric_suffix(obj_name)
-        unused = (
-            from_renderers and is_mesh and obj_name not in used and name not in used
-            and mesh_file_id(obj_name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
-        )
+        unused = obj_name in unused_names
         level = levels.get(obj_name, levels.get(name))
         if level is None and is_mesh:
             level = by_mesh_id.get(mesh_file_id(obj_name), by_mesh_id.get(mesh_file_id(name)))
@@ -72,6 +129,7 @@ def scene_warnings(
     baked_lights: int = 0,
     light_notes: Iterable[str] = (),
     hidden_unused: int = 0,
+    removed_unused: int = 0,
     hidden_lods: int = 0,
     skipped_nodes: int = 0,
     skipped_offsets: int = 0,
@@ -98,6 +156,8 @@ def scene_warnings(
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
             )
+        if removed_unused:
+            messages.append(removed_warning(removed_unused))
         if hidden_unused:
             messages.append(unused_warning(hidden_unused))
         if hidden_lods:
@@ -114,9 +174,11 @@ def scene_warnings(
     return [prefix + m for m in messages]
 
 
-def prefab_warnings(*, hidden_unused: int = 0, hidden_lods: int = 0) -> list[str]:
+def prefab_warnings(*, hidden_unused: int = 0, removed_unused: int = 0, hidden_lods: int = 0) -> list[str]:
     """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
     messages: list[str] = []
+    if removed_unused:
+        messages.append(removed_warning(removed_unused))
     if hidden_unused:
         messages.append(unused_warning(hidden_unused))
     if hidden_lods:
@@ -129,6 +191,14 @@ def unused_warning(hidden_unused: int) -> str:
     return (
         f"{hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
         "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
+    )
+
+
+def removed_warning(removed_unused: int) -> str:
+    """使われていない FBX の部品を読み込まなかったときの文言（#152）。"""
+    return (
+        f"{removed_unused} object(s) from model files are not used by the Unity prefabs or scene "
+        "and were not imported (turn off 'Skip Unused Parts' to import them hidden)"
     )
 
 

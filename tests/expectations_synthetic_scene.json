@@ -249,12 +249,12 @@
     {
       "top": "Partial",
       "object": "Child",
-      "hidden": true
+      "absent": true
     },
     {
       "top": "Partial",
       "object": "Skinned",
-      "hidden": true
+      "absent": true
     },
     {
       "top": "KioskRoot",

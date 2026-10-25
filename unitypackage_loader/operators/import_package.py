@@ -41,6 +41,12 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         description="Hide the distant LOD levels of Unity LODGroups (scenes and prefabs)",
         options={"HIDDEN", "SKIP_SAVE"},
     )
+    skip_unused_parts: BoolProperty(
+        name="Skip Unused Parts",
+        default=True,
+        description="Do not import the parts of a model file that the Unity prefabs or scene do not use (scenes and prefabs)",
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
     fbx_importer: EnumProperty(
         name="FBX Importer",
         items=(
@@ -216,6 +222,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 scene_cameras=self.scene_cameras,
                 scene_exposure=self.scene_exposure,
                 hide_lods=self.hide_lods,
+                skip_unused_parts=self.skip_unused_parts,
                 material_mode=self.material_mode,
                 force_opaque=self.force_opaque,
                 backface_culling=self.backface_culling,
