@@ -101,6 +101,8 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/unit
 blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/unitypackages/ に出る）
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_prefabs.json  # 読み込む単位 Prefabs（LODGroup の非表示）
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_keep_unused.json          # Scenes で使われていない部品を読み込んで隠す（Skip Unused Parts を OFF）
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_prefabs_keep_unused.json  # Prefabs で同じく OFF
 blender -b --factory-startup --python tests/make_synthetic_urp_package.py     # URP 用の合成パッケージ（ライトが URP の単位になるので別にする。マテリアルを Standard にした _standard も出る）
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_urp.unitypackage tests/expectations_synthetic_urp.json             # URP Lit の読み方と URP のライト
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_urp_standard.unitypackage tests/expectations_synthetic_urp_standard.json  # ライトの追加データからの URP の判定

@@ -324,6 +324,9 @@ def main() -> int:
         # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
         for obj_name, part in spec.get("parts", {}).items():
             obj = next((o for o in objects if o.name == obj_name), None)
+            if part.get("absent"):  # 読み込まないもの（使われていない部品。#152）
+                c.true(f"{coll_name}/{obj_name} absent", obj is None)
+                continue
             c.true(f"{coll_name}/{obj_name} exists", obj is not None)
             if obj is None:
                 continue
@@ -365,6 +368,9 @@ def main() -> int:
     for spec in exp.get("placed_objects", []):
         label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
         found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
+        if spec.get("absent"):  # 読み込まないもの（使われていない部品。#152）
+            c.eq(f"{label} found", len(found), 0)
+            continue
         c.eq(f"{label} found", len(found), 1)
         if len(found) != 1:
             continue

@@ -33,11 +33,44 @@
       "mat_files": [
         ""
       ]
+    },
+    "Partial": {
+      "prefab": "Assets/Synthetic/Prefabs/Partial.prefab",
+      "objects": 1,
+      "parts": {
+        "Spike.001": {
+          "hidden": false
+        }
+      }
+    },
+    "Unpacked": {
+      "prefab": "Assets/Synthetic/Prefabs/Unpacked.prefab",
+      "objects": 5
+    },
+    "RingPlain": {
+      "prefab": "Assets/Synthetic/Prefabs/RingPlain.prefab",
+      "objects": 1,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    "RingRed": {
+      "prefab": "Assets/Synthetic/Prefabs/RingRed.prefab",
+      "objects": 1,
+      "mat_files": [
+        "ProbeRed.mat"
+      ],
+      "parts": {
+        "Ring.002": {
+          "hidden": false
+        }
+      }
     }
   },
-  "warnings_max": 4,
+  "warnings_max": 6,
   "warnings_contain": [
-    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet"
+    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet",
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported"
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "

@@ -102,10 +102,11 @@ ticked):
   gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.
   Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
   Small props copied side by side under a common parent in Unity (for example several cups in a room) are placed one by one.
-  Parts of a model file that a prefab or the scene does not use (for example unused LODs or extra nodes) are hidden,
-  matched by the mesh each Unity renderer references. Where Unity has an LODGroup, only the most detailed level (LOD0)
-  stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the dialog; the hidden
-  objects stay in the file and keep their level in the `unity_lod` custom property).
+  Parts of a model file that a prefab or the scene does not use (for example unused LODs, extra nodes, or the other
+  pieces of a model file that bundles many props) are not imported, matched by the mesh each Unity renderer references
+  (turn off **Unused Parts** in the dialog to import them hidden instead). Where Unity has an LODGroup, only the most
+  detailed level (LOD0) stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the
+  dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
   measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
   The render pipeline is detected from the URP / HDRP additional data on lights and cameras, and from the materials'
@@ -120,7 +121,8 @@ ticked):
 - **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
   Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
   them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
-  `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, as scenes do.
+  `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, and parts of a model file that the prefab
+  does not use are not imported, as in scenes.
 - **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
   [Matching meshes to materials](#matching-meshes-to-materials).
 

@@ -931,6 +931,14 @@ class ModelPlacement:
         return (self.model_guid, tuple(sorted((name, tuple(r.materials)) for name, r in self.renderers.items())))
 
 
+def built_from_renderers(h: Hierarchy, placement: ModelPlacement) -> bool:
+    """展開した prefab・シーンの Renderer から作った配置か（モデルの PrefabInstance で FBX を丸ごと置いた配置ではないか）。
+
+    このとき Unity にあるのは ``renderers`` の Renderer だけで、FBX のほかの部品は使われていない（#58）。
+    """
+    return placement.root in h.nodes and h.nodes[placement.root].model_guid is None
+
+
 def _close(a: Mat4, b: Mat4) -> bool:
     return all(abs(x - y) <= _CLOSE * max(1.0, abs(x), abs(y)) for ra, rb in zip(a, b) for x, y in zip(ra, rb))
 

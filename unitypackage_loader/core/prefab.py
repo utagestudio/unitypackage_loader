@@ -17,9 +17,10 @@ SkinnedMeshRenderer の ``m_Mesh``）の GUID で決める。パッケージ内�
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .hierarchy import CLASS_MESH_RENDERER, SOLE_RENDERER, Hierarchy, ModelNames, placements
+from .hierarchy import CLASS_MESH_RENDERER, SOLE_RENDERER, Hierarchy, ModelNames, ModelPlacement, built_from_renderers, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
@@ -35,22 +36,32 @@ class RendererMaterials:
 
 
 def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
-    """Blender のオブジェクト名で表を引く（完全一致 → 連番を外した形 → メッシュ参照の fileID のハッシュ）。
+    """Blender のオブジェクト名で表を引く（完全一致 → 連番を外した形 → メッシュ参照の fileID のハッシュ →
+    表の名前の連番も外した形）。
 
     prefab で GameObject の名前を変えてあると名前では引けないので、オブジェクト名から求めたメッシュの fileID を
     表の Renderer のメッシュ参照と照合する（Scenes 単位と同じ。#71）。
+    FBX のノード名がもともと「Base-Ring.001」のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が
+    「Base-Ring.002」に付け替え、ここまでのどれでも引けない。最後に表の名前の連番も外して比べ、該当する行が
+    1 つだけならそれを使う。複数あれば（「Body」と「Body.001」が両方ある FBX など）どれか決められないので引かない（#155）。
     """
-    rm = table.get(obj_name) or table.get(strip_numeric_suffix(obj_name))
+    base = strip_numeric_suffix(obj_name)
+    rm = table.get(obj_name) or table.get(base)
     if rm is not None:
         return rm
-    ids = {mesh_file_id(obj_name), mesh_file_id(strip_numeric_suffix(obj_name))}
-    return next((r for r in table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
+    ids = {mesh_file_id(obj_name), mesh_file_id(base)}
+    rm = next((r for r in table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
+    if rm is not None:
+        return rm
+    candidates = [r for name, r in table.items() if strip_numeric_suffix(name) == base]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def tables_from_hierarchy(
     h: Hierarchy,
     model_names: ModelNames,
     name_tables: dict[str, dict[int, str]] | None = None,
+    placed: list[ModelPlacement] | None = None,
 ) -> dict[str, dict[str, RendererMaterials]]:
     """展開した prefab の階層から、モデルの GUID → GameObject 名 → Renderer の表を作る。
 
@@ -58,9 +69,10 @@ def tables_from_hierarchy(
     同じモデルに同名の GameObject があれば先のもの（配置の順）を採用する。モデルをそのまま置いた PrefabInstance は、
     中への上書きを名前で引けたものだけが表に入る。1 つも引けなければ表に入れない（FBX を置いただけの prefab を、
     モデルを使う prefab として数えない。読み込む単位 Prefabs の候補は以前と同じ）。
+    ``placed`` に ``placements`` の結果を渡すと、配置を求め直さない。
     """
     result: dict[str, dict[str, RendererMaterials]] = {}
-    for placement in placements(h, model_names, name_tables):
+    for placement in placed if placed is not None else placements(h, model_names, name_tables):
         if not placement.renderers:
             continue
         table = result.setdefault(placement.model_guid, {})
@@ -73,6 +85,30 @@ def tables_from_hierarchy(
                 ),
             )
     return result
+
+
+def models_placed_whole(h: Hierarchy, placed: list[ModelPlacement]) -> set[str]:
+    """モデルの PrefabInstance で FBX を丸ごと置いている配置のある、モデルの GUID。
+
+    そのモデルは FBX のすべての部品が Unity にあるので、表に無い部品も隠さない（#151）。
+    """
+    return {p.model_guid for p in placed if not built_from_renderers(h, p)}
+
+
+def unused_parts(table: dict[str, RendererMaterials], objects: Iterable[tuple[str, bool]]) -> set[str]:
+    """表の Renderer が使っていないメッシュのオブジェクト名（読み込む単位 Prefabs で隠すもの。#151）。
+
+    ``objects`` は (Blender のオブジェクト名, メッシュか)。照合は ``find_renderer``（名前 → 連番を外した形 → メッシュ参照の
+    fileID）に加えて、表の名前の連番も外して比べる（Scenes 単位の ``scene_import.unused_in_placement`` と同じ）。
+    FBX のノード名がもともと「Base-Ring.001」のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が
+    「Base-Ring.002」に付け替えるので、片側だけ外したのでは使っている部品まで隠して（消して）しまう。
+    FBX を丸ごと置いたモデル（``models_placed_whole``）には使わない。
+    """
+    stripped = {strip_numeric_suffix(n) for n in table}
+    return {
+        name for name, is_mesh in objects
+        if is_mesh and strip_numeric_suffix(name) not in stripped and find_renderer(table, name) is None
+    }
 
 
 def merge_prefab_tables(tables: list[dict[str, RendererMaterials]]) -> dict[str, RendererMaterials]:

@@ -5,8 +5,15 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
-from unitypackage_loader.core.hierarchy import SOLE_RENDERER, Expander, parse_asset
-from unitypackage_loader.core.prefab import RendererMaterials, merge_prefab_tables, resolve_sole_renderer, tables_from_hierarchy
+from unitypackage_loader.core.hierarchy import SOLE_RENDERER, Expander, parse_asset, placements
+from unitypackage_loader.core.prefab import (
+    RendererMaterials,
+    merge_prefab_tables,
+    models_placed_whole,
+    resolve_sole_renderer,
+    tables_from_hierarchy,
+    unused_parts,
+)
 
 MAT_A = "1" * 32
 MAT_B = "2" * 32
@@ -402,6 +409,48 @@ class FindRendererTests(unittest.TestCase):
         self.assertEqual(find_renderer(table, "Body.003").materials, [MAT_A])  # 連番を外す
         self.assertEqual(find_renderer(table, "Door.001").materials, [MAT_B])  # メッシュ参照のハッシュ
         self.assertIsNone(find_renderer(table, "Window"))
+
+    def test_numbered_node_names_renamed_by_blender(self):
+        from unitypackage_loader.core.prefab import find_renderer
+
+        # FBX のノード名が「Base-Ring.001」で、2 回目の読み込みで Blender が「Base-Ring.002」に付け替えた（#155）
+        table = {"Base-Ring.001": RendererMaterials("Base-Ring.001", [MAT_A]), "Body": RendererMaterials("Body", [MAT_B])}
+        self.assertEqual(find_renderer(table, "Base-Ring.002").materials, [MAT_A])
+        self.assertEqual(find_renderer(table, "Base-Ring.001").materials, [MAT_A])  # 完全一致が先
+        # 連番を外すと同じになる行が複数あれば、どれか決められないので引かない
+        both = {"Body": RendererMaterials("Body", [MAT_A]), "Body.001": RendererMaterials("Body.001", [MAT_B])}
+        self.assertEqual(find_renderer(both, "Body.001").materials, [MAT_B])
+        self.assertEqual(find_renderer(both, "Body.002").materials, [MAT_A])  # 連番を外した「Body」と完全一致
+        ambiguous = {"Arm.001": RendererMaterials("Arm.001", [MAT_A]), "Arm.002": RendererMaterials("Arm.002", [MAT_B])}
+        self.assertIsNone(find_renderer(ambiguous, "Arm.003"))
+
+
+class UnusedPartsTests(unittest.TestCase):
+    """読み込む単位 Prefabs で、prefab が使っていない FBX の部品を見分ける（#151）。"""
+
+    def test_meshes_missing_from_the_table(self):
+        from unitypackage_loader.core.unity_ids import mesh_file_id
+
+        table = {
+            "Body": RendererMaterials("Body", [MAT_A]),
+            "Renamed": RendererMaterials("Renamed", [MAT_B], mesh_file_id=mesh_file_id("Door")),
+        }
+        objects = [("Body", True), ("Body.002", True), ("Door.001", True), ("Window", True), ("Armature", False)]
+        self.assertEqual(unused_parts(table, objects), {"Window"})  # メッシュでないものは対象にしない
+
+    def test_numbered_node_names_renamed_by_blender(self):
+        # FBX のノード名が「Base-Ring.001」で、2 回目の読み込みで Blender が「Base-Ring.002」に付け替えた
+        table = {"Base-Ring.001": RendererMaterials("Base-Ring.001", [MAT_A])}
+        objects = [("Base-Ring.002", True), ("Chain-Link.002", True)]
+        self.assertEqual(unused_parts(table, objects), {"Chain-Link.002"})
+
+    def test_models_placed_whole(self):
+        # Renderer からだけ使う prefab では、FBX の部品は表の分しか Unity に無い
+        h = expand(BASE, {BASE: PREFAB})
+        self.assertEqual(models_placed_whole(h, placements(h, MODELS)), set())
+        # モデルの PrefabInstance で FBX を丸ごと置いた prefab では、すべての部品がある
+        on_model = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_LocalPosition.x", "1", None)])})
+        self.assertEqual(models_placed_whole(on_model, placements(on_model, MODELS)), {MODEL_A})
 
 
 class RenamedGameObjectMappingTests(unittest.TestCase):
