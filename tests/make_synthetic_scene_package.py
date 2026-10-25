@@ -32,6 +32,10 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - BoothRoot: メッシュが 2 つの FBX（Booth.fbx）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
   モデルの中の Renderer 1 つへのマテリアルの上書きは、どちらのメッシュか決められないので当てずに警告する（Issue #31）
 
+シーンには置かない prefab: RingRed / RingPlain は、ノード名がもともと連番付きの FBX（Rings.fbx の Ring.001 と Rod.001）の
+Ring.001 だけを指す色違い（ProbeRed / ProbeMat）。読み込む単位 Prefabs で 2 つ目を読むと Blender が Ring.002 に付け替えるが、
+それでも prefab のマテリアルを当て、Rod は使われていない部品として扱う（Issue #155）。
+
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
 
@@ -128,6 +132,19 @@ def export_lod_fbx(path: Path) -> None:
         obj.data.name = name
         if tip is not None:
             max(obj.data.vertices, key=lambda v: (v.co.x, v.co.y, v.co.z)).co = tip
+        obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_rings_fbx(path: Path) -> None:
+    """ノード名がもともと連番付き（Ring.001 / Rod.001）の FBX（Issue #155）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("RingFbx")
+    for name, x in (("Ring.001", 0.0), ("Rod.001", 2.0)):
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, 0, 0))
+        obj = bpy.context.active_object
+        obj.name = name
+        obj.data.name = name
         obj.data.materials.append(material)
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
@@ -608,6 +625,21 @@ def main() -> None:
         + transform(7201, 7200, father=7001, pos=(-1, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100))
         + mesh_renderer(7202, 7203, 7200, model, mats["ProbeRed"], 4300000)
     )).encode(), f"fileFormatVersion: 2\nguid: {guid_of(legacy_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
+
+    # ノード名がもともと連番付きの FBX と、その Ring.001 だけを指す色違いの prefab（#155）
+    rings_fbx = tmp / "rings.fbx"
+    export_rings_fbx(rings_fbx)
+    rings_path = "Assets/Synthetic/Models/Rings.fbx"
+    rings_model = add(rings_path, rings_fbx.read_bytes(), model_meta(guid_of(rings_path), {}))
+    for label, mat_name in (("RingRed", "ProbeRed"), ("RingPlain", "ProbeMat")):
+        ring_prefab_path = f"Assets/Synthetic/Prefabs/{label}.prefab"
+        add(ring_prefab_path, (HEADER + "".join([
+            game_object(10, label),
+            transform(11, 10),
+            game_object(100, "Ring.001"),
+            transform(101, 100, father=11),
+            mesh_renderer(102, 103, 100, rings_model, mats[mat_name], mesh_file_id("Ring.001")),
+        ])).encode(), prefab_meta(ring_prefab_path))
 
     menu_path = "Assets/Synthetic/Scenes/Menu.unity"
     add(menu_path, (HEADER + game_object(10, "Canvas") + transform(11, 10, class_id=224, kind="RectTransform")

@@ -36,16 +36,25 @@ class RendererMaterials:
 
 
 def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
-    """Blender のオブジェクト名で表を引く（完全一致 → 連番を外した形 → メッシュ参照の fileID のハッシュ）。
+    """Blender のオブジェクト名で表を引く（完全一致 → 連番を外した形 → メッシュ参照の fileID のハッシュ →
+    表の名前の連番も外した形）。
 
     prefab で GameObject の名前を変えてあると名前では引けないので、オブジェクト名から求めたメッシュの fileID を
     表の Renderer のメッシュ参照と照合する（Scenes 単位と同じ。#71）。
+    FBX のノード名がもともと「Base-Ring.001」のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が
+    「Base-Ring.002」に付け替え、ここまでのどれでも引けない。最後に表の名前の連番も外して比べ、該当する行が
+    1 つだけならそれを使う。複数あれば（「Body」と「Body.001」が両方ある FBX など）どれか決められないので引かない（#155）。
     """
-    rm = table.get(obj_name) or table.get(strip_numeric_suffix(obj_name))
+    base = strip_numeric_suffix(obj_name)
+    rm = table.get(obj_name) or table.get(base)
     if rm is not None:
         return rm
-    ids = {mesh_file_id(obj_name), mesh_file_id(strip_numeric_suffix(obj_name))}
-    return next((r for r in table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
+    ids = {mesh_file_id(obj_name), mesh_file_id(base)}
+    rm = next((r for r in table.values() if r.mesh_file_id and r.mesh_file_id in ids), None)
+    if rm is not None:
+        return rm
+    candidates = [r for name, r in table.items() if strip_numeric_suffix(name) == base]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def tables_from_hierarchy(

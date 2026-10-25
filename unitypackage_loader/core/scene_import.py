@@ -98,9 +98,15 @@ def parts_to_hide(
     """
     objects = list(objects)
     unused_names = unused_in_placement(h, placement, objects)
-    disabled = {name for name, r in placement.renderers.items() if not r.visible}
     levels = {name: r.lod_level for name, r in placement.renderers.items()}
     by_mesh_id = {r.mesh_file_id: r.lod_level for r in placement.renderers.values() if r.mesh_file_id}
+    # 表の名前の連番も外した形（ノード名がもともと連番付きで、Blender が付け替えたとき。同じ形の行が 1 つだけなら使う。
+    # prefab.find_renderer と同じ。#155）
+    by_base: dict[str, list[int]] = {}
+    for renderer_name, r in placement.renderers.items():
+        by_base.setdefault(strip_numeric_suffix(renderer_name), []).append(r.lod_level)
+    disabled = {name for name, r in placement.renderers.items() if not r.visible}
+    disabled |= {strip_numeric_suffix(n) for n in disabled if len(by_base[strip_numeric_suffix(n)]) == 1}
     hide: set[str] = set()
     lods: dict[str, int] = {}
     unused_count = lod_count = 0
@@ -110,6 +116,8 @@ def parts_to_hide(
         level = levels.get(obj_name, levels.get(name))
         if level is None and is_mesh:
             level = by_mesh_id.get(mesh_file_id(obj_name), by_mesh_id.get(mesh_file_id(name)))
+        if level is None and len(by_base.get(name, [])) == 1:
+            level = by_base[name][0]
         if level is not None:
             lods[obj_name] = level
         lod_hidden = bool(hide_lods and level)

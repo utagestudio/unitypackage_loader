@@ -24,6 +24,25 @@
     "Unpacked": {
       "prefab": "Assets/Synthetic/Prefabs/Unpacked.prefab",
       "objects": 5
+    },
+    "RingPlain": {
+      "prefab": "Assets/Synthetic/Prefabs/RingPlain.prefab",
+      "objects": 2,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    "RingRed": {
+      "prefab": "Assets/Synthetic/Prefabs/RingRed.prefab",
+      "objects": 2,
+      "mat_files": [
+        "ProbeRed.mat"
+      ],
+      "parts": {
+        "Ring.002": {
+          "hidden": false
+        }
+      }
     }
   },
   "warnings_contain": [
