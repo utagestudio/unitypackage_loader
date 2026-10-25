@@ -2,7 +2,7 @@ import unittest
 
 from tests import _paths  # noqa: F401
 from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelPlacement, Node, PlacedRenderer, SceneContents
-from unitypackage_loader.core.scene_import import parts_to_hide, scene_warnings
+from unitypackage_loader.core.scene_import import parts_to_hide, prefab_warnings, scene_warnings, unused_warning
 from unitypackage_loader.core.transform import IDENTITY
 from unitypackage_loader.core.unity_ids import mesh_file_id
 
@@ -104,6 +104,15 @@ class SceneWarningsTests(unittest.TestCase):
         self.assertEqual(scene_warnings("S", None, hidden_unused=3), [])
         self.assertEqual(len(scene_warnings("S", None, baked_lights=1)), 1)
         self.assertEqual(scene_warnings("S", SceneContents([])), [])
+
+
+class PrefabWarningsTests(unittest.TestCase):
+    def test_same_wording_as_scenes(self):
+        self.assertEqual(prefab_warnings(), [])
+        messages = prefab_warnings(hidden_unused=53, hidden_lods=2)
+        self.assertEqual(messages[0], unused_warning(53))
+        self.assertTrue(messages[0].startswith("53 object(s) from model files are not used"))
+        self.assertTrue(messages[1].startswith("2 object(s) are lower LOD levels"))
 
 
 if __name__ == "__main__":

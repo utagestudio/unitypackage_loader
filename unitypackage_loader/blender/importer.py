@@ -23,6 +23,7 @@ from ..core.hierarchy import (
     RawAsset,
     effective_active,
     parse_asset,
+    placements,
     summarize,
 )
 from ..core.hierarchy import components as scene_components
@@ -35,11 +36,19 @@ from ..core.mapping import fully_replaced_materials, resolve_materials, slot_ass
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
-from ..core.prefab import RendererMaterials, find_renderer, merge_prefab_tables, resolve_sole_renderer, tables_from_hierarchy
+from ..core.prefab import (
+    RendererMaterials,
+    find_renderer,
+    merge_prefab_tables,
+    models_placed_whole,
+    resolve_sole_renderer,
+    tables_from_hierarchy,
+    unused_parts,
+)
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
-from ..core.scene_import import lod_warning, parts_to_hide, scene_warnings
+from ..core.scene_import import parts_to_hide, prefab_warnings, scene_warnings
 from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
 from ..core.units import (
     UNIT_PREFABS,
@@ -159,6 +168,8 @@ class PreparedPackage:
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
+    # prefab の pathname → FBX を丸ごと置いているモデルの GUID（表に無い部品も隠さない。#151）
+    prefab_whole_models: dict[str, set[str]] = field(default_factory=dict)
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
@@ -350,12 +361,15 @@ def prepare_package(
     model_names, recycle = _model_tables(models)
     expander = Expander(_prefab_reader(pkg, warnings.append), model_names, recycle)
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
+    prefab_whole_models: dict[str, set[str]] = {}
     for entry in pkg.prefabs():
         try:
             hierarchy = expander.expand_asset(entry.guid)
             if hierarchy is None:  # 読めなかった（警告は読むときに出している）
                 continue
-            tables = tables_from_hierarchy(hierarchy, model_names, recycle)
+            placed = placements(hierarchy, model_names, recycle)
+            tables = tables_from_hierarchy(hierarchy, model_names, recycle, placed)
+            whole = models_placed_whole(hierarchy, placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
             _log_exception(f"could not resolve prefab {entry.pathname}")
@@ -367,6 +381,7 @@ def prepare_package(
             )
         if tables:
             prefab_tables[entry.pathname] = tables
+            prefab_whole_models[entry.pathname] = whole
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
     # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
@@ -379,7 +394,7 @@ def prepare_package(
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
+        prefabs=prefabs, prefab_whole_models=prefab_whole_models, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=pipeline.pipeline,
         pipeline_source=pipeline.source,
     )
@@ -865,7 +880,8 @@ class _ImportSession:
                         skipped = self.model_by_guid.get(guid)
                         if skipped is not None and not skipped.supported:
                             self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-                hidden_lods = 0
+                hidden_lods = hidden_unused = 0
+                whole = self.prepared.prefab_whole_models.get(group.prefab.pathname, set()) if group.prefab else set()
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                     done += 1
@@ -879,8 +895,11 @@ class _ImportSession:
                     # Models 単位の表は prefab をまたいで統合したものなので、LOD を隠すのは prefab 単位のときだけ
                     if group.prefab is not None:
                         hidden_lods += self.hide_prefab_lods(objects, prefab_table)
-                if hidden_lods and group.prefab is not None:
-                    self.report.warn(f"prefab {group.prefab.pathname}: {lod_warning(hidden_lods)}")
+                        if summary.guid not in whole:
+                            hidden_unused += self.hide_unused_parts(objects, prefab_table)
+                if group.prefab is not None:
+                    for message in prefab_warnings(hidden_unused=hidden_unused, hidden_lods=hidden_lods):
+                        self.report.warn(f"prefab {group.prefab.pathname}: {message}")
             for scene_summary in scenes:
                 try:
                     self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
@@ -1102,6 +1121,17 @@ class _ImportSession:
                 defer_hide(obj, self.hidden_objects)
                 hidden += 1
         return hidden
+
+    def hide_unused_parts(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
+        """prefab が使っていない FBX の部品を隠し、隠した数を返す（Scenes 単位の #58 と同じ扱い。#151）。
+
+        LOD として隠したものは数えない（表にある Renderer なので、ここでは対象にならない）。
+        """
+        unused = unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
+        for obj in objects:
+            if obj.name in unused:
+                defer_hide(obj, self.hidden_objects)
+        return len(unused)
 
     def light_scale(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> float:
         """HDRP のシーンのグローバルな Volume の露出から、そのシーンの HDRP のライトに掛ける倍率を決める（#130）。

@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import NamedTuple
 
-from .hierarchy import Hierarchy, ModelPlacement, SceneContents
+from .hierarchy import Hierarchy, ModelPlacement, SceneContents, built_from_renderers
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
-__all__ = ["HiddenParts", "lod_warning", "parts_to_hide", "scene_warnings"]
+__all__ = ["HiddenParts", "lod_warning", "parts_to_hide", "prefab_warnings", "scene_warnings", "unused_warning"]
 
 
 class HiddenParts(NamedTuple):
@@ -35,7 +35,7 @@ def parts_to_hide(
       （表で名前を引けない新しい形式のモデル）
     - ``hide_lods`` なら、LODGroup の遠景用の段（LOD1 以降）の Renderer を隠す（#104）
     """
-    from_renderers = placement.root in h.nodes and h.nodes[placement.root].model_guid is None
+    from_renderers = built_from_renderers(h, placement)
     disabled = {name for name, r in placement.renderers.items() if not r.visible}
     used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
     mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
@@ -99,10 +99,7 @@ def scene_warnings(
                 "(such as Unity's built-in primitives) and were skipped"
             )
         if hidden_unused:
-            messages.append(
-                f"{hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
-                "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
-            )
+            messages.append(unused_warning(hidden_unused))
         if hidden_lods:
             messages.append(lod_warning(hidden_lods))
         if skipped_nodes:
@@ -115,6 +112,24 @@ def scene_warnings(
                 f"{skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
             )
     return [prefix + m for m in messages]
+
+
+def prefab_warnings(*, hidden_unused: int = 0, hidden_lods: int = 0) -> list[str]:
+    """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
+    messages: list[str] = []
+    if hidden_unused:
+        messages.append(unused_warning(hidden_unused))
+    if hidden_lods:
+        messages.append(lod_warning(hidden_lods))
+    return messages
+
+
+def unused_warning(hidden_unused: int) -> str:
+    """使われていない FBX の部品を隠したときの文言（Scenes / Prefabs のどちらからも使う。#58 / #151）。"""
+    return (
+        f"{hidden_unused} object(s) from model files are not used by the Unity prefabs or scene "
+        "and were hidden (they stay in the file; unhide them if a renamed part was hidden by mistake)"
+    )
 
 
 def lod_warning(hidden_lods: int) -> str:

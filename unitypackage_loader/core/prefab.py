@@ -17,9 +17,10 @@ SkinnedMeshRenderer の ``m_Mesh``）の GUID で決める。パッケージ内�
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .hierarchy import CLASS_MESH_RENDERER, SOLE_RENDERER, Hierarchy, ModelNames, placements
+from .hierarchy import CLASS_MESH_RENDERER, SOLE_RENDERER, Hierarchy, ModelNames, ModelPlacement, built_from_renderers, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
@@ -51,6 +52,7 @@ def tables_from_hierarchy(
     h: Hierarchy,
     model_names: ModelNames,
     name_tables: dict[str, dict[int, str]] | None = None,
+    placed: list[ModelPlacement] | None = None,
 ) -> dict[str, dict[str, RendererMaterials]]:
     """展開した prefab の階層から、モデルの GUID → GameObject 名 → Renderer の表を作る。
 
@@ -58,9 +60,10 @@ def tables_from_hierarchy(
     同じモデルに同名の GameObject があれば先のもの（配置の順）を採用する。モデルをそのまま置いた PrefabInstance は、
     中への上書きを名前で引けたものだけが表に入る。1 つも引けなければ表に入れない（FBX を置いただけの prefab を、
     モデルを使う prefab として数えない。読み込む単位 Prefabs の候補は以前と同じ）。
+    ``placed`` に ``placements`` の結果を渡すと、配置を求め直さない。
     """
     result: dict[str, dict[str, RendererMaterials]] = {}
-    for placement in placements(h, model_names, name_tables):
+    for placement in placed if placed is not None else placements(h, model_names, name_tables):
         if not placement.renderers:
             continue
         table = result.setdefault(placement.model_guid, {})
@@ -73,6 +76,23 @@ def tables_from_hierarchy(
                 ),
             )
     return result
+
+
+def models_placed_whole(h: Hierarchy, placed: list[ModelPlacement]) -> set[str]:
+    """モデルの PrefabInstance で FBX を丸ごと置いている配置のある、モデルの GUID。
+
+    そのモデルは FBX のすべての部品が Unity にあるので、表に無い部品も隠さない（#151）。
+    """
+    return {p.model_guid for p in placed if not built_from_renderers(h, p)}
+
+
+def unused_parts(table: dict[str, RendererMaterials], objects: Iterable[tuple[str, bool]]) -> set[str]:
+    """表の Renderer が使っていないメッシュのオブジェクト名（読み込む単位 Prefabs で隠すもの。#151）。
+
+    ``objects`` は (Blender のオブジェクト名, メッシュか)。照合は ``find_renderer`` と同じ（名前 → 連番を外した形 →
+    メッシュ参照の fileID）。FBX を丸ごと置いたモデル（``models_placed_whole``）には使わない。
+    """
+    return {name for name, is_mesh in objects if is_mesh and find_renderer(table, name) is None}
 
 
 def merge_prefab_tables(tables: list[dict[str, RendererMaterials]]) -> dict[str, RendererMaterials]:
