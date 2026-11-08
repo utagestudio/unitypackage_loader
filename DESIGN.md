@@ -656,6 +656,12 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    Shader Graph のマテリアルは URP Lit の `_WorkflowMode` / `_Surface` を持つので指紋で URP Lit と読まれるが、テクスチャは独自の名前で持つことがある
    （Synty の POLYGON シリーズは `_Albedo_Map` / `_Base_Map` / `_Normal_Map` / `_Normal_Amount`。URP Lit の `_BaseMap` だけを読んでいたため、すべて白かった。#158）。
    表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）
+   発光も同じく、一般名で見つからなければ独自の名前（ON / OFF は `_Enable_Emission` / `_UseEmission` など、色は `_Emission_Color` / `_EmissiveColor` など、
+   テクスチャは `_Emission_Map` / `_EmissiveMap` など、強さは `_Emission_Intensity` など）で探す（`fill_emission_from_aliases`。#167）。発光は「色 × テクスチャ」とし
+   （Synty の Shader Graph は ON のとき Emission_Map × Emission_Color。テクスチャを指定しなければ白）、ON / OFF が OFF なら光らせず、色が黒なら光らせない。
+   色の項目が無ければテクスチャがあるときだけ白とする。Unity 標準の `_EmissionColor` / `_EmissionMap` と HDRP の `_EmissiveColor` / `_EmissiveColorMap` は各プロファイルが
+   条件付きで読む（#52 のキーワードの判定など）ので、別名の検索では拾わない。トゥーン系のプロファイルで読んだマテリアルには当てない。
+   独自シェーダーへの対応はこの汎用の仕組みで拾える範囲に限り、専用のプロファイルは分野の標準になっているシェーダーだけに作る（2026-11-09 に決定）
 
 **パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
 
