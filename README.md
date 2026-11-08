@@ -137,6 +137,9 @@ selection dialog opens (`Selection Dialog`: `Ask` / `All Models` / `First Model 
 You can also register an additional GUID table for custom shaders (a JSON file in the same format as `shader_guids.json`).
 "Max Extract Size" (default 8 GiB, 0 = no limit) refuses an import before writing anything when the files to extract
 from one package would exceed it or the free space of the destination.
+To stay within the Windows path length limit, files whose full path would be too long are placed in short folders under
+`_long/` in the destination. If the destination folder itself is too long, the import stops with an error; in that case set
+Textures > Extract To to `Custom Path` and choose a short folder such as `C:\upi`.
 
 ### Security notes
 

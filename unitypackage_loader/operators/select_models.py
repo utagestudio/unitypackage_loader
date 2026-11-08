@@ -17,7 +17,7 @@ import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, StringProperty
 
 from ..core.package import PackageError, human_size
-from ..core.report import sanitize_display
+from ..core.report import describe_exception, sanitize_display
 from ..core.units import (
     NO_MESH_REASON,
     NO_SCENE_MESH_REASON,
@@ -369,7 +369,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             return {"CANCELLED"}
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
-            self.report({"ERROR"}, sanitize_display(f"Import failed: {exc!r}"))
+            self.report({"ERROR"}, sanitize_display(f"Import failed: {describe_exception(exc)}"))
             return {"CANCELLED"}
         finally:
             wm.progress_end()
