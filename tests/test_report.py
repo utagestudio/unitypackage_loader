@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _paths  # noqa: F401  (sys.path 設定)
-from unitypackage_loader.core.report import ImportReport, MaterialReport, sanitize_display
+from unitypackage_loader.core.report import ImportReport, MaterialReport, describe_exception, sanitize_display
 
 
 class SanitizeTests(unittest.TestCase):
@@ -37,6 +37,20 @@ class AsTextTests(unittest.TestCase):
         # 名前に含まれる改行で行が増えない: header, extract root, models(1+1), objects(1+1),
         # materials(1+1+tex+warn), images(1+1), warnings(1+1), errors(1+1)
         self.assertEqual(len(text.splitlines()), 2 + 2 + 2 + 4 + 2 + 2 + 2)
+
+
+
+class DescribeExceptionTests(unittest.TestCase):
+    def test_os_error_includes_filename(self):
+        exc = FileNotFoundError(2, "The filename or extension is too long", "C:\\cache\\Assets\\Base.png")
+        self.assertEqual(
+            describe_exception(exc),
+            "FileNotFoundError: The filename or extension is too long: C:\\cache\\Assets\\Base.png",
+        )
+
+    def test_other_exceptions_use_repr(self):
+        self.assertEqual(describe_exception(ValueError("bad")), "ValueError('bad')")
+        self.assertEqual(describe_exception(OSError("no file name")), "OSError('no file name')")
 
 
 if __name__ == "__main__":

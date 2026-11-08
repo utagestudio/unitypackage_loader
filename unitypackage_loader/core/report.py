@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-__all__ = ["MaterialReport", "ImportReport", "sanitize_display"]
+__all__ = ["MaterialReport", "ImportReport", "describe_exception", "sanitize_display"]
 
 # C0 制御文字（改行・タブ含む）、DEL、C1 制御文字（8 ビットの ESC / CSI など）。
 # 名前やパスはパッケージ由来の文字列なので、ANSI エスケープで端末や UI の表示を乱せないようにする
@@ -15,6 +15,13 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 def sanitize_display(text: str) -> str:
     """表示・ログ用に制御文字を ``\\x1b`` のような可視表現へ置き換える。"""
     return _CONTROL_RE.sub(lambda m: f"\\x{ord(m.group(0)):02x}", text)
+
+
+def describe_exception(exc: BaseException) -> str:
+    """想定外の例外を表示する文。``OSError`` の ``repr`` にはファイル名が入らないので、あれば添える（#159）。"""
+    if isinstance(exc, OSError) and exc.filename:
+        return f"{type(exc).__name__}: {exc.strerror or exc}: {exc.filename}"
+    return repr(exc)
 
 
 @dataclass

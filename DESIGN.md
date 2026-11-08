@@ -262,7 +262,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 **Textures**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現 |
+| Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現。フルパスが 240 文字を超えるファイルは `<パッケージ名>/_long/<元のフォルダのハッシュ>/` に置く（#159） |
 | Pack into .blend | Bool = OFF | |
 | Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
 | Overwrite extracted files | Bool = OFF | OFF なら、展開先の記録（`.unitypackage_importer.json`）で元の tar メンバーの GUID・サイズ・更新時刻が一致する展開済みファイルだけを使い回す（サイズだけでは同じ名前・同じサイズの別ファイルと区別できない。#72）。書き直した画像は、読み込み済みなら読み直す |
@@ -561,6 +561,10 @@ class UnityPackage:
   超えた `pathname` / `asset.meta` は警告して無視し、`read_asset` は `PackageError`（呼び出し側はそのアセットだけスキップ）。
 - 展開前に書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せても実際に書く量）を求め、
   Preferences の上限（`Max Extract Size`、既定 8 GiB、0 で無制限）と展開先の空き容量（`shutil.disk_usage`）を超えるなら何も書かずに `PackageError`。
+- パスの長さ（`extract_target`。#159）: Windows の既定ではパスが MAX_PATH（260）を超えられないので、展開するファイルのフルパスを
+  UTF-16 の単位で 240 以下に収める。超えるファイルは元のフォルダのハッシュで決まる `_long/<10 桁>/` に置き（OBJ の .mtl・glTF の .bin のような
+  同じフォルダの付属ファイルは一緒に入る）、それでも超えればファイル名の先頭とハッシュで短くする。展開先そのものが長すぎて収まらなければ、
+  Windows では `PackageError`（Extract To で短いフォルダを選ぶよう案内）、ほかの OS では元のパスに書く。記録のキーは置いた場所の相対パス。
 - 書き出し時は展開先から対象までの各要素がシンボリックリンクでないことを確認し、リンクなら `PackageError`（既存のリンク経由で外側へ書くのを防ぐ）。展開先自体はユーザーが選んだ場所なのでリンクでもよい。
 - 進捗: `wm.progress_begin/update/end`。
 

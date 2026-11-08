@@ -11,6 +11,7 @@ tar.gz はランダムアクセスできないため、
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -102,6 +103,11 @@ def _identity(entry: "AssetEntry") -> dict[str, object]:
     return {"guid": entry.guid, "size": entry.size, "mtime": entry.mtime}
 
 
+def _record_key(dest_root: Path, target: Path) -> str:
+    """記録のキー。展開先からの相対パス（区切りは ``/``）。短いフォルダに置いたファイルは置いた場所で記録する。"""
+    return target.relative_to(dest_root).as_posix()
+
+
 def _load_record(dest_root: Path) -> dict[str, object]:
     """展開先の記録を読む。無い・壊れている・symlink なら空（どのファイルも使い回さない）。"""
     path = dest_root / EXTRACT_RECORD_NAME
@@ -179,6 +185,69 @@ def safe_relative_path(pathname: str) -> PurePosixPath:
     for part in p.parts:
         _check_path_component(part, pathname)
     return p
+
+
+# Windows の既定では、パスは MAX_PATH（終端の NUL を含めて 260）を超えられず、フォルダは 248 文字未満でないと作れない。
+# Blender が長いパスに対応した作りかどうかに頼らないよう、展開するファイルのフルパスを OS に依らずこの長さ
+# （UTF-16 の単位）に収める（#159）
+MAX_EXTRACT_PATH = 240
+# 収まらないファイルを、元のフォルダごとに置く短いフォルダ（``<展開先>/_long/<元のフォルダのハッシュ>/``）
+LONG_PATH_DIR = "_long"
+_MAX_KEPT_SUFFIX = 16  # これより長い拡張子は、ファイル名を短くするときに残さない
+# 短くしても収まらないときにエラーにするのは Windows だけ。ほかの OS は長いパスを扱えるので元のパスに書く
+_WINDOWS = os.name == "nt"
+
+
+def _path_length(path: object) -> int:
+    """Windows が数えるパスの長さ（UTF-16 の単位。BMP 外の文字は 2）。"""
+    return len(str(path).encode("utf-16-le")) // 2
+
+
+def _truncate(text: str, limit: int) -> str:
+    """``text`` の先頭を、UTF-16 の単位で ``limit`` 以下に切る。"""
+    out = []
+    used = 0
+    for ch in text:
+        used += _path_length(ch)
+        if used > limit:
+            break
+        out.append(ch)
+    return "".join(out)
+
+
+def _digest(text: str, size: int) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:size]
+
+
+def extract_target(dest_root: Path, relative: PurePosixPath) -> Path:
+    """``relative``（``safe_relative_path`` の結果）を展開するパス。
+
+    ふつうは ``dest_root/<relative>`` だが、フルパスが ``MAX_EXTRACT_PATH`` を超えるときは、元のフォルダの
+    ハッシュで決まる短いフォルダに置く。OBJ の .mtl のように同じフォルダに置くべきファイルも、元のフォルダが
+    同じなら同じフォルダに入る。それでも収まらなければファイル名も短くし（名前のハッシュを付けて区別する）、
+    展開先そのものが長すぎて収まらなければ、Windows では ``PackageError``、ほかの OS では元のパスにする。
+    """
+    target = dest_root.joinpath(*relative.parts)
+    if _path_length(target) <= MAX_EXTRACT_PATH:
+        return target
+    short_dir = dest_root / LONG_PATH_DIR / _digest(relative.parent.as_posix(), 10)
+    name = relative.name
+    target = short_dir / name
+    if _path_length(target) <= MAX_EXTRACT_PATH:
+        return target
+    suffix = relative.suffix if len(relative.suffix) <= _MAX_KEPT_SUFFIX else ""
+    stem = name[: len(name) - len(suffix)] if suffix else name
+    tag = "~" + _digest(name, 8)
+    room = MAX_EXTRACT_PATH - _path_length(short_dir) - 1 - len(tag) - _path_length(suffix)
+    stem = _truncate(stem, room) if room > 0 else ""
+    if not stem:
+        if not _WINDOWS:
+            return dest_root.joinpath(*relative.parts)
+        raise PackageError(
+            f"the folder to extract into is too long for file paths on Windows ({_path_length(dest_root)} characters): "
+            f"{dest_root}. Choose a shorter folder with Extract To > Custom Path"
+        )
+    return short_dir / f"{stem}{tag}{suffix}"
 
 
 def _reject_symlinks(dest_root: Path, target: Path) -> None:
@@ -412,6 +481,8 @@ class UnityPackage:
     ) -> dict[str, Path]:
         """指定 GUID の ``asset`` を ``dest_root/<pathname>`` に書き出し、GUID → パスを返す。
 
+        フルパスが長すぎるファイルは短いフォルダに置く（``extract_target``。#159）。
+
         ``overwrite=False`` なら、既にあるファイルのうち、展開先の記録（``EXTRACT_RECORD_NAME``）で元の tar メンバーの
         GUID・サイズ・更新時刻が一致するものは書き出さない。サイズだけでは、同じ名前・同じサイズの別のファイル
         （同じアセットの新しい版など）と区別できないため（#72）。実際に書き出した GUID は ``written`` に加える。
@@ -430,15 +501,14 @@ class UnityPackage:
         result: dict[str, Path] = {}
         pending: dict[str, Path] = {}
         for guid, entry in wanted.items():
-            relative = safe_relative_path(entry.pathname)
-            target = dest_root / relative
+            target = extract_target(dest_root, safe_relative_path(entry.pathname))
             _reject_symlinks(dest_root, target)
             result[guid] = target
             if (
                 not overwrite
                 and target.is_file()
                 and target.stat().st_size == entry.size
-                and record.get(str(relative)) == _identity(entry)
+                and record.get(_record_key(dest_root, target)) == _identity(entry)
             ):
                 continue
             pending[guid] = target
@@ -473,7 +543,7 @@ class UnityPackage:
                         dst.write(chunk)
                 done += 1
                 entry = wanted[split[0]]
-                record[str(safe_relative_path(entry.pathname))] = _identity(entry)
+                record[_record_key(dest_root, target)] = _identity(entry)
                 if written is not None:
                     written.add(entry.guid)
                 if progress is not None:
