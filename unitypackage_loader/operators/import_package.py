@@ -10,7 +10,7 @@ from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatPrope
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
-from ..core.report import sanitize_display
+from ..core.report import describe_exception, sanitize_display
 from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
 from . import select_models
 
@@ -281,9 +281,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                         return {"CANCELLED"}
                 except Exception as exc:  # noqa: BLE001
                     traceback.print_exc()
-                    failures.append(sanitize_display(f"{Path(path).name}: {exc!r}"))
+                    failures.append(sanitize_display(f"{Path(path).name}: {describe_exception(exc)}"))
                     if not batch:
-                        self.report({"ERROR"}, sanitize_display(f"Import failed: {exc!r}"))
+                        self.report({"ERROR"}, sanitize_display(f"Import failed: {describe_exception(exc)}"))
                         return {"CANCELLED"}
         finally:
             wm.progress_end()
