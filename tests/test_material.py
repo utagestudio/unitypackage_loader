@@ -252,6 +252,33 @@ class NormalizeTests(unittest.TestCase):
         self.assertFalse(mat.keywords_known)
         self.assertTrue(normalize_material(mat).has_emission)
 
+    def test_shader_graph_custom_texture_names(self):
+        # Synty の POLYGON シリーズの Shader Graph: URP Lit の _WorkflowMode / _Surface を持つので URP として読まれるが、
+        # テクスチャは独自の名前（_Albedo_Map / _Normal_Map、デカールは _Base_Map）で持つ。表に無いので別名でも探す
+        shader = "{fileID: -6465566751694194690, guid: 0730dae39bc73f34796280af9875ce14, type: 3}"
+        common = dict(floats=[("_WorkflowMode", 1), ("_Surface", 0), ("_Normal_Amount", 0.5)], colors=[("_BaseColor", (1, 1, 1, 1))])
+        albedo = normalize_material(parse_material(mat_yaml(
+            "Generic_Wood", shader,
+            tex=[("_Albedo_Map", TEX_A, (2, 2), (0, 0)), ("_Normal_Map", TEX_N, (1, 1), (0, 0)), ("_Hair_Mask", None, (1, 1), (0, 0))],
+            **common,
+        )))
+        self.assertEqual(albedo.family, "urp")
+        self.assertEqual(albedo.base_color_tex.guid, TEX_A)
+        self.assertEqual(albedo.uv_scale, (2.0, 2.0))
+        self.assertEqual(albedo.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(albedo.normal_strength, 0.5)
+        decal = normalize_material(parse_material(mat_yaml("Decal", shader, tex=[("_Base_Map", TEX_A, (1, 1), (0, 0))], **common)))
+        self.assertEqual(decal.base_color_tex.guid, TEX_A)
+
+    def test_listed_shader_does_not_use_custom_texture_names(self):
+        # 表で分かる URP Lit は、_BaseMap が空なら残りの独自名を拾わない（表で分かるシェーダーは各プロファイルの読み方に任せる）
+        n = normalize_material(parse_material(mat_yaml(
+            "Lit", "{fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}",
+            tex=[("_BaseMap", None, (1, 1), (0, 0)), ("_Albedo_Map", TEX_A, (1, 1), (0, 0))],
+            floats=[("_WorkflowMode", 1), ("_Surface", 0)],
+        )))
+        self.assertIsNone(n.base_color_tex)
+
     def test_urp_transparent(self):
         n = normalize_material(parse_material(URP_TRANSPARENT))
         self.assertEqual((n.family, n.alpha_mode), ("urp", "blend"))
