@@ -9,7 +9,14 @@ from unittest import mock
 
 from tests import _paths
 from unitypackage_loader.core import package as package_module
-from unitypackage_loader.core.package import PackageError, UnityPackage, safe_relative_path
+from unitypackage_loader.core.package import (
+    LONG_PATH_DIR,
+    MAX_EXTRACT_PATH,
+    PackageError,
+    UnityPackage,
+    extract_target,
+    safe_relative_path,
+)
 from unitypackage_loader.core.unity_binary import is_serialized_file
 
 GUID_FOLDER = "0" * 32
@@ -406,6 +413,84 @@ class ExtractBudgetTests(unittest.TestCase):
         with mock.patch.object(package_module.shutil, "disk_usage", side_effect=OSError("no statvfs")):
             paths = self.pkg.extract([GUID_TEX], self.dest)
         self.assertTrue(paths[GUID_TEX].is_file())
+
+
+class LongPathTests(unittest.TestCase):
+    """Windows のパス長の上限に収まるよう、長いパスのファイルを短いフォルダに置く（#159）。"""
+
+    DEEP = "Assets/" + "/".join(f"VeryLongFolderName{i:02d}" for i in range(12))
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def length(self, path: Path) -> int:
+        return len(str(path).encode("utf-16-le")) // 2
+
+    def test_short_path_is_kept(self):
+        rel = safe_relative_path("Assets/Example/Textures/Base.png")
+        self.assertEqual(extract_target(self.root, rel), self.root / "Assets/Example/Textures/Base.png")
+
+    def test_long_path_goes_to_short_folder_per_source_folder(self):
+        obj = extract_target(self.root, safe_relative_path(f"{self.DEEP}/Model.obj"))
+        mtl = extract_target(self.root, safe_relative_path(f"{self.DEEP}/Model.mtl"))
+        other = extract_target(self.root, safe_relative_path(f"{self.DEEP}x/Model.obj"))
+        self.assertEqual(obj.parent.parent, self.root / LONG_PATH_DIR)
+        self.assertEqual(obj.name, "Model.obj")
+        self.assertEqual(obj.parent, mtl.parent)  # 同じフォルダに置くべき付属ファイルは一緒に
+        self.assertNotEqual(obj.parent, other.parent)
+        self.assertLessEqual(self.length(obj), MAX_EXTRACT_PATH)
+        # 同じ入力からは同じ場所（2 回目の読み込みで使い回せる）
+        self.assertEqual(obj, extract_target(self.root, safe_relative_path(f"{self.DEEP}/Model.obj")))
+
+    def test_long_file_name_is_shortened_and_kept_distinct(self):
+        a = extract_target(self.root, safe_relative_path("Assets/T/" + "a" * 300 + "_1.png"))
+        b = extract_target(self.root, safe_relative_path("Assets/T/" + "a" * 300 + "_2.png"))
+        self.assertNotEqual(a, b)
+        self.assertEqual(a.parent, b.parent)
+        self.assertEqual(a.suffix, ".png")
+        self.assertLessEqual(self.length(a), MAX_EXTRACT_PATH)
+
+    def test_length_counts_utf16_units(self):
+        # BMP 外の文字（絵文字）は UTF-16 で 2 単位。文字数では収まっていても置き換える
+        name = "\U0001F600" * 100 + ".png"
+        root = self.root / ("r" * max(1, MAX_EXTRACT_PATH - self.length(self.root) - 1 - 110))
+        target = extract_target(root, safe_relative_path(f"A/{name}"))
+        self.assertLessEqual(self.length(target), MAX_EXTRACT_PATH)
+        self.assertIn(LONG_PATH_DIR, target.parts)
+
+    def test_too_long_dest_root_is_package_error_on_windows(self):
+        root = self.root / ("d" * MAX_EXTRACT_PATH)
+        with mock.patch.object(package_module, "_WINDOWS", True), self.assertRaises(PackageError) as cm:
+            extract_target(root, safe_relative_path("Assets/A.png"))
+        self.assertIn("Extract To", str(cm.exception))
+
+    def test_too_long_dest_root_keeps_original_path_elsewhere(self):
+        # Linux / macOS は長いパスを扱えるので、今まで読めていた場所で止めない
+        root = self.root / ("d" * MAX_EXTRACT_PATH)
+        with mock.patch.object(package_module, "_WINDOWS", False):
+            self.assertEqual(extract_target(root, safe_relative_path("Assets/A.png")), root / "Assets/A.png")
+
+    def test_extract_long_pathname_and_reuse(self):
+        pkg_path = self.root / "long.unitypackage"
+        guid = "a" * 32
+        with tarfile.open(pkg_path, "w:gz") as tar:
+            _add(tar, f"{guid}/pathname", f"{self.DEEP}/Base.png".encode())
+            _add(tar, f"{guid}/asset", b"\x89PNG-long")
+        pkg = UnityPackage(pkg_path)
+        dest = self.root / "out"
+        paths = pkg.extract([guid], dest)
+        self.assertIn(LONG_PATH_DIR, paths[guid].parts)
+        self.assertEqual(paths[guid].read_bytes(), b"\x89PNG-long")
+        # 記録は置いた場所で引くので、2 回目は書き直さない
+        before = paths[guid].stat().st_mtime_ns
+        written = set()
+        pkg.extract([guid], dest, written=written)
+        self.assertEqual(written, set())
+        self.assertEqual(paths[guid].stat().st_mtime_ns, before)
 
 
 class LocalSampleTests(unittest.TestCase):
