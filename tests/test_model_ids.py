@@ -95,6 +95,20 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(claims[uid(hierarchy_file_id("MeshRenderer", ["Body"]))], "Body.001")
         self.assertEqual(claims[uid(named_file_id("MeshRenderer", "Hair"))], "Hair.001")
 
+    def test_renamed_top_level_node_does_not_block_the_collapsed_path(self):
+        # 最上位がアーマチュア 1 つの FBX を 2 回目に読むと、アーマチュアも「Armature.001」になる。FBX にその名前の
+        # ノードが無い（Blender が付けた名前）ので元の名前は決まらないが、ルートに畳む形では使わない（Synty の
+        # Generic_Characters.fbx）
+        native = Counter({"Body": 1, "Hair": 1})
+        objects = [obj("Armature.001", mesh=False), obj("Armature.001", "Body.001"), obj("Armature.001", "Hair.001")]
+        claims = object_claims(objects, native=native, taken={"Armature", "Body", "Hair"})
+        self.assertEqual(claims[uid(hierarchy_file_id("MeshRenderer", ["Body"]))], "Body.001")
+        self.assertEqual(claims[uid(hierarchy_file_id("SkinnedMeshRenderer", ["Hair"]))], "Hair.001")
+        # 最上位が複数あれば畳まれないので、親の名前が決まらないものは返さない
+        objects.append(obj("Light.001", mesh=False))
+        claims = object_claims(objects, native=native, taken={"Armature", "Body", "Hair", "Light"})
+        self.assertNotIn(uid(hierarchy_file_id("MeshRenderer", ["Body"])), claims)
+
     def test_native_numeric_suffix_is_kept(self):
         # FBX にもともと「Ring」と「Ring.001」がある。ぶつかる相手がいなければ Blender の名前がそのまま FBX の名前
         native = Counter({"Ring": 1, "Ring.001": 1})

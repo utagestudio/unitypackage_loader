@@ -151,17 +151,22 @@ def object_claims(
         seen: set[tuple[str, ...]] = set()
         for raw in itertools.islice(obj.paths, _MAX_PATHS):
             resolved = [names.resolve(part)[0] for part in raw[:-1]]
-            if any(part is None for part in resolved):
-                continue
-            path = (*resolved, leaf)
-            variants = [path, path[1:]] if collapsed else [path]
+            variants: list[tuple[str, ...]] = []
+            if all(part is not None for part in resolved):
+                variants.append((*resolved, leaf))  # type: ignore[arg-type]
+            # ルートに畳む形は最上位のノードの名前を使わないので、その名前が決まらなくても計算できる
+            # （2 回目の読み込みで、最上位のアーマチュアが「Armature.001」になったときなど）
+            if collapsed and len(raw) > 1 and all(part is not None for part in resolved[1:]):
+                variants.append((*resolved[1:], leaf))  # type: ignore[arg-type]
             for variant in variants:
                 if variant in seen:
                     continue
                 seen.add(variant)
                 for type_name in type_names:
                     claim(hierarchy_file_id(type_name, variant), obj)
-            if collapsed and len(path) == 1 and not leaf_duplicated:
+            if collapsed and len(raw) == 1 and not leaf_duplicated:
+                for type_name in type_names:
+                    claim(hierarchy_file_id(type_name, ()), obj)  # 最上位のメッシュそのものがルートに畳まれる
                 for type_name in type_names:
                     claim(named_file_id(type_name, MODEL_ROOT_NAME), obj)
         if not leaf_duplicated:
