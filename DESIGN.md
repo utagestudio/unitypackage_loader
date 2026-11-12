@@ -650,8 +650,12 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    - VRChat Toon Standard: `_ShadowBoost` `_MinBrightness` `_MetallicStrength` と `_Ramp` スロット（Standard の残骸を持つので Standard より先に判定）
 3. どれにも該当しない → `generic`（`_MainTex`/`_BaseMap`/`_Color`/`_BumpMap`/`_EmissionMap`/`_Cutoff` の一般名で最善努力）。
    ベースカラーと法線のテクスチャが一般名で見つからなければ、自作シェーダー（Amplify Shader Editor など）でよく使われる名前を、大文字小文字と `_` を無視した完全一致で探す
-   （ベースカラーは `_Base_Color` / `_Albedo` / `_Diffuse` / `_MainTexture` / `_ColorMap` など、法線は `_Normal` / `_Bump` など、法線の強さは `_NormalScale` / `_Scale_Normal` / `_NormalStrength` など）。
+   （ベースカラーは `_Base_Color` / `_Base_Map` / `_Albedo` / `_Albedo_Map` / `_Diffuse` / `_MainTexture` / `_ColorMap` など、法線は `_Normal` / `_Normal_Map` / `_Bump` など、法線の強さは `_NormalScale` / `_Scale_Normal` / `_NormalStrength` / `_Normal_Amount` など）。
    `_Mask` や `_Color_Tilling` のような別の役割の名前を拾わないよう、部分一致にはしない
+   この別名での検索は、シェーダー表に無いシェーダーなら、指紋で選んだプロファイル（URP Lit など）で読んだあとにも行う（`fill_textures_from_aliases`）。
+   Shader Graph のマテリアルは URP Lit の `_WorkflowMode` / `_Surface` を持つので指紋で URP Lit と読まれるが、テクスチャは独自の名前で持つことがある
+   （Synty の POLYGON シリーズは `_Albedo_Map` / `_Base_Map` / `_Normal_Map` / `_Normal_Amount`。URP Lit の `_BaseMap` だけを読んでいたため、すべて白かった。#158）。
+   表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）
 
 **パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
 

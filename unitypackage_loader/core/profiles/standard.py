@@ -108,13 +108,13 @@ def _smoothness(mat: UnityMaterial, n: NormalizedMaterial) -> None:
 # 大文字小文字と "_" を無視して完全一致で比べる（_Mask や _Color_Tilling のような別の役割の名前を拾わないよう、部分一致にはしない）。
 # #118 で宣言されていない残りの _MainTex を読まなくなり、独自の名前でしか色を持たないシェーダーが白くなった
 _BASE_COLOR_ALIASES = (
-    "basecolor", "basecolormap", "basecolortex", "basecolortexture", "basetex", "basetexture",
+    "basecolor", "basecolormap", "basecolortex", "basecolortexture", "basemap", "basetex", "basetexture",
     "albedo", "albedomap", "albedotex", "albedotexture", "diffuse", "diffusemap", "diffusetex", "diffusetexture",
     "maintexture", "colormap", "colortex", "colortexture",
 )
-_NORMAL_ALIASES = ("normal", "normals", "normaltex", "normaltexture", "bump", "bumptex", "bumptexture")
+_NORMAL_ALIASES = ("normal", "normals", "normalmap", "normaltex", "normaltexture", "bump", "bumptex", "bumptexture")
 _NORMAL_SCALE_ALIASES = (
-    "normalscale", "scalenormal", "normalstrength", "normalintensity", "normalpower", "bumpstrength", "bumppower",
+    "normalscale", "scalenormal", "normalstrength", "normalintensity", "normalpower", "normalamount", "bumpstrength", "bumppower",
 )
 
 
@@ -139,6 +139,22 @@ def _find_float(mat: UnityMaterial, aliases: tuple[str, ...], default: float) ->
     return default
 
 
+def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """ベースカラー・法線のテクスチャが一般名で見つからなかったとき、自作シェーダーでよく使われる名前で探す。
+
+    Shader Graph で作ったシェーダーは URP Lit の ``_WorkflowMode`` / ``_Surface`` を持つので指紋では URP Lit と読まれるが、
+    テクスチャは ``_Albedo_Map`` / ``_Base_Map`` / ``_Normal_Map`` のような独自の名前で持つことがある（Synty の POLYGON シリーズ）。
+    """
+    if n.base_color_tex is None:
+        n.base_color_tex = _find_texture(mat, _BASE_COLOR_ALIASES)
+        if n.base_color_tex is not None:
+            n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
+    if n.normal_tex is None:
+        n.normal_tex = _find_texture(mat, _NORMAL_ALIASES)
+        if n.normal_tex is not None:
+            n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
+
+
 class GenericProfile(StandardProfile):
     """どのプロファイルにも一致しないシェーダー向け。一般的なプロパティ名だけで最善努力する。
 
@@ -151,13 +167,7 @@ class GenericProfile(StandardProfile):
 
     def normalize(self, mat: UnityMaterial, info: ShaderInfo | None = None) -> NormalizedMaterial:
         n = super().normalize(mat, info)
-        if n.base_color_tex is None:
-            n.base_color_tex = _find_texture(mat, _BASE_COLOR_ALIASES)
-            n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
-        if n.normal_tex is None:
-            n.normal_tex = _find_texture(mat, _NORMAL_ALIASES)
-            if n.normal_tex is not None:
-                n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
+        fill_textures_from_aliases(mat, n)
         if info is None:
             n.family = "unknown"
             n.warnings.append("unknown shader; used generic property mapping")

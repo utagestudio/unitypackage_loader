@@ -210,6 +210,11 @@ def normalize_material(
         mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
     norm = profile.normalize(mat, info)
+    if info is None:
+        # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
+        from .standard import fill_textures_from_aliases
+
+        fill_textures_from_aliases(mat, norm)
     if dropped:
         norm.extras["undeclared_properties"] = dropped
     return norm
