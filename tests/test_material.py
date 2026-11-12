@@ -252,6 +252,66 @@ class NormalizeTests(unittest.TestCase):
         self.assertFalse(mat.keywords_known)
         self.assertTrue(normalize_material(mat).has_emission)
 
+    def test_shader_graph_custom_texture_names(self):
+        # Synty の POLYGON シリーズの Shader Graph: URP Lit の _WorkflowMode / _Surface を持つので URP として読まれるが、
+        # テクスチャは独自の名前（_Albedo_Map / _Normal_Map、デカールは _Base_Map）で持つ。表に無いので別名でも探す
+        shader = "{fileID: -6465566751694194690, guid: 0730dae39bc73f34796280af9875ce14, type: 3}"
+        common = dict(floats=[("_WorkflowMode", 1), ("_Surface", 0), ("_Normal_Amount", 0.5)], colors=[("_BaseColor", (1, 1, 1, 1))])
+        albedo = normalize_material(parse_material(mat_yaml(
+            "Generic_Wood", shader,
+            tex=[("_Albedo_Map", TEX_A, (2, 2), (0, 0)), ("_Normal_Map", TEX_N, (1, 1), (0, 0)), ("_Hair_Mask", None, (1, 1), (0, 0))],
+            **common,
+        )))
+        self.assertEqual(albedo.family, "urp")
+        self.assertEqual(albedo.base_color_tex.guid, TEX_A)
+        self.assertEqual(albedo.uv_scale, (2.0, 2.0))
+        self.assertEqual(albedo.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(albedo.normal_strength, 0.5)
+        decal = normalize_material(parse_material(mat_yaml("Decal", shader, tex=[("_Base_Map", TEX_A, (1, 1), (0, 0))], **common)))
+        self.assertEqual(decal.base_color_tex.guid, TEX_A)
+
+    def test_shader_graph_custom_emission_names(self):
+        # Synty の Generic_Standard: _Enable_Emission が ON のとき _Emission_Map × _Emission_Color で光る（#167）
+        shader = "{fileID: -6465566751694194690, guid: 3b44a38ec6f81134ab0f820ac54d6a93, type: 3}"
+
+        def norm(enable, color, strength=None, keywords=()):
+            floats = [("_WorkflowMode", 1), ("_Surface", 0), ("_Enable_Emission", enable)]
+            if strength is not None:
+                floats.append(("_Emission_Intensity", strength))
+            return normalize_material(parse_material(mat_yaml(
+                "Generic_01_A", shader,
+                tex=[("_Albedo_Map", TEX_A, (1, 1), (0, 0)), ("_Emission_Map", TEX_E, (1, 1), (0, 0))],
+                floats=floats, colors=[("_Emission_Color", color), ("_EmissionColor", (1, 1, 1, 1))],
+                keywords=keywords,
+            )))
+
+        lit = norm(1, (1, 0.5, 0, 1), strength=2)
+        self.assertEqual(lit.emission_tex.guid, TEX_E)
+        self.assertEqual(lit.emission_color, (1.0, 0.5, 0.0, 1.0))
+        self.assertAlmostEqual(lit.emission_strength, 2.0)
+        self.assertFalse(norm(0, (1, 0.5, 0, 1)).has_emission)  # OFF
+        # ON でも色が黒なら光らない（Unity でも テクスチャ × 黒）。標準の _EmissionColor（白）は URP のキーワードが無いので使わない（#52）
+        self.assertFalse(norm(1, (0, 0, 0, 1)).has_emission)
+
+    def test_custom_emission_does_not_revive_standard_leftovers(self):
+        # 独自の名前が無く、標準の _EmissionColor だけが残っている（キーワードが無いので URP Lit は無視する）なら光らせない
+        n = normalize_material(parse_material(mat_yaml(
+            "Leftover", "{fileID: -6465566751694194690, guid: 0730dae39bc73f34796280af9875ce14, type: 3}",
+            tex=[("_Albedo_Map", TEX_A, (1, 1), (0, 0)), ("_EmissionMap", TEX_E, (1, 1), (0, 0))],
+            floats=[("_WorkflowMode", 1), ("_Surface", 0)], colors=[("_EmissionColor", (1, 1, 1, 1))],
+            keywords=["_ALPHATEST_ON"],
+        )))
+        self.assertFalse(n.has_emission)
+
+    def test_listed_shader_does_not_use_custom_texture_names(self):
+        # 表で分かる URP Lit は、_BaseMap が空なら残りの独自名を拾わない（表で分かるシェーダーは各プロファイルの読み方に任せる）
+        n = normalize_material(parse_material(mat_yaml(
+            "Lit", "{fileID: 4800000, guid: 933532a4fcc9baf4fa0491de14d08ed7, type: 3}",
+            tex=[("_BaseMap", None, (1, 1), (0, 0)), ("_Albedo_Map", TEX_A, (1, 1), (0, 0))],
+            floats=[("_WorkflowMode", 1), ("_Surface", 0)],
+        )))
+        self.assertIsNone(n.base_color_tex)
+
     def test_urp_transparent(self):
         n = normalize_material(parse_material(URP_TRANSPARENT))
         self.assertEqual((n.family, n.alpha_mode), ("urp", "blend"))

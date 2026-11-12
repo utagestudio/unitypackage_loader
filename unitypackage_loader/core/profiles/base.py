@@ -210,6 +210,13 @@ def normalize_material(
         mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
     norm = profile.normalize(mat, info)
+    if info is None:
+        # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
+        from .standard import fill_emission_from_aliases, fill_textures_from_aliases
+
+        fill_textures_from_aliases(mat, norm)
+        if norm.lighting != "toon":  # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）
+            fill_emission_from_aliases(mat, norm)
     if dropped:
         norm.extras["undeclared_properties"] = dropped
     return norm
