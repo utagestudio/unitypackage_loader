@@ -5,9 +5,23 @@
 オフセット 1）。Unity 6 の ``AssetImporter.MakeLocalFileIDWithHash`` と 28 通りで一致し（Issue #31 の調査）、
 FBX を展開した prefab の MeshFilter の ``m_Mesh`` とも一致した（Issue #58）。メッシュの名前は FBX のノード名で、
 Blender の FBX インポーターが付けるオブジェクト名と同じ。
+
+モデルの中の階層オブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、
+.meta の ``fileIdsGeneration`` で 2 通りある（Issue #31。Unity 6000.6 に合成 FBX と実パッケージの FBX を読ませた表と、
+7 つのモデル・380 件あまりで一致した）。
+
+- 2（今の既定）: モデルのルートからの階層パスで決まる。GameObject は ``Type:GameObject->//RootNode/root/<パス>0``、
+  コンポーネントは ``Type:<型>->//RootNode/root/<パス>/<型>0``。ルート自身はパスが空（``//RootNode/root``）。
+- 1（キーの無い古い .meta もこちら）: 名前だけで決まる。``Type:<型>-><名前>0`` で、ルートの名前は ``//RootNode``。
+  同じ名前のノードが複数あると 2 つ目以降はオフセットが付くが、その順は Blender から分からない。
+
+どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをモデルのルートに畳む（``preserveHierarchy`` が無いとき）。
+兄弟に同じ名前があると Unity は 2 つ目以降を「名前 1」「名前 2」に変えるが、その順も Blender の連番とは一致しない。
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 _MASK = (1 << 64) - 1
 _P1 = 11400714785074694791
@@ -75,3 +89,18 @@ def local_file_id(type_name: str, name: str, offset: int = 0) -> int:
 
 def mesh_file_id(name: str, offset: int = 0) -> int:
     return local_file_id("Mesh", name, offset)
+
+
+MODEL_ROOT_NAME = "//RootNode"  # 名前で決まる世代での、モデルのルートの名前
+_HIERARCHY_ROOT = "//RootNode/root"
+
+
+def hierarchy_file_id(type_name: str, path: Sequence[str]) -> int:
+    """階層パスで決まる世代（``fileIdsGeneration: 2``）の fileID。``path`` はルートを除く、上からの名前の並び。"""
+    base = _HIERARCHY_ROOT + "".join("/" + part for part in path)
+    return local_file_id(type_name, base if type_name == "GameObject" else f"{base}/{type_name}")
+
+
+def named_file_id(type_name: str, name: str = MODEL_ROOT_NAME) -> int:
+    """名前だけで決まる世代（``fileIdsGeneration: 1``）の fileID。名前を省くとモデルのルート。"""
+    return local_file_id(type_name, name)
