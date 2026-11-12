@@ -17,8 +17,9 @@
   Renderer の ``m_Enabled`` とマテリアル（``m_Materials.Array.data[N]`` / ``.size``）を反映する。
   ``m_RemovedGameObjects`` / ``m_RemovedComponents`` で消されたものは除く。
 - 元がモデル（FBX 等）の PrefabInstance は、モデルのルートを表す 1 つの Node にする。ルートの Transform の fileID は
-  FBX によらず定数なので上書きを当てられるが、中のオブジェクトへの上書きは fileID を名前に結び付けられないため
-  読まずに数える（Issue #31）。
+  FBX によらず定数（.meta の世代で 2 通り）なので上書きを当てられる。中のオブジェクトの fileID は名前と階層パスの
+  ハッシュで、ここでは名前に結び付けられない。マテリアルの上書きは対象の fileID ごとに残して読み込み側が突き合わせ
+  （``pending_renderer``）、それ以外は読まずに数える（Issue #31）。
 - Unity 2018.2 以前の形式も読む。PrefabInstance はクラス名が ``Prefab`` で元を ``m_ParentPrefab`` に持ち、
   stripped ドキュメントの参照は ``m_PrefabParentObject`` / ``m_PrefabInternal``、モデルのルートの fileID は
   GameObject 100000 / Transform 400000。
@@ -62,9 +63,14 @@ _TRANSFORM_CLASSES = (CLASS_TRANSFORM, CLASS_RECT_TRANSFORM)
 _RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
 _COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)  # 中身をそのまま持ち、上書きを当ててから読むコンポーネント
 
-# モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）
+# モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）。
+# .meta の fileIdsGeneration が 2 のモデルでの値（``unity_ids.hierarchy_file_id`` のパスが空のもの）
 MODEL_ROOT_GAME_OBJECT = 919132149155446097
 MODEL_ROOT_TRANSFORM = -8679921383154817045
+# fileIdsGeneration が 1（キーの無い .meta を含む）のモデルでのルート（``unity_ids.named_file_id`` の //RootNode）。
+# Unity 2019.3〜2019.4 ごろに作られたパッケージがこの値で書いている（UnityJapanOffice で確認）
+NAMED_MODEL_ROOT_GAME_OBJECT = -927199367670048503
+NAMED_MODEL_ROOT_TRANSFORM = -4216859302048453862
 # Unity 2018.2 以前の形式（.meta の fileIDToRecycleName で 100000 / 400000 が //RootNode）でのルート
 LEGACY_MODEL_ROOT_GAME_OBJECT = 100000
 LEGACY_MODEL_ROOT_TRANSFORM = 400000
@@ -74,10 +80,28 @@ MAX_NESTING = 16  # PrefabInstance をたどる深さの上限
 MAX_NODES = 200_000  # 1 つの階層に展開する Transform の上限（細工された巨大なシーンへの備え）
 MAX_SLOTS = 1024
 _MASK = 0x7FFF_FFFF_FFFF_FFFF
-_MODEL_ROOT_UIDS = {MODEL_ROOT_GAME_OBJECT & _MASK, MODEL_ROOT_TRANSFORM & _MASK}
-# モデルの中への上書きのうち、名前を引けなかったが、すべて同じ 1 つの Renderer を指すマテリアルの上書きを記録する名前。
-# 読み込み側が、モデルのメッシュのオブジェクトが 1 つだけならそれに当てる（#109）。Unity・Blender の名前には現れない
-SOLE_RENDERER = "\x00sole-renderer"
+_MODEL_ROOT_UIDS = {
+    MODEL_ROOT_GAME_OBJECT & _MASK, MODEL_ROOT_TRANSFORM & _MASK,
+    NAMED_MODEL_ROOT_GAME_OBJECT & _MASK, NAMED_MODEL_ROOT_TRANSFORM & _MASK,
+}
+# モデルの中への上書きのうち、表で名前を引けなかった Renderer へのマテリアルの上書きを記録する名前の接頭辞。後ろに対象の
+# fileID（上位ビットを落とした値）が続く。読み込み側が、読み込んだオブジェクトの名前から計算した fileID と突き合わせて
+# オブジェクトの名前に付け替える（``prefab.resolve_model_renderers``。#31 / #109）。Unity・Blender の名前には現れない
+_PENDING_RENDERER = "\x00renderer:"
+
+
+def pending_renderer(uid: int) -> str:
+    """名前を引けなかった Renderer（fileID の上位ビットを落とした値）の行の名前。"""
+    return f"{_PENDING_RENDERER}{uid}"
+
+
+def pending_renderer_id(name: str) -> int | None:
+    """``pending_renderer`` の名前なら、その fileID。ふつうの名前なら None。"""
+    if not name.startswith(_PENDING_RENDERER):
+        return None
+    return int(name[len(_PENDING_RENDERER):])
+
+
 # 表の無いモデルの PrefabInstance で、ルートの Transform への位置・回転・スケールの上書きを記録する名前。読み込み側が、
 # モデルのオブジェクトが 1 つだけ（Unity がノードを //RootNode に畳む形）ならそのノードへの上書きとして組み立て直す（#111）
 SOLE_NODE = "\x00sole-node"
@@ -299,12 +323,15 @@ class Node:
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
     components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
     # モデルの PrefabInstance で、古い形式の .meta（fileIDToRecycleName）から名前を引けた中への上書き
-    # （名前を引けず、すべて同じ Renderer を指すマテリアルの上書きは ``SOLE_RENDERER`` の名前で入る。#109）
+    # （名前を引けなかったマテリアルの上書きは、対象の fileID ごとに ``pending_renderer`` の名前で入る。#31）
     model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
     model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
     # 1 メッシュの FBX（表で分かる畳まれたノードの名前）か表の無いモデル（``SOLE_NODE``）のモデルの PrefabInstance のルート。
     # このルートへの位置・回転・スケールの上書きは、どの階層のものも成分付きで ``model_transforms`` に記録する（#99 / #111）
     collapsed_key: str | None = None
+    # モデルの PrefabInstance のルートで、モデルの中の fileID から今のアセットでの fileID への XOR（差し込んだ PrefabInstance の
+    # fileID を重ねたもの）。prefab を挟んだ外側からの上書きの対象を、モデルの中の fileID に戻すのに使う（#31）
+    id_mask: int = 0
 
     @property
     def local(self) -> Mat4:
@@ -428,8 +455,12 @@ class Expander:
         )
         root.scope = root.key
         h.nodes[root.key] = root
-        h.transforms[_uid(MODEL_ROOT_TRANSFORM)] = root.key
-        h.game_objects[MODEL_ROOT_GAME_OBJECT] = root.key
+        # ルートの fileID は .meta の世代で 2 通りある。上書きはどちらか一方でしか書かれないので、両方を同じ Node に向ける
+        for transform_id, game_object_id in (
+            (MODEL_ROOT_TRANSFORM, MODEL_ROOT_GAME_OBJECT), (NAMED_MODEL_ROOT_TRANSFORM, NAMED_MODEL_ROOT_GAME_OBJECT)
+        ):
+            h.transforms[_uid(transform_id)] = root.key
+            h.game_objects[_uid(game_object_id)] = root.key
         return h
 
     def _build(self, raw: RawAsset, stack: tuple[str, ...]) -> Hierarchy:
@@ -524,6 +555,7 @@ class Expander:
                 game_object=remap(iid, node.game_object),
                 renderer_key=remap(iid, node.renderer_key) if node.renderer else 0,
                 scope=added.get(node.scope, 0),
+                id_mask=(node.id_mask ^ iid) & _MASK,
             )
             copied.components = {remap(iid, k): value for k, value in copied.components.items()}
             h.nodes[new_key] = copied
@@ -576,36 +608,76 @@ class Expander:
             collapsed = SOLE_NODE
         if collapsed is not None and root_key in h.nodes:
             h.nodes[root_key].collapsed_key = collapsed
-        # 名前を引けなかったマテリアルの上書き。Renderer の fileID → [(スロット番号, .mat の GUID)]（#109）
-        unnamed: dict[int, list[tuple[int, str | None]]] = {}
+        # prefab を挟んで、その中のモデルの Renderer を指しているかもしれないマテリアルの上書き（#31）
+        through: list[tuple[int, int, str | None]] = []
         for file_id, guid, path, value, reference in instance.modifications:
             uid = target(file_id, guid)
             if uid is None:
                 continue
-            if _apply_modification(h, scope, uid, path, value, reference) or not is_model or not _is_tracked(path):
+            if _apply_modification(h, scope, uid, path, value, reference) or not _is_tracked(path):
+                continue
+            if not is_model:
+                material = _MATERIAL_PATH.fullmatch(path)
+                if material and int(material.group(1)) < MAX_SLOTS:
+                    through.append((uid, int(material.group(1)), ref_guid(reference)))
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
                 continue
             material = _MATERIAL_PATH.fullmatch(path)
-            if material and uid not in _MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS:
-                unnamed.setdefault(uid, []).append((int(material.group(1)), ref_guid(reference)))
+            if material and uid not in _MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS and root_key in h.nodes:
+                # 名前を引けない Renderer。対象の fileID ごとに残し、読み込んだオブジェクトと突き合わせる（読み込み側。#31）
+                _set_slot(h.nodes[root_key].model_materials, pending_renderer(uid), int(material.group(1)), ref_guid(reference))
                 continue
             h.unresolved_overrides += 1
             if material or path == "m_Materials.Array.size":
                 h.unresolved_material_overrides += 1
-        if len(unnamed) == 1 and root_key in h.nodes:
-            # 対象が 1 つなら、モデルの Renderer が 1 つだけのときにそれと確定する（判定は読み込み側。#109）
-            slots = h.nodes[root_key].model_materials.setdefault(SOLE_RENDERER, [])
-            for index, material_guid in next(iter(unnamed.values())):
-                if index >= len(slots):
-                    slots.extend([None] * (index + 1 - len(slots)))
-                slots[index] = material_guid
-        else:
-            # 対象が複数あれば Renderer も複数あり、どれがどれかを決められない（#31）
-            pending = sum(len(v) for v in unnamed.values())
-            h.unresolved_overrides += pending
-            h.unresolved_material_overrides += pending
+        if through:
+            self._override_through(h, sub, added, through)
         return scope
+
+    def _override_through(
+        self, h: Hierarchy, sub: Hierarchy, added: dict[int, int], overrides: list[tuple[int, int, str | None]]
+    ) -> None:
+        """prefab を挟んだ外側からの、モデルの中の Renderer へのマテリアルの上書きを、モデルのルートに記録する（#31）。
+
+        外側のアセットは、prefab の中のモデルのオブジェクトを「PrefabInstance の fileID XOR モデルの中の fileID」で指す
+        （Prefab Variant をシーンに置き、シーンが部品のマテリアルを替えたときなど）。展開した Renderer のどれにも
+        当たらなかった上書きの対象を、差し込んだ prefab の中のモデルのルートごとに XOR で戻し、次の順で当てる。
+
+        1. 古い形式の .meta の表で名前を引ける
+        2. 内側のアセットが同じ Renderer を上書きしていて、その fileID の行がある
+        3. どちらでもなく、prefab の中のモデルが 1 つだけなら、そのモデルの中の fileID として行を足す。モデルが複数あると
+           どのモデルの中かを決められないので、当てない（今までと同じ）
+
+        3 で足した行が実際にモデルのオブジェクトを指しているかは、読み込み側が fileID の計算で確かめる。
+        """
+        roots = [(node.id_mask, h.nodes[added[key]]) for key, node in sub.nodes.items() if node.model_guid is not None]
+        roots = [(mask, root) for mask, root in roots if root.key in h.nodes]
+        for uid, index, material_guid in overrides:
+            for step in range(3):
+                found = False
+                for mask, root in roots:
+                    inner = (uid ^ mask) & _MASK
+                    if step == 0:
+                        table = self._recycle.get(root.model_guid or "", {})
+                        name = _model_object_name(table, inner) if inner // 100000 in _RENDERER_CLASSES else None
+                    elif step == 1:
+                        name = pending_renderer(inner) if pending_renderer(inner) in root.model_materials else None
+                    else:
+                        name = pending_renderer(inner) if len(roots) == 1 and inner not in _MODEL_ROOT_UIDS else None
+                    if name is not None:
+                        _set_slot(root.model_materials, name, index, material_guid)
+                        found = True
+                        break
+                if found:
+                    break
+
+
+def _set_slot(rows: dict[str, list[str | None]], name: str, index: int, material_guid: str | None) -> None:
+    slots = rows.setdefault(name, [])
+    if index >= len(slots):
+        slots.extend([None] * (index + 1 - len(slots)))
+    slots[index] = material_guid
 
 
 def _remove_component(h: Hierarchy, scope: _Inserted, uid: int) -> bool:

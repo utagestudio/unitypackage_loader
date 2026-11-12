@@ -5,12 +5,19 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
-from unitypackage_loader.core.hierarchy import SOLE_RENDERER, Expander, parse_asset, placements
+from unitypackage_loader.core.hierarchy import (
+    NAMED_MODEL_ROOT_GAME_OBJECT,
+    NAMED_MODEL_ROOT_TRANSFORM,
+    Expander,
+    parse_asset,
+    pending_renderer,
+    placements,
+)
 from unitypackage_loader.core.prefab import (
     RendererMaterials,
     merge_prefab_tables,
     models_placed_whole,
-    resolve_sole_renderer,
+    resolve_model_renderers,
     tables_from_hierarchy,
     unused_parts,
 )
@@ -325,53 +332,122 @@ class PrefabVariantTests(unittest.TestCase):
         self.assertEqual(tables_of(BASE, assets), {})
 
     def test_overrides_on_model_objects_are_counted(self):
-        # 元がモデルなので、中のオブジェクトの fileID を名前に結び付けられない（名前の上書きは数えない）。
-        # マテリアルの上書きが別々の対象を指すので、Renderer が複数あり、どれがどれかを決められない（#31）
+        # 元がモデルなので、中のオブジェクトの fileID を表では名前に結び付けられない（名前の上書きは数えない）。
+        # マテリアルの上書きは対象の fileID ごとに残し、読み込んだオブジェクトと突き合わせる（#31）
         on_model = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
             (123456789, "m_Materials.Array.data[0]", "", MAT_C),
             (987654321, "m_Materials.Array.data[0]", "", MAT_A),
             (123456789, "m_Name", "Renamed", None),
         ])})
-        self.assertEqual((on_model.unresolved_overrides, on_model.unresolved_material_overrides), (2, 2))
-        self.assertEqual(tables_from_hierarchy(on_model, MODELS), {})  # FBX を置いただけの prefab はモデルを使うものとして数えない
+        self.assertEqual((on_model.unresolved_overrides, on_model.unresolved_material_overrides), (0, 0))
+        table = tables_from_hierarchy(on_model, MODELS)[MODEL_A]
+        self.assertEqual(
+            {name: rm.materials for name, rm in table.items()},
+            {pending_renderer(123456789): [MAT_C], pending_renderer(987654321): [MAT_A]},
+        )
         moved = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_LocalPosition.x", "1", None)])})
         self.assertEqual((moved.unresolved_overrides, moved.unresolved_material_overrides), (1, 0))
+        self.assertEqual(tables_from_hierarchy(moved, MODELS), {})  # FBX を置いただけの prefab はモデルを使うものとして数えない
         resolvable = expand(VARIANT, {BASE: PREFAB, VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])})
         self.assertEqual(resolvable.unresolved_overrides, 0)
 
-
-    def test_material_overrides_on_one_model_object_are_kept_for_the_sole_renderer(self):
-        # 名前を引けなくても、すべて同じ対象を指すなら、モデルの Renderer が 1 つのときにそれと確定する（#109）
+    def test_material_overrides_on_a_model_object_are_kept_by_file_id(self):
+        target = -7511558181221131132
         h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
-            (-7511558181221131132, "m_Materials.Array.data[2]", "", MAT_C),
-            (-7511558181221131132, "m_Materials.Array.data[0]", "", MAT_A),
-            (-7511558181221131132, "m_Materials.Array.size", "40", None),  # 長さは当てられないので数える
+            (target, "m_Materials.Array.data[2]", "", MAT_C),
+            (target, "m_Materials.Array.data[0]", "", MAT_A),
+            (target, "m_Materials.Array.size", "40", None),  # 長さは当てられないので数える
         ])})
         self.assertEqual((h.unresolved_overrides, h.unresolved_material_overrides), (1, 1))
         table = tables_from_hierarchy(h, MODELS)[MODEL_A]
-        self.assertEqual(list(table), [SOLE_RENDERER])
-        self.assertEqual(table[SOLE_RENDERER].materials, [MAT_A, None, MAT_C])
+        name = pending_renderer(target & 0x7FFF_FFFF_FFFF_FFFF)
+        self.assertEqual(list(table), [name])
+        self.assertEqual(table[name].materials, [MAT_A, None, MAT_C])
 
-    def test_sole_renderer_row_goes_to_the_only_mesh(self):
-        table = {SOLE_RENDERER: RendererMaterials(SOLE_RENDERER, [MAT_A, None, MAT_C], mesh_guid=MODEL_A)}
-        resolved, unread = resolve_sole_renderer(table, ["MetroEntrance_02"])
-        self.assertEqual(unread, 0)
-        self.assertEqual(list(resolved), ["MetroEntrance_02"])
-        self.assertEqual(resolved["MetroEntrance_02"].materials, [MAT_A, None, MAT_C])
-        # メッシュが複数（または無い）なら当てず、当てられなかった上書きの数を返す
-        for meshes in (["Body", "Hair"], []):
-            resolved, unread = resolve_sole_renderer(table, meshes)
-            self.assertEqual((resolved, unread), ({}, 2))
+    def test_named_generation_root_ids_point_at_the_model_root(self):
+        # fileIdsGeneration が 1 のモデルは、ルートの fileID が別の定数（#31。UnityJapanOffice で確認）
+        h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
+            (NAMED_MODEL_ROOT_TRANSFORM, "m_LocalPosition.x", "3", None),
+            (NAMED_MODEL_ROOT_GAME_OBJECT, "m_Name", "Placed", None),
+            (NAMED_MODEL_ROOT_GAME_OBJECT, "m_IsActive", "0", None),
+        ])})
+        self.assertEqual(h.unresolved_overrides, 0)
+        (root,) = [n for n in h.nodes.values() if n.model_guid == MODEL_A]
+        self.assertEqual((root.name, root.position[0], root.active), ("Placed", 3.0, False))
 
-    def test_sole_renderer_row_fills_only_empty_slots_of_a_named_row(self):
+    def test_overrides_through_a_prefab_reach_the_model_objects(self):
+        # Variant（PrefabInstance 5000）を、もう 1 段の Variant（6000）がさらに上書きする。外側の対象は
+        # 「PrefabInstance の fileID XOR モデルの中の fileID」（#31。UnityJapanOffice のシーンと Office Variant の形）
+        wall, roof = 1111111111, 2222222222
+        inner = variant_yaml(5000, MODEL_A, [(wall, "m_Materials.Array.data[0]", "", MAT_A)])
+        outer = variant_yaml(6000, BASE, [
+            (wall ^ 5000, "m_Materials.Array.data[0]", "", MAT_C),  # 内側が上書きした Renderer を上書きし直す
+            (roof ^ 5000, "m_Materials.Array.data[1]", "", MAT_B),  # 内側が触っていない Renderer
+        ])
+        table = tables_of(VARIANT, {BASE: inner, VARIANT: outer})[MODEL_A]
+        self.assertEqual(
+            {name: rm.materials for name, rm in table.items()},
+            {pending_renderer(wall): [MAT_C], pending_renderer(roof): [None, MAT_B]},
+        )
+        # 内側の展開結果（キャッシュ）は、外側の上書きで変わらない
+        exp = Expander(reader({BASE: inner, VARIANT: outer}), MODELS)
+        exp.expand_asset(VARIANT)
+        (root,) = [n for n in exp.expand_asset(BASE).nodes.values() if n.model_guid]
+        self.assertEqual(root.model_materials, {pending_renderer(wall): [MAT_A]})
+
+    def test_overrides_through_a_prefab_with_two_models_need_a_known_row(self):
+        # prefab の中にモデルが 2 つあると、新しい対象がどちらのモデルの中かを決められない。内側が上書き済みの行だけを当てる
+        wall, roof = 1111111111, 2222222222
+        two = variant_yaml(5000, MODEL_A, [(wall, "m_Materials.Array.data[0]", "", MAT_A)]) + "\n".join(
+            variant_yaml(5500, MODEL_B, []).splitlines()[2:]
+        ) + "\n"
+        outer = variant_yaml(6000, BASE, [
+            (wall ^ 5000, "m_Materials.Array.data[0]", "", MAT_C),
+            (roof ^ 5000, "m_Materials.Array.data[0]", "", MAT_B),
+        ])
+        tables = tables_of(VARIANT, {BASE: two, VARIANT: outer})
+        self.assertEqual({n: rm.materials for n, rm in tables[MODEL_A].items()}, {pending_renderer(wall): [MAT_C]})
+        self.assertNotIn(MODEL_B, tables)
+
+    def test_overrides_through_a_prefab_use_the_recycle_table(self):
+        # 古い形式の .meta の表があるモデルは、XOR を戻した fileID を表で引いて名前の行にする
+        recycle = {MODEL_A: {100000: "//RootNode", 100002: "Body", 400002: "Body", 2300002: "Body", 4300000: "Body", 4300002: "Hair"}}
+        inner = variant_yaml(5000, MODEL_A, [])
+        outer = variant_yaml(6000, BASE, [(2300002 ^ 5000, "m_Materials.Array.data[1]", "", MAT_B)])
+        exp = Expander(reader({BASE: inner, VARIANT: outer}), MODELS, recycle)
+        table = tables_from_hierarchy(exp.expand_asset(VARIANT), MODELS, recycle)[MODEL_A]
+        self.assertEqual({n: rm.materials for n, rm in table.items()}, {"Body": [None, MAT_B]})
+
+    def test_pending_row_goes_to_the_claiming_object(self):
+        row_a, row_b = pending_renderer(11), pending_renderer(22)
         table = {
             "Body": RendererMaterials("Body", [MAT_B, None]),
-            SOLE_RENDERER: RendererMaterials(SOLE_RENDERER, [MAT_A, MAT_C, MAT_A]),
+            row_a: RendererMaterials(row_a, [MAT_A, MAT_C, MAT_A], mesh_guid=MODEL_A),
+            row_b: RendererMaterials(row_b, [None, MAT_C], mesh_guid=MODEL_A),
         }
-        resolved, unread = resolve_sole_renderer(table, ["Body"])
-        self.assertEqual((list(resolved), unread), (["Body"], 0))
-        self.assertEqual(resolved["Body"].materials, [MAT_B, MAT_C, MAT_A])
-        self.assertIs(resolve_sole_renderer(table := {"Body": table["Body"]}, ["Body"])[0], table)  # 行が無ければそのまま
+        resolved, unread = resolve_model_renderers(table, {11: "Body", 22: "Hair.001"}, ["Body", "Hair.001", "Shoes"])
+        self.assertEqual(unread, 0)
+        # 名前で引けた行があれば、その空いたスロットだけを埋める
+        self.assertEqual({n: rm.materials for n, rm in resolved.items()}, {
+            "Body": [MAT_B, MAT_C, MAT_A], "Hair.001": [None, MAT_C],
+        })
+        # 突き合わせられなかった行は外し、当てられなかった上書きの数を返す（メッシュが複数あるので推測しない）
+        resolved, unread = resolve_model_renderers(table, {11: "Body"}, ["Body", "Hair.001", "Shoes"])
+        self.assertEqual((list(resolved), unread), (["Body"], 1))
+        self.assertIs(resolve_model_renderers(plain := {"Body": table["Body"]}, {}, ["Body"])[0], plain)  # 行が無ければそのまま
+
+    def test_sole_pending_row_goes_to_the_only_mesh(self):
+        # 突き合わせられなくても、行が 1 つでメッシュも 1 つなら、Unity の Renderer もそれ 1 つなので確定する（#109）
+        row = pending_renderer(11)
+        table = {row: RendererMaterials(row, [MAT_A, None, MAT_C], mesh_guid=MODEL_A)}
+        resolved, unread = resolve_model_renderers(table, {}, ["MetroEntrance_02"])
+        self.assertEqual(unread, 0)
+        self.assertEqual({n: rm.materials for n, rm in resolved.items()}, {"MetroEntrance_02": [MAT_A, None, MAT_C]})
+        for meshes in (["Body", "Hair"], []):
+            self.assertEqual(resolve_model_renderers(table, {}, meshes), ({}, 2))
+        other = pending_renderer(22)
+        two = {**table, other: RendererMaterials(other, [MAT_A])}
+        self.assertEqual(resolve_model_renderers(two, {}, ["Body"]), ({}, 3))  # 対象が 2 つあるなら Renderer も 2 つあったはず
 
 
 class MergeByMeshTests(unittest.TestCase):

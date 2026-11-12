@@ -31,7 +31,8 @@
       "prefab": "Assets/Synthetic/Prefabs/Booth.prefab",
       "objects": 2,
       "mat_files": [
-        ""
+        "ProbeMat.mat",
+        "ProbeRed.mat"
       ]
     },
     "Partial": {
@@ -69,7 +70,7 @@
   },
   "warnings_max": 6,
   "warnings_contain": [
-    "Booth.fbx: 1 material override(s) on an object inside the model are not read yet",
+    "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
     "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported"
   ],
   "warnings_exclude": [
