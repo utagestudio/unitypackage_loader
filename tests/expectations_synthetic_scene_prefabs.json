@@ -29,7 +29,7 @@
     },
     "Booth": {
       "prefab": "Assets/Synthetic/Prefabs/Booth.prefab",
-      "objects": 2,
+      "objects": 3,
       "mat_files": [
         "ProbeMat.mat",
         "ProbeRed.mat"

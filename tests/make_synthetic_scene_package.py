@@ -29,7 +29,7 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - KioskRoot: Renderer が 1 つの FBX（Kiosk.fbx。表も externalObjects も無い 2 マテリアルのメッシュ）をそのまま置いた
   prefab（Kiosk.prefab）を、位置 (8, 0, 8) に。prefab はモデルの中の Renderer の m_Materials[0] を ProbeRed に、[1] を
   ProbeDecal（Standard の _Mode: 0 が残った、半透明＋アルファクリップの URP Lit。Issue #112）に上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
-- BoothRoot: メッシュが 2 つの FBX（Booth.fbx）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
+- BoothRoot: メッシュが 2 つの FBX（Booth.fbx。屋根は Empty の子）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
   モデルの中の Renderer へのマテリアルの上書きは、fileID を名前と階層パスから計算して屋根と壁に当てる。モデルに無いオブジェクトを指す上書きは当てずに警告する（Issue #31）
 
 シーンには置かない prefab: RingRed / RingPlain は、ノード名がもともと連番付きの FBX（Rings.fbx の Ring.001 と Rod.001）の
@@ -246,15 +246,21 @@ def export_kiosk_fbx(path: Path) -> None:
 
 
 def export_booth_fbx(path: Path) -> None:
-    """メッシュが 2 つの FBX（Issue #31。表が無いので、中の Renderer への上書きの対象は fileID の計算で決める）。"""
+    """メッシュが 2 つの FBX（Issue #31。表が無いので、中の Renderer への上書きの対象は fileID の計算で決める）。
+
+    屋根は Empty（BoothFrame）の子にする（階層パスで決まる世代の fileID が、親の名前を含むことを確かめるため）。
+    """
     bpy.ops.wm.read_factory_settings(use_empty=True)
     material = bpy.data.materials.new("BoothFbx")
-    for name, z in (("BoothWall", 0.0), ("BoothRoof", 1.5)):
+    frame = bpy.data.objects.new("BoothFrame", None)
+    bpy.context.collection.objects.link(frame)
+    for name, z, parent in (("BoothWall", 0.0, None), ("BoothRoof", 1.5, frame)):
         bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, z))
         obj = bpy.context.active_object
         obj.name = name
         obj.data.name = name
         obj.data.materials.append(material)
+        obj.parent = parent
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
 
@@ -264,7 +270,7 @@ KIOSK_RENDERER = hierarchy_file_id("MeshRenderer", [])
 assert KIOSK_RENDERER == -7511558181221131132
 # Booth はメッシュが 2 つ。屋根は階層パスで決まる世代（fileIdsGeneration: 2）の値、壁は名前で決まる世代（1）の値で指す
 # （実際の .meta ではどちらか一方だが、読み込み側は両方の世代を突き合わせるので、1 つのモデルで両方を確かめる）
-BOOTH_ROOF_RENDERER = hierarchy_file_id("MeshRenderer", ["BoothRoof"])
+BOOTH_ROOF_RENDERER = hierarchy_file_id("MeshRenderer", ["BoothFrame", "BoothRoof"])
 BOOTH_WALL_RENDERER = named_file_id("MeshRenderer", "BoothWall")
 BOOTH_GONE_RENDERER = 3713382542316546517  # モデルに無いオブジェクトを指したままの上書き（当てずに警告する）
 
