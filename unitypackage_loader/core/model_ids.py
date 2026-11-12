@@ -73,7 +73,7 @@ def parse_fbx_node_names(data: bytes) -> Counter[str] | None:
 def _binary_string_ending_at(data: bytes, end: int) -> str | None:
     """``end`` で名前が終わる文字列属性（``S`` + 長さ + 「<名前>\\0\\1Model」）の名前。"""
     tail = len(_BINARY_MODEL)
-    for length in range(0, min(_MAX_NAME, end - 4) + 1):
+    for length in range(0, min(_MAX_NAME, end - 5) + 1):
         start = end - length
         if data[start - 5 : start - 4] == b"S" and struct.unpack_from("<I", data, start - 4)[0] == length + tail:
             return data[start:end].decode("utf-8", "replace")
@@ -87,7 +87,7 @@ def fbx_node_names(path: str | Path) -> Counter[str] | None:
         if target.suffix.lower() != ".fbx" or target.stat().st_size > _MAX_FILE:
             return None
         return parse_fbx_node_names(target.read_bytes())
-    except (OSError, struct.error):
+    except (OSError, ValueError, struct.error):
         return None
 
 
