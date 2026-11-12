@@ -270,6 +270,39 @@ class NormalizeTests(unittest.TestCase):
         decal = normalize_material(parse_material(mat_yaml("Decal", shader, tex=[("_Base_Map", TEX_A, (1, 1), (0, 0))], **common)))
         self.assertEqual(decal.base_color_tex.guid, TEX_A)
 
+    def test_shader_graph_custom_emission_names(self):
+        # Synty の Generic_Standard: _Enable_Emission が ON のとき _Emission_Map × _Emission_Color で光る（#167）
+        shader = "{fileID: -6465566751694194690, guid: 3b44a38ec6f81134ab0f820ac54d6a93, type: 3}"
+
+        def norm(enable, color, strength=None, keywords=()):
+            floats = [("_WorkflowMode", 1), ("_Surface", 0), ("_Enable_Emission", enable)]
+            if strength is not None:
+                floats.append(("_Emission_Intensity", strength))
+            return normalize_material(parse_material(mat_yaml(
+                "Generic_01_A", shader,
+                tex=[("_Albedo_Map", TEX_A, (1, 1), (0, 0)), ("_Emission_Map", TEX_E, (1, 1), (0, 0))],
+                floats=floats, colors=[("_Emission_Color", color), ("_EmissionColor", (1, 1, 1, 1))],
+                keywords=keywords,
+            )))
+
+        lit = norm(1, (1, 0.5, 0, 1), strength=2)
+        self.assertEqual(lit.emission_tex.guid, TEX_E)
+        self.assertEqual(lit.emission_color, (1.0, 0.5, 0.0, 1.0))
+        self.assertAlmostEqual(lit.emission_strength, 2.0)
+        self.assertFalse(norm(0, (1, 0.5, 0, 1)).has_emission)  # OFF
+        # ON でも色が黒なら光らない（Unity でも テクスチャ × 黒）。標準の _EmissionColor（白）は URP のキーワードが無いので使わない（#52）
+        self.assertFalse(norm(1, (0, 0, 0, 1)).has_emission)
+
+    def test_custom_emission_does_not_revive_standard_leftovers(self):
+        # 独自の名前が無く、標準の _EmissionColor だけが残っている（キーワードが無いので URP Lit は無視する）なら光らせない
+        n = normalize_material(parse_material(mat_yaml(
+            "Leftover", "{fileID: -6465566751694194690, guid: 0730dae39bc73f34796280af9875ce14, type: 3}",
+            tex=[("_Albedo_Map", TEX_A, (1, 1), (0, 0)), ("_EmissionMap", TEX_E, (1, 1), (0, 0))],
+            floats=[("_WorkflowMode", 1), ("_Surface", 0)], colors=[("_EmissionColor", (1, 1, 1, 1))],
+            keywords=["_ALPHATEST_ON"],
+        )))
+        self.assertFalse(n.has_emission)
+
     def test_listed_shader_does_not_use_custom_texture_names(self):
         # 表で分かる URP Lit は、_BaseMap が空なら残りの独自名を拾わない（表で分かるシェーダーは各プロファイルの読み方に任せる）
         n = normalize_material(parse_material(mat_yaml(

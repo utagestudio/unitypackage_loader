@@ -117,6 +117,17 @@ _NORMAL_SCALE_ALIASES = (
     "normalscale", "scalenormal", "normalstrength", "normalintensity", "normalpower", "normalamount", "bumpstrength", "bumppower",
 )
 
+# 発光（#167）。ON / OFF・色・テクスチャ・強さを独自の名前で持つシェーダー（Synty の _Enable_Emission / _Emission_Color /
+# _Emission_Map など）向け。Unity 標準の名前は各プロファイルが読み、条件付きで無視もする（#52 のキーワードの判定など）ので、
+# ここでは拾わない（_EMISSION_STANDARD_NAMES）
+_EMISSION_TOGGLE_ALIASES = ("enableemission", "useemission", "emissionenabled", "emissionenable", "emissionon", "emissiontoggle")
+_EMISSION_COLOR_ALIASES = ("emissioncolor", "emissioncolour", "emissivecolor", "emissivecolour", "emissiontint")
+_EMISSION_TEX_ALIASES = (
+    "emissionmap", "emissiontex", "emissiontexture", "emissivemap", "emissivetex", "emissivetexture", "emission", "emissive",
+)
+_EMISSION_STRENGTH_ALIASES = ("emissionintensity", "emissionstrength", "emissionpower", "emissiveintensity", "emissivestrength")
+_EMISSION_STANDARD_NAMES = frozenset({"_EmissionColor", "_EmissionMap", "_EmissiveColor", "_EmissiveColorMap", "_EmissiveColorLDR"})
+
 
 def _alias_key(name: str) -> str:
     return name.replace("_", "").lower()
@@ -127,6 +138,15 @@ def _find_texture(mat: UnityMaterial, aliases: tuple[str, ...]):
     by_key = {_alias_key(name): ref for name, ref in mat.textures.items()}
     for alias in aliases:
         if by_key.get(alias) is not None:
+            return by_key[alias]
+    return None
+
+
+def _find_color(mat: UnityMaterial, aliases: tuple[str, ...], exclude: frozenset[str] = frozenset()):
+    """``aliases`` の順に色を探す。無ければ None。"""
+    by_key = {_alias_key(name): value for name, value in mat.colors.items() if name not in exclude}
+    for alias in aliases:
+        if alias in by_key:
             return by_key[alias]
     return None
 
@@ -155,6 +175,33 @@ def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> Non
             n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
 
 
+def fill_emission_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """発光が一般名で見つからなかったとき、独自の名前（ON / OFF・色・テクスチャ・強さ）で探す（#167）。
+
+    発光は「色 × テクスチャ」とする（Synty の Shader Graph は ON のとき Emission_Map × Emission_Color）。誤って光らせると
+    目立つので、ON / OFF の項目が OFF なら光らせず、色が黒なら（テクスチャがあっても）光らせない。色の項目が無ければ、
+    テクスチャがあるときだけ白とする。
+    """
+    if n.has_emission:
+        return
+    names = {_alias_key(name): name for name in (*mat.floats, *mat.ints)}
+    toggle = next((names[a] for a in _EMISSION_TOGGLE_ALIASES if a in names), None)
+    if toggle is not None and not mat.flag(toggle):
+        return
+    by_key = {_alias_key(name): ref for name, ref in mat.textures.items() if name not in _EMISSION_STANDARD_NAMES}
+    tex = next((by_key[a] for a in _EMISSION_TEX_ALIASES if by_key.get(a) is not None), None)
+    color = _find_color(mat, _EMISSION_COLOR_ALIASES, _EMISSION_STANDARD_NAMES)
+    if color is None:
+        if tex is None:
+            return
+        color = (1.0, 1.0, 1.0, 1.0)
+    if is_black(color):
+        return
+    n.emission_tex = tex
+    n.emission_color = color
+    n.emission_strength *= max(0.0, _find_float(mat, _EMISSION_STRENGTH_ALIASES, 1.0))
+
+
 class GenericProfile(StandardProfile):
     """どのプロファイルにも一致しないシェーダー向け。一般的なプロパティ名だけで最善努力する。
 
@@ -168,6 +215,7 @@ class GenericProfile(StandardProfile):
     def normalize(self, mat: UnityMaterial, info: ShaderInfo | None = None) -> NormalizedMaterial:
         n = super().normalize(mat, info)
         fill_textures_from_aliases(mat, n)
+        fill_emission_from_aliases(mat, n)
         if info is None:
             n.family = "unknown"
             n.warnings.append("unknown shader; used generic property mapping")
