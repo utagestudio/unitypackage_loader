@@ -54,8 +54,10 @@ jobs:
           GTM_ID: ${{ vars.GTM_ID }}
         run: |
           mkdir -p site
+          # zip の名前はアドオン名に合わせる（manifest の id は unitypackage_loader のまま。Issue #150）
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('unitypackage_loader/blender_manifest.toml', 'rb'))['version'])")
           ~/blender/blender -b --factory-startup --command extension build \
-            --source-dir unitypackage_loader --output-dir site
+            --source-dir unitypackage_loader --output-filepath "site/unitypackage_importer-${version}.zip"
           ~/blender/blender -b --factory-startup --command extension server-generate --repo-dir=site
           python3 tools/build_site.py site "${{ steps.pages.outputs.base_url }}"
           ls -la site

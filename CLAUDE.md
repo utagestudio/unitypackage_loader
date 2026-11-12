@@ -118,7 +118,7 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/unit
 blender -b --factory-startup --python tests/integration_import.py
 
 # 配布用 zip / Extension Repository の index.json
-blender -b --factory-startup --command extension build --source-dir unitypackage_loader --output-dir dist
+blender -b --factory-startup --command extension build --source-dir unitypackage_loader --output-filepath dist/unitypackage_importer-<version>.zip  # zip 名はアドオン名に合わせる（id は unitypackage_loader のまま。#150）
 blender -b --factory-startup --command extension server-generate --repo-dir=site
 ```
 

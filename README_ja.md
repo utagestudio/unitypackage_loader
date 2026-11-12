@@ -52,10 +52,10 @@ ln -s "$PWD/unitypackage_loader" ~/.config/blender/5.2/extensions/user_default/u
 Blender の Preferences > Get Extensions で右上メニューから "Refresh Local" を実行し、
 "Unitypackage Importer" を有効にします。ほかの入手先から入れたものがあれば、先にアンインストールしてください。
 
-配布用の zip は次のコマンドで作ります。
+配布用の zip は次のコマンドで作ります（`<version>` は `unitypackage_loader/blender_manifest.toml` の `version`）。
 
 ```sh
-blender --command extension build --source-dir unitypackage_loader --output-dir dist
+blender --command extension build --source-dir unitypackage_loader --output-filepath dist/unitypackage_importer-<version>.zip
 ```
 
 紹介ページと Extension Repository は、`.github/workflows/pages.yml` が main への push ごとに生成します（Blender の
