@@ -261,7 +261,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 |---|---|---|
 | Material mode | Enum: `Auto` / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS, VRChat Toon Standard）→ Toon、PBR 系（Standard, URP Lit, HDRP Lit, VRChat Standard Lite）→ Principled、Unlit 系（Unlit/*, VRChat Toon Lit）→ Unlit |
 | Transparency | Enum: `Auto` / `Force opaque` = `Auto` | Unity 側の Cutout/Fade/Transparent 判定を `surface_render_method` に反映 |
-| Backface culling | Bool = ON | `_Cull` / `_CullMode` / `_Culling` に従う |
+| Backface culling | Bool = OFF | ON なら `_Cull` / `_CullMode` / `_Culling` に従って背面を隠す。既定は OFF で、すべてのマテリアルを両面で描く（Unity は軽さのために背面を描かないことが多いが、Blender では裏側が欠けて見えるだけのことが多い。Issue #169）。Preferences の既定値で変えられ、読み込み後はサイドバーの Tools の「Backface Culling On / Off」で選択メッシュのマテリアルを一括で切り替えられる（`materials.set_backface_culling`。On でも両面描画のマテリアルは ON にしない。`unity_build_options` も書き換えて、再構築の初期値をそろえる） |
 | Normal maps | Bool = ON | |
 | Emission | Bool = ON | |
 | Reuse existing materials by name | Bool = OFF | 同名マテリアルが .blend に既にある場合、置き換えず再利用 |
@@ -390,7 +390,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
 
 共通:
 - `material.surface_render_method`: Opaque/Cutout → `DITHERED`、Fade/Transparent → `BLENDED`（Blender 4.2 以降の API。`blend_method` は使わない）
-- `material.use_backface_culling` = `_Cull == 2`（Back）
+- `material.use_backface_culling` = Backface culling の設定が ON かつ `_Cull == 2`（Back）
 - `material.diffuse_color` にベースカラー（ソリッド表示用）
 - ノードはフレームでグループ化し、位置を整えて読みやすくする
 

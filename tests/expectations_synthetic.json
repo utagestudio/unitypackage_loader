@@ -1,5 +1,5 @@
 {
-  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
+  "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true, "backface_culling": true },
   "errors": 0,
   "objects": { "count": 16, "mesh_count": 16, "armature_count": 0 },
   "materials": { "count": 19, "mapped": 16, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },

@@ -24,7 +24,7 @@ MODE_AUTO = "AUTO"
 class MaterialBuildOptions:
     mode: str = MODE_AUTO
     force_opaque: bool = False
-    backface_culling: bool = True
+    backface_culling: bool = False  # Unity の _Cull に従って背面を隠すか（#169）
     use_normal_maps: bool = True
     use_emission: bool = True
     store_props: bool = True
@@ -523,6 +523,26 @@ def stored_build_options(mat: bpy.types.Material) -> dict[str, bool]:
     if not isinstance(data, dict):
         return {}
     return {name: bool(data[name]) for name in _REMEMBERED_OPTIONS if name in data}
+
+
+def set_backface_culling(mat: bpy.types.Material, enabled: bool) -> bool:
+    """Backface Culling を切り替える。ON は Unity の _Cull に従い、両面描画のマテリアルは ON にしない（#169）。
+
+    組み立ての設定（``unity_build_options``）も書き換え、再構築のダイアログの初期値をそろえる。
+    Unity の情報が無いマテリアル（アウトラインなど）は触らずに False を返す。
+    """
+    raw = mat.get("unity_normalized")
+    if not raw:
+        return False
+    try:
+        cull = bool(json.loads(raw).get("cull_backface", True))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    mat.use_backface_culling = enabled and cull
+    options = stored_build_options(mat)
+    options["backface_culling"] = enabled
+    mat[BUILD_OPTIONS_PROP] = json.dumps(options)
+    return True
 
 
 def rebuild_from_props(mat: bpy.types.Material, mode: str, opts: MaterialBuildOptions | None = None) -> tuple[str, list[str]]:

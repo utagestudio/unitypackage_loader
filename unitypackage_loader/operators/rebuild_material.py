@@ -44,7 +44,7 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         default="SELECTED",
     )
     force_opaque: BoolProperty(name="Force Opaque", default=False)
-    backface_culling: BoolProperty(name="Backface Culling", default=True)
+    backface_culling: BoolProperty(name="Backface Culling", default=False)
     use_normal_maps: BoolProperty(name="Normal Maps", default=True)
     use_emission: BoolProperty(name="Emission", default=True)
 
@@ -104,7 +104,28 @@ class UNITYPKG_OT_rebuild_material(bpy.types.Operator):
         return {"FINISHED"} if done else {"CANCELLED"}
 
 
-_classes = (UNITYPKG_OT_rebuild_material,)
+class UNITYPKG_OT_set_backface_culling(bpy.types.Operator):
+    bl_idname = "unitypkg.set_backface_culling"
+    bl_label = "Set Backface Culling"
+    bl_description = (
+        "Turn Backface Culling on (following Unity's _Cull setting) or off for the materials of the selected meshes"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    enable: BoolProperty(name="Enable", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        return any(m.get("unity_normalized") for m in _target_materials(context, "SELECTED"))
+
+    def execute(self, context):
+        changed = sum(mat_builder.set_backface_culling(m, self.enable) for m in _target_materials(context, "SELECTED"))
+        state = "on (following Unity)" if self.enable else "off"
+        self.report({"INFO"}, f"Backface Culling {state} for {changed} material(s)")
+        return {"FINISHED"} if changed else {"CANCELLED"}
+
+
+_classes = (UNITYPKG_OT_rebuild_material, UNITYPKG_OT_set_backface_culling)
 
 
 def register() -> None:

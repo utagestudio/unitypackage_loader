@@ -145,6 +145,10 @@ class UNITYPKG_PT_tools(bpy.types.Panel):
         col = layout.column(align=True)
         col.label(text="Materials (selected meshes)")
         col.operator("unitypkg.rebuild_material", text="Rebuild in Another Mode", icon="NODE_MATERIAL")
+        row = col.row(align=True)
+        row.label(text="Backface Culling")
+        row.operator("unitypkg.set_backface_culling", text="On").enable = True
+        row.operator("unitypkg.set_backface_culling", text="Off").enable = False
         col.separator()
         col.label(text="Outlines (selected meshes)")
         row = col.row(align=True)

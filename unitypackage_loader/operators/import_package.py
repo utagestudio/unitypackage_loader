@@ -83,7 +83,12 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     force_opaque: BoolProperty(
         name="Force Opaque", default=False, description="Ignore Unity cutout/transparent settings"
     )
-    backface_culling: BoolProperty(name="Backface Culling", default=True, description="Follow Unity's _Cull setting")
+    # 既定は OFF（Unity は軽さのために背面を描かないが、Blender では裏側が欠けて見えるだけのことが多い。#169）
+    backface_culling: BoolProperty(
+        name="Backface Culling",
+        default=False,
+        description="Hide back faces where Unity's _Cull setting does (off: draw both sides of every material)",
+    )
     use_normal_maps: BoolProperty(name="Normal Maps", default=True)
     use_emission: BoolProperty(name="Emission", default=True)
     reuse_existing: BoolProperty(
@@ -129,6 +134,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         "extract_mode": "default_extract_mode",
         "extract_path": "default_extract_path",
         "import_unreferenced": "default_import_unreferenced",
+        "backface_culling": "default_backface_culling",
     }
 
     def invoke(self, context, event):
