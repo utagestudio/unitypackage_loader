@@ -78,7 +78,8 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |
-| | Backface Culling / Normal Maps / Emission | Whether to apply each element |
+| | Backface Culling | Hide back faces where Unity's `_Cull` setting does (off by default: every material is drawn on both sides). After import, "Backface Culling On / Off" in the sidebar's Tools panel switches it for the materials of the selected meshes |
+| | Normal Maps / Emission | Whether to apply each element |
 | | Outlines (Solidify) | Add a Solidify outline from Unity's outline color and width (converted with Width Scale) |
 | | Reuse Existing Materials | Reuse a material with the same name if one already exists instead of rebuilding it |
 | | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files (only when the option above is on) |

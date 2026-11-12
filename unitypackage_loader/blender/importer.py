@@ -110,7 +110,7 @@ class ImportOptions:
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
-    backface_culling: bool = True
+    backface_culling: bool = False  # Unity の _Cull に従って背面を隠すか（既定は両面を描く。#169）
     use_normal_maps: bool = True
     use_emission: bool = True
     reuse_existing: bool = False

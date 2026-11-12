@@ -51,6 +51,11 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
     default_extract_mode: EnumProperty(name="Extract To", items=EXTRACT_MODE_ITEMS, default="BESIDE_BLEND")
     default_extract_path: StringProperty(name="Custom Path", subtype="DIR_PATH", default="")
     default_import_unreferenced: BoolProperty(name="Import Unreferenced Images", default=False)
+    default_backface_culling: BoolProperty(
+        name="Backface Culling",
+        default=False,
+        description="Hide back faces where Unity's _Cull setting does (off: draw both sides of every material)",
+    )
     shader_table_path: StringProperty(
         name="Extra Shader Table",
         subtype="FILE_PATH",
@@ -86,6 +91,7 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
         if self.default_extract_mode == "CUSTOM":
             col.prop(self, "default_extract_path")
         col.prop(self, "default_import_unreferenced")
+        col.prop(self, "default_backface_culling")
 
         col = layout.column(heading="Shaders")
         col.prop(self, "shader_table_path")

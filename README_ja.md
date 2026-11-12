@@ -77,7 +77,8 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
 | Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
-| | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
+| | Backface Culling | Unity の `_Cull` に従って背面を隠す（既定 OFF。OFF ではすべてのマテリアルを両面で描く）。読み込み後はサイドバーの Tools パネルの「Backface Culling On / Off」で、選択メッシュのマテリアルを一括で切り替えられる |
+| | Normal Maps / Emission | 各要素を反映するか |
 | | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
 | | Bundled .blend Materials | 同梱 .blend のマテリアルを `Keep`（既定）/ `Rebuild`（上のオプションが ON のときのみ） |
