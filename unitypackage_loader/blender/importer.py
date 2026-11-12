@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import traceback
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ from ..core.hierarchy import components as scene_components
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
 from ..core.lights import LIGHT_CAMERA_BASIS, PIPELINE_HDRP, convert_camera, convert_light, decide_pipeline, pipelines_in_assets
 from ..core.fbx_units import read_unit_scale
+from ..core.model_ids import ModelObject, fbx_node_names, object_claims
 from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
@@ -42,7 +44,8 @@ from ..core.prefab import (
     find_renderer,
     merge_prefab_tables,
     models_placed_whole,
-    resolve_sole_renderer,
+    has_pending_renderers,
+    resolve_model_renderers,
     tables_from_hierarchy,
     unused_parts,
 )
@@ -107,7 +110,7 @@ class ImportOptions:
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
     material_mode: str = mat_builder.MODE_AUTO
     force_opaque: bool = False
-    backface_culling: bool = True
+    backface_culling: bool = False  # Unity の _Cull に従って背面を隠すか（既定は両面を描く。#169）
     use_normal_maps: bool = True
     use_emission: bool = True
     reuse_existing: bool = False
@@ -501,6 +504,37 @@ def _remove_created(before: dict[str, set[str]]) -> None:
         bpy.data.batch_remove(ids)
 
 
+def _model_objects(objects: list[bpy.types.Object]) -> list[ModelObject]:
+    """読み込んだモデルのオブジェクトと、最上位からの名前の並び（``model_ids.object_claims`` に渡す形）。
+
+    ボーンの子になっているオブジェクトは、Unity ではボーンの GameObject の下にある。Blender のアーマチュアの
+    オブジェクトが FBX のノードとは限らないので、それを含む並びと含まない並びの両方を出す。
+    """
+    members = set(objects)
+    cache: dict[bpy.types.Object, list[tuple[str, ...]]] = {}
+
+    def paths(obj) -> list[tuple[str, ...]]:
+        found = cache.get(obj)
+        if found is not None:
+            return found
+        cache[obj] = [(obj.name,)]  # 親子が循環していても止まるようにする
+        parent = obj.parent if obj.parent in members else None
+        if parent is not None:
+            above = paths(parent)
+            if obj.parent_type == "BONE" and obj.parent_bone and parent.type == "ARMATURE":
+                bones: list[str] = []
+                bone = parent.data.bones.get(obj.parent_bone)
+                while bone is not None:
+                    bones.append(bone.name)
+                    bone = bone.parent
+                chain = tuple(reversed(bones))
+                above = [p + chain for p in above] + [p[:-1] + chain for p in above]
+            cache[obj] = [p + (obj.name,) for p in above]
+        return cache[obj]
+
+    return [ModelObject(o.name, paths(o), o.type == "MESH") for o in objects]
+
+
 def _is_removed(datablock) -> bool:
     try:
         _ = datablock.name
@@ -852,6 +886,7 @@ class _ImportSession:
         # 1 つのモデルの複数のスロット、prefab のスロット分割のどれでも。#77）
         self.built_by_guid: dict[str, bpy.types.Material] = {}
         self.imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
+        self.node_names: dict[str, Counter | None] = {}  # モデルの GUID → FBX のノードの名前と数（読めなければ None。#31）
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
 
         self.model_by_guid = {m.guid: m for m in self.prepared.models}
@@ -961,14 +996,21 @@ class _ImportSession:
         new_materials: list[bpy.types.Material] = new["materials"]
         fbx_names = [m.name for m in new_materials]
         mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
-        # 名前を引けないモデルの中へのマテリアルの上書きは、メッシュが 1 つのときだけそれに当てる（#109）
-        prefab_table, unread = resolve_sole_renderer(prefab_table or {}, [o.name for o in mesh_objects])
-        if unread:
-            self.report.warn(
-                f"{model.name}: {unread} material override(s) on an object inside the model are not read yet "
-                f"(the model has {len(mesh_objects)} meshes, so the overridden one is unknown); "
-                "the model's own assignments are used for them"
-            )
+        prefab_table = prefab_table or {}
+        if has_pending_renderers(prefab_table):
+            # 表で名前を引けないモデルの中へのマテリアルの上書きは、対象の fileID を、読み込んだオブジェクトの名前と
+            # 親子関係から計算した fileID と突き合わせて当てる（#31。メッシュが 1 つだけならそれに当てる。#109）
+            if model.guid not in self.node_names:
+                self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
+            taken = {strip_numeric_suffix(name) for name in before["objects"]}
+            claims = object_claims(_model_objects(new["objects"]), native=self.node_names[model.guid], taken=taken)
+            prefab_table, unread = resolve_model_renderers(prefab_table, claims, [o.name for o in mesh_objects])
+            if unread:
+                self.report.warn(
+                    f"{model.name}: {unread} material override(s) on objects inside the model could not be matched "
+                    "to an imported object (the object is not in the model, or its name is not unique); "
+                    "the model's own assignments are used for them"
+                )
         object_slots = {
             o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
             for o in mesh_objects

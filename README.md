@@ -78,7 +78,8 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |
-| | Backface Culling / Normal Maps / Emission | Whether to apply each element |
+| | Backface Culling | Hide back faces where Unity's `_Cull` setting does (off by default: every material is drawn on both sides). After import, "Backface Culling On / Off" in the sidebar's Tools panel switches it for the materials of the selected meshes |
+| | Normal Maps / Emission | Whether to apply each element |
 | | Outlines (Solidify) | Add a Solidify outline from Unity's outline color and width (converted with Width Scale) |
 | | Reuse Existing Materials | Reuse a material with the same name if one already exists instead of rebuilding it |
 | | Bundled .blend Materials | `Keep` (default) / `Rebuild` materials from bundled .blend files (only when the option above is on) |
@@ -181,7 +182,9 @@ variants), their assignments are merged, with the first one by path taking prece
 assignments, import that prefab with the Prefabs unit. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
 the package; overrides applied directly to a model (FBX) instance are applied when a scene is imported and the model's
 `.meta` is in the Unity 2018.2-and-earlier format (which has a name table). Without a name table, material overrides are
-still applied when the model has only one mesh (so the overridden renderer is certain); otherwise they are reported as a warning.
+matched to the imported objects by their names and hierarchy (Unity derives the internal IDs from them). Objects whose names are
+not unique inside the model cannot be matched; those overrides, and position or visibility overrides on parts inside such a model,
+are reported as a warning.
 A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
 which can differ from Blender's slot order, so the entries are matched to slots in that order.
 

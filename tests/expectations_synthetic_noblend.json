@@ -8,7 +8,7 @@
   "split_slots": 1,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"], "SyntheticNoMat": ["NoMatMat"] },
   "material_checks": [
-    { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard" },
+    { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard", "backface_culling": false },
     { "name": "TwinAFbxMat", "alpha_mode": "opaque" },
     { "name": "TwinBFbxMat", "alpha_mode": "blend" },
     { "name": "VariantFbxMat", "alpha_mode": "cutout" },

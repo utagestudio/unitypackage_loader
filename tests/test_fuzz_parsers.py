@@ -13,6 +13,7 @@ import unittest
 from tests import _paths  # noqa: F401
 from tests import test_hierarchy as th
 from tests import test_material as tm
+from tests import test_model_ids as tmi
 from tests import test_prefab as tp
 from tests import test_profiles_hdrp as tph
 from tests import test_profiles_toon as tpt
@@ -31,6 +32,7 @@ from unitypackage_loader.core.hierarchy import (
 )
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
+from unitypackage_loader.core.model_ids import parse_fbx_node_names
 from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
 from unitypackage_loader.core.shader_source import declared_properties
@@ -118,6 +120,9 @@ def mutate_bytes(data: bytes, rng: random.Random) -> bytes:
         else:
             del buf[i:]
     return bytes(buf)
+
+
+ASCII_FBX = '; FBX 7.4.0 project file\nObjects:  {\n\tModel: 1234, "Model::Body", "Mesh" {\n\t}\n\tModel: "Model::Old", "Null" {\n\t}\n}\n'
 
 
 # 読み込み側の処理の流れ（blender/importer.py の prepare_package と同じ順に呼ぶ）
@@ -225,6 +230,11 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
+
+    def test_fbx_node_names(self):
+        # 表の無いモデルの中への上書きの対象を決めるときに読む、FBX のノード名（#31）
+        self.fuzz("fbx node names", parse_fbx_node_names, tmi.FbxNodeNameTests.binary(["Body", "日本語", "Part", "Part"]), mutate_bytes)
+        self.fuzz("fbx node names", lambda text: parse_fbx_node_names(text.encode("utf-8", "replace")), ASCII_FBX, mutate_text)
 
 
 if __name__ == "__main__":

@@ -77,7 +77,8 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
 | Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
-| | Backface Culling / Normal Maps / Emission | 各要素を反映するか |
+| | Backface Culling | Unity の `_Cull` に従って背面を隠す（既定 OFF。OFF ではすべてのマテリアルを両面で描く）。読み込み後はサイドバーの Tools パネルの「Backface Culling On / Off」で、選択メッシュのマテリアルを一括で切り替えられる |
+| | Normal Maps / Emission | 各要素を反映するか |
 | | Outlines (Solidify) | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける（Width Scale で換算） |
 | | Reuse Existing Materials | 同名マテリアルが既にあれば作り直さず再利用 |
 | | Bundled .blend Materials | 同梱 .blend のマテリアルを `Keep`（既定）/ `Rebuild`（上のオプションが ON のときのみ） |
@@ -166,7 +167,8 @@ prefab の Renderer は、そのメッシュを持つモデルにだけ当ては
 特定の prefab の割り当てを使うには、読み込む単位 Prefabs でその prefab を読み込みます。
 Prefab Variant やネストされた prefab のマテリアルの上書きは、元がパッケージ内の prefab なら読みます。
 モデル（FBX）を直接置いたものへの上書きは、Unity 2018.2 以前の形式の `.meta`（名前の表がある）ならシーンの読み込みで当てます。
-名前の表が無くても、モデルのメッシュが 1 つだけなら上書きの対象がそれに決まるので、マテリアルの上書きは当てます。それ以外は警告に出します。
+名前の表が無いモデルでは、マテリアルの上書きを、読み込んだオブジェクトの名前と階層から対象を突き合わせて当てます（Unity の内部の ID が名前と階層から作られているため）。
+モデルの中で名前が重複しているオブジェクトは対象を決められないので、その上書きと、こうしたモデルの中の部品への位置・表示の上書きは警告に出します。
 prefab のマテリアルの並びは Unity のサブメッシュ順（メッシュのポリゴンで最初に使われた順）で、Blender のスロット順と
 異なることがあるため、その順でスロットに対応付けます。
 
