@@ -1351,9 +1351,10 @@ def placements(
         if placement is None:
             placement = ModelPlacement(guid, root, worlds[root], active[root])
             names = node_names.get(guid)
-            if names is not None and root == own:
+            if names is not None:
                 label = _fbx_node_name(h.nodes[root], guid, renderer_tables.get(guid, {}), names)
-                if label is not None:  # FBX の中のノードをルートにした
+                # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
+                if label is not None:
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
             by_root[(root, guid)] = placement
             result.append(placement)
