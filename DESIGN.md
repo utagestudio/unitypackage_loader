@@ -64,6 +64,13 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
   - 1 メッシュの FBX（表の GameObject はルートだけで、メッシュも 1 つ）: Renderer の GameObject 自身。この形の FBX では、Unity はノードを `//RootNode` に畳んでその変換をモデルのルートの Transform に載せ、メッシュの頂点はノード空間のままにするので、メッシュを直接指す Renderer にはノードの変換が掛からない。そこで、下のノード自身をルートにした配置と同じく `node_transforms`（名前は表のメッシュ名）でそのノードを単位行列にする。これをしないと、ノードが原点から離れた FBX（街並みアセットの歩道など）がノードの移動ぶんずれる（Issue #98。Unity 6000.6.0f1 で確認）。
   - それ以外: FBX のノード（GameObject 名で判定し、名前を変えてあれば Renderer のメッシュ名で判定）が続く間は親をたどり、その 1 つ上を候補にする（最上位の祖先は越えない）。次のときは候補を使わず、たどったノード自身をルートにする。候補にまとめると同じノードの Renderer が重なるとき（複製を並べた入れ物）。部品が 1 つだけで、候補の直下に別のモデルがあり、候補の名前がモデルの名前と違うとき（部屋のような入れ物。照明の prefab にろうそくを足したような、部品の多いモデルのルートは分けない）。ノード自身をルートにした配置は、`node_transforms` でそのノードを単位行列にする。Unity の GameObject の行列がノードの変換を含むので、Blender のオブジェクトの元の変換を掛けないため（下記「古い形式のモデルの中への上書き」の N = C·L·A で L を単位行列にする）。
   - 表が無いモデル、表に無いメッシュを指す Renderer があるモデル（古い番号を引き継いだ、一部の行しか無い表）: 従来どおり最上位の祖先。
+    ただし表の無いモデルでも、FBX のノードが 1 つだけなら 1 メッシュの FBX と同じに扱う（Issue #181）。ノードの数はパッケージの走査のときに
+    FBX の中身から数え（`model_ids.parse_fbx_node_names`。1 つだけならその名前を `AssetEntry.fbx_sole_node` に残す。64 MiB を超える FBX は読まない）、
+    `placements` の `sole_nodes` で渡す。メッシュはそのノードのものしか無いので、メッシュ参照の fileID → ノード名の表をその場で作り、上の 1 メッシュの FBX と同じ
+    `node_transforms` を付ける。Expander（中への上書きの照合）とモデルの PrefabInstance の配置（#111）には使わない。以前は、ノードが原点から離れた FBX の
+    メッシュを直接指す prefab で、ノードの移動・回転が残っていた。UnityJapanOffice の NoonA の `Cussion_01`（0.76 m）、Synty Starter の Overview の岩（9〜17 m）、
+    Japanese Street の `AE_Tablet_08`（向きが 90 度違い、隣の札と面がそろわなかった）。メッシュのワールド座標を前後で比べ、動いたのはこれらだけだった
+    （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs は prefab の中の位置で並べないので対象外。
   - 複数のノードが 1 つのメッシュを共有する FBX もあるので、Renderer の名前は、GameObject 名が FBX のノード名にあればそれを優先し、無ければメッシュ名にする。
   - Japanese Apartment のシーンで、Unity が書き出した Renderer の外形の中心と比べた。FBX との対応が切れた Renderer 18 個のうち、共通の親の下にあった 13 個はすべて 1 mm 未満で一致した。Japanese Street と Unity Japan Office の配置は変わらない。Gothic Lights のデモシーンでは、潰れて抜けていた 161 個の Renderer が残るようになった。
 - 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
