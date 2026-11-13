@@ -436,6 +436,55 @@ class ModelRootTest(unittest.TestCase):
         self.assertEqual(set(self.by_root("Wall").renderers), {"Wall", "Wall_LOD1"})
 
 
+class NodeRootWithoutOwnRendererTest(unittest.TestCase):
+    """FBX のノードを配置のルートにしたら、Renderer の有無や並び順によらずノードを単位行列にする（Issue #183）。
+
+    以前は、配置を作るときに最初に見た Renderer がルートの GameObject 自身のときだけ単位行列にしていた。
+    Japanese Train Station の改札（ルートは Renderer の無い FBX の Empty）と時計（子の針の Renderer を先に見る）で、
+    ノードの FBX の中での変換が残っていた。
+    """
+
+    KIT = "f" * 32
+    TABLE = {KIT: {
+        100000: "//RootNode", 100002: "Gate", 100004: "Leaf", 100006: "Clock", 100008: "Hand",
+        4300000: "Leaf", 4300002: "Clock", 4300004: "Hand",
+    }}
+    SCENE = HEADER + "".join([
+        # Renderer の無い FBX のノードがルート（シーンに FBX を展開して置いたもの）
+        game_object(20, "Gate (1)"),
+        transform(21, 20, pos=(1, 0, 0)),
+        game_object(30, "Leaf"),
+        transform(31, 30, father=21, pos=(0, 0.5, 0)),
+        mesh_renderer(32, 33, 30, KIT, MAT_A, mesh_file_id=4300000),
+        # 子の Renderer が先に来る、Renderer のあるルート
+        game_object(50, "Hand"),
+        transform(51, 50, father=41, pos=(0, -0.2, 0)),
+        mesh_renderer(52, 53, 50, KIT, MAT_A, mesh_file_id=4300004),
+        game_object(40, "Clock"),
+        transform(41, 40, pos=(2, 0, 0)),
+        mesh_renderer(42, 43, 40, KIT, MAT_A, mesh_file_id=4300002),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.hierarchy = Expander(lambda guid: None, {cls.KIT: "Kit"}).expand_raw(parse_asset(cls.SCENE))
+        cls.placements = placements(cls.hierarchy, {cls.KIT: "Kit"}, cls.TABLE)
+
+    def by_root(self, name):
+        return next(p for p in self.placements if self.hierarchy.nodes[p.root].name == name)
+
+    def test_node_without_renderer(self):
+        gate = self.by_root("Gate (1)")
+        self.assertEqual(set(gate.renderers), {"Leaf"})
+        self.assertEqual(gate.node_transforms, {"Gate": self.IDENTITY})
+
+    def test_child_renderer_seen_first(self):
+        clock = self.by_root("Clock")
+        self.assertEqual(set(clock.renderers), {"Clock", "Hand"})
+        self.assertEqual(clock.node_transforms, {"Clock": self.IDENTITY})
+
+
 class SoleNodeWithoutTableTest(unittest.TestCase):
     """表の無いモデルでも、FBX のノードが 1 つだけなら、表のある 1 メッシュの FBX と同じに置く（Issue #181）。
 
