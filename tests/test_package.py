@@ -18,6 +18,7 @@ from unitypackage_loader.core.package import (
     safe_relative_path,
 )
 from unitypackage_loader.core.unity_binary import is_serialized_file
+from tests import test_model_ids
 
 GUID_FOLDER = "0" * 32
 GUID_MAT = "1" * 32
@@ -377,6 +378,55 @@ class ScanCacheTests(unittest.TestCase):
             self.assertIsNone(pkg.entries[GUID_SCENE]._cache)
             with self.assertRaises(PackageError):
                 pkg.read_asset(GUID_SCENE)
+
+
+class FbxSoleNodeTests(unittest.TestCase):
+    """scan で FBX のノードが 1 つだけか見て、その名前を覚える（表の無い 1 メッシュの FBX の配置に使う。#181）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "fbx.unitypackage"
+        with tarfile.open(self.path, "w:gz") as tar:
+            # asset が pathname より先（Unity が書き出す順）
+            _add(tar, f"{GUID_FBX}/asset", test_model_ids.FbxNodeNameTests.binary(["Cushion"]))
+            _add(tar, f"{GUID_FBX}/pathname", b"Assets/Fbx/Cushion.fbx")
+            # pathname が先
+            _add(tar, f"{GUID_MAT}/pathname", b"Assets/Fbx/Lamp.FBX")
+            _add(tar, f"{GUID_MAT}/asset", test_model_ids.FbxNodeNameTests.binary(["Lamp"]))
+            # ノードが 2 つ
+            _add(tar, f"{GUID_OTHER}/asset", test_model_ids.FbxNodeNameTests.binary(["Desk", "Drawer"]))
+            _add(tar, f"{GUID_OTHER}/pathname", b"Assets/Fbx/Desk.fbx")
+            # FBX でないモデル
+            _add(tar, f"{GUID_VRM}/asset", test_model_ids.FbxNodeNameTests.binary(["Avatar"]))
+            _add(tar, f"{GUID_VRM}/pathname", b"Assets/Fbx/Avatar.obj")
+            # 最上位のノードが 1 つで、子を持つ（#185）
+            _add(tar, f"{GUID_SCENE}/asset", test_model_ids.FbxTopNodeTests.binary([(1, "Switch", 0), (2, "Stick", 1)]))
+            _add(tar, f"{GUID_SCENE}/pathname", b"Assets/Fbx/Switch.fbx")
+            _add(tar, f"{GUID_TEX}/asset", test_model_ids.FbxTopNodeTests.binary([(1, "Wall", 0), (2, "Door", 0)]))
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Fbx/House.fbx")
+
+    def test_sole_node_is_recorded(self):
+        pkg = UnityPackage(self.path)
+        pkg.scan()
+        self.assertEqual(pkg.entries[GUID_FBX].fbx_sole_node, "Cushion")
+        self.assertEqual(pkg.entries[GUID_MAT].fbx_sole_node, "Lamp")
+        self.assertEqual(pkg.entries[GUID_OTHER].fbx_sole_node, "")
+        self.assertEqual(pkg.entries[GUID_VRM].fbx_sole_node, "")
+        self.assertIsNone(pkg.entries[GUID_FBX]._cache, "the FBX itself is not kept in memory")
+
+    def test_single_top_node_is_recorded(self):
+        pkg = UnityPackage(self.path)
+        pkg.scan()
+        self.assertEqual((pkg.entries[GUID_SCENE].fbx_sole_node, pkg.entries[GUID_SCENE].fbx_top_node), ("", "Switch"))
+        self.assertEqual(pkg.entries[GUID_TEX].fbx_top_node, "")
+        self.assertEqual(pkg.entries[GUID_FBX].fbx_top_node, "")  # Connections の無い FBX は分からない扱い
+
+    def test_fbx_over_read_limit_is_not_read(self):
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 16):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+        self.assertEqual(pkg.entries[GUID_FBX].fbx_sole_node, "")
 
 
 class ExtractBudgetTests(unittest.TestCase):

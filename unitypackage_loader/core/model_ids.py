@@ -16,6 +16,8 @@ fileID は名前（と階層パス）のハッシュなので（``unity_ids``）
 
 FBX のノード名の一覧（``fbx_node_names``）が分かれば、Blender の連番が FBX に元からあるものか、付け替えたものかを区別できる。
 分からないモデル（FBX 以外や、読めなかったもの）は、名前の連番を外した形が他と重ならないオブジェクトだけを扱う。
+
+表示の上書きと削除（``hierarchy.PartState``）は ``PartMatcher`` で、隠すオブジェクトと Unity に無いオブジェクトにする（#172）。
 """
 
 from __future__ import annotations
@@ -24,10 +26,11 @@ import itertools
 import re
 import struct
 from collections import Counter
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .hierarchy import PartState, pending_object_id, pending_renderer_id
 from .meta import strip_numeric_suffix
 from .unity_ids import MODEL_ROOT_NAME, hierarchy_file_id, named_file_id
 
@@ -52,6 +55,8 @@ class ModelObject:
     name: str
     paths: list[tuple[str, ...]] = field(default_factory=list)
     is_mesh: bool = True
+    parent: str | None = None  # 親のオブジェクトの名前（モデルの外の親は None）
+    is_armature: bool = False
 
 
 def parse_fbx_node_names(data: bytes) -> Counter[str] | None:
@@ -72,12 +77,55 @@ def parse_fbx_node_names(data: bytes) -> Counter[str] | None:
 
 def _binary_string_ending_at(data: bytes, end: int) -> str | None:
     """``end`` で名前が終わる文字列属性（``S`` + 長さ + 「<名前>\\0\\1Model」）の名前。"""
+    start = _binary_string_start(data, end)
+    return data[start:end].decode("utf-8", "replace") if start is not None else None
+
+
+def _binary_string_start(data: bytes, end: int) -> int | None:
+    """``end`` で名前が終わる文字列属性の、名前の始まりの位置。"""
     tail = len(_BINARY_MODEL)
     for length in range(0, min(_MAX_NAME, end - 5) + 1):
         start = end - length
         if data[start - 5 : start - 4] == b"S" and struct.unpack_from("<I", data, start - 4)[0] == length + tail:
-            return data[start:end].decode("utf-8", "replace")
+            return start
     return None
+
+
+_BINARY_CONNECTION = re.compile(rb"S\x02\x00\x00\x00OOL(.{8})L(.{8})", re.DOTALL)  # C: "OO", 子, 親
+_ASCII_MODEL_ID = re.compile(rb'^[ \t]*Model:\s*(-?\d+)\s*,\s*"Model::([^"\r\n]*)"', re.MULTILINE)
+_ASCII_CONNECTION = re.compile(rb'C:\s*"OO"\s*,\s*(-?\d+)\s*,\s*(-?\d+)')
+
+
+def parse_fbx_top_nodes(data: bytes) -> list[str] | None:
+    """FBX の中身から、最上位のノード（Connections でシーンのルート = 0 につながる Model）の名前を返す。
+
+    Unity は最上位のノードが 1 つだけの FBX で、子があってもそのノードをモデルのルートに畳む（#185）。
+    ノードの ID か Connections が読めない形（ID の無い古い FBX など）は None。
+    """
+    models: dict[int, str] = {}
+    parents: dict[int, int] = {}
+    if data.startswith(_BINARY_MAGIC):
+        position = data.find(_BINARY_MODEL)
+        while position >= 0:
+            start = _binary_string_start(data, position)
+            # 名前の前は「L + 8 バイトの ID」と「S + 4 バイトの長さ」
+            if start is not None and start >= 14 and data[start - 14 : start - 13] == b"L":
+                models[struct.unpack_from("<q", data, start - 13)[0]] = data[start:position].decode("utf-8", "replace")
+            position = data.find(_BINARY_MODEL, position + 1)
+        for match in _BINARY_CONNECTION.finditer(data):
+            child, parent = struct.unpack("<q", match.group(1))[0], struct.unpack("<q", match.group(2))[0]
+            if child in models:
+                parents.setdefault(child, parent)
+    else:
+        for match in _ASCII_MODEL_ID.finditer(data):
+            models[int(match.group(1))] = match.group(2).decode("utf-8", "replace")
+        for match in _ASCII_CONNECTION.finditer(data):
+            child, parent = int(match.group(1)), int(match.group(2))
+            if child in models:
+                parents.setdefault(child, parent)
+    if not models or set(parents) != set(models):
+        return None
+    return [name for key, name in models.items() if parents[key] == 0]
 
 
 def fbx_node_names(path: str | Path) -> Counter[str] | None:
@@ -127,12 +175,14 @@ def object_claims(
     type_names: Iterable[str] = RENDERER_TYPES,
     native: Counter[str] | None = None,
     taken: Collection[str] = (),
+    meshes_only: bool = True,
 ) -> dict[int, str]:
     """fileID（上位ビットを落とした値）→ オブジェクトの名前。対象が 1 つに決まるものだけを返す。
 
     ``type_names`` は Unity の型の名前（Renderer なら ``RENDERER_TYPES``、位置なら ``Transform``）。``native`` は
     ``fbx_node_names`` の結果、``taken`` は読み込む前からあったオブジェクトの名前（連番を外した形）。
-    返すのはメッシュのオブジェクトだけだが、同じ fileID になるオブジェクトが他にあれば（メッシュでなくても）返さない。
+    ``meshes_only`` なら返すのはメッシュのオブジェクトだけ（Renderer の fileID のとき）。同じ fileID になるオブジェクトが
+    他にあれば（メッシュでなくても）返さない。
     """
     type_names = tuple(type_names)
     names = _Names(objects, native, taken)
@@ -172,9 +222,90 @@ def object_claims(
         if not leaf_duplicated:
             for type_name in type_names:
                 claim(named_file_id(type_name, leaf), obj)
-    meshes = {o.name for o in objects if o.is_mesh}
+    meshes = {o.name for o in objects if o.is_mesh or not meshes_only}
     return {
         file_id: name
         for file_id, owners in claims.items()
         if len(owners) == 1 and (name := next(iter(owners))) in meshes
     }
+
+
+@dataclass
+class PartMatch:
+    """表示の上書きと削除を、読み込んだオブジェクトに当てた結果（``PartMatcher.match``）。"""
+
+    hidden: set[str] = field(default_factory=set)  # 隠すオブジェクト（非アクティブな GameObject の子孫と、無効な Renderer）
+    removed: set[str] = field(default_factory=set)  # Unity で消されたオブジェクト（使われていない部品と同じ扱い）
+    unmatched: int = 0  # 当てられなかった上書き・削除の数（見た目を変えないものと、Renderer 以外の削除は数えない）
+
+
+class PartMatcher:
+    """読み込んだモデルのオブジェクトに、モデルの PrefabInstance の中への表示の上書きと削除を当てる（#172）。
+
+    GameObject の fileID はオブジェクトの種類を問わずに、Renderer の fileID はメッシュのオブジェクトだけに結び付ける
+    （``object_claims``）。古い形式の .meta の表で引いた名前の行は、名前（完全一致 → 連番を外した形が 1 つだけ）で引く。
+
+    非アクティブな GameObject と消した GameObject は子孫も対象にする。ただしアーマチュアの子はたどらない。Blender の
+    FBX インポーターはスキンメッシュをアーマチュアの子にするが、Unity ではスキンメッシュとボーンの GameObject は別の枝にある。
+    """
+
+    def __init__(self, objects: Sequence[ModelObject], native: Counter[str] | None = None, taken: Collection[str] = ()):
+        self.object_ids = object_claims(objects, ("GameObject",), native, taken, meshes_only=False)
+        self.renderer_ids = object_claims(objects, RENDERER_TYPES, native, taken)
+        self._names = {o.name for o in objects}
+        self._bases: dict[str, list[str]] = {}
+        for o in objects:
+            self._bases.setdefault(strip_numeric_suffix(o.name), []).append(o.name)
+        self._children: dict[str, list[str]] = {}
+        armatures = {o.name for o in objects if o.is_armature}
+        for o in objects:
+            if o.parent is not None and o.parent not in armatures:
+                self._children.setdefault(o.parent, []).append(o.name)
+
+    def _by_name(self, name: str) -> str | None:
+        if name in self._names:
+            return name
+        candidates = self._bases.get(strip_numeric_suffix(name), [])
+        return candidates[0] if len(candidates) == 1 else None
+
+    def _subtree(self, roots: Iterable[str]) -> set[str]:
+        result: set[str] = set()
+        stack = list(roots)
+        while stack:
+            name = stack.pop()
+            if name not in result:
+                result.add(name)
+                stack.extend(self._children.get(name, []))
+        return result
+
+    def match(self, parts: Mapping[str, PartState]) -> PartMatch:
+        hide_trees: list[str] = []
+        hide_own: set[str] = set()
+        remove_trees: list[str] = []
+        remove_own: set[str] = set()
+        unmatched = 0
+        for key, state in parts.items():
+            hides_tree, hides_own = state.active is False, state.enabled is False
+            if not (hides_tree or hides_own or state.removed):
+                continue  # 表示する値（Unity の既定値）を書いただけの上書き
+            if (uid := pending_object_id(key)) is not None:
+                name = self.object_ids.get(uid)
+            elif (uid := pending_renderer_id(key)) is not None:
+                name = self.renderer_ids.get(uid)
+            else:
+                name = self._by_name(key)
+            if name is None:
+                # Renderer 以外（コライダーなど）を消したものは区別できないので数えない
+                unmatched += int(hides_tree or hides_own or state.removed_object)
+                continue
+            if hides_tree:
+                hide_trees.append(name)
+            if hides_own:
+                hide_own.add(name)
+            if state.removed_object:
+                remove_trees.append(name)
+            if state.removed_renderer:
+                remove_own.add(name)
+        removed = self._subtree(remove_trees) | remove_own
+        hidden = (self._subtree(hide_trees) | hide_own) - removed
+        return PartMatch(hidden, removed, unmatched)

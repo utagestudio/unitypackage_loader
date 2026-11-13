@@ -21,6 +21,7 @@ from ..core.hierarchy import (
     SOLE_NODE,
     Expander,
     Hierarchy,
+    PartState,
     RawAsset,
     built_from_renderers,
     effective_active,
@@ -32,7 +33,7 @@ from ..core.hierarchy import components as scene_components
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
 from ..core.lights import LIGHT_CAMERA_BASIS, PIPELINE_HDRP, convert_camera, convert_light, decide_pipeline, pipelines_in_assets
 from ..core.fbx_units import read_unit_scale
-from ..core.model_ids import ModelObject, fbx_node_names, object_claims
+from ..core.model_ids import ModelObject, PartMatch, PartMatcher, fbx_node_names
 from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
 from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
@@ -45,6 +46,8 @@ from ..core.prefab import (
     merge_prefab_tables,
     models_placed_whole,
     has_pending_renderers,
+    inactive_models,
+    parts_from_placements,
     resolve_model_renderers,
     tables_from_hierarchy,
     unused_parts,
@@ -155,6 +158,9 @@ class ModelSummary:
     supported: bool
     skip_reason: str = ""  # supported が False の理由
     info: ModelImporterInfo = field(default_factory=ModelImporterInfo)  # .meta の設定（読み込みのたびに解析し直さない。#75）
+    # prefab の MeshCollider だけが使い、prefab の Renderer も配置も使っていない（当たり判定用のメッシュ。選択ダイアログの
+    # Models で、既定のチェックを外して理由を出す。読み込めないわけではないので supported は変えない。#166）
+    collider_only: bool = False
 
     @property
     def guid(self) -> str:
@@ -176,6 +182,10 @@ class PreparedPackage:
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
     # prefab の pathname → FBX を丸ごと置いているモデルの GUID（表に無い部品も隠さない。#151）
     prefab_whole_models: dict[str, set[str]] = field(default_factory=dict)
+    # prefab の pathname → モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（#172）
+    prefab_parts: dict[str, dict[str, dict[str, PartState]]] = field(default_factory=dict)
+    # prefab の pathname → prefab の中の配置がすべて非アクティブなモデルの GUID（すべての部品を隠す。#177）
+    prefab_inactive_models: dict[str, set[str]] = field(default_factory=dict)
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
@@ -365,17 +375,25 @@ def prepare_package(
     # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
     model_names, recycle = _model_tables(models)
-    expander = Expander(_prefab_reader(pkg, warnings.append), model_names, recycle)
+    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
+    collider_meshes: set[str] = set()
+    expander = Expander(_prefab_reader(pkg, warnings.append, collider_meshes), model_names, recycle)
+    used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     prefab_whole_models: dict[str, set[str]] = {}
+    prefab_parts: dict[str, dict[str, dict[str, PartState]]] = {}
+    prefab_inactive_models: dict[str, set[str]] = {}
     for entry in pkg.prefabs():
         try:
             hierarchy = expander.expand_asset(entry.guid)
             if hierarchy is None:  # 読めなかった（警告は読むときに出している）
                 continue
-            placed = placements(hierarchy, model_names, recycle)
+            placed = placements(hierarchy, model_names, recycle, sole_nodes, top_nodes)
             tables = tables_from_hierarchy(hierarchy, model_names, recycle, placed)
             whole = models_placed_whole(hierarchy, placed)
+            parts = parts_from_placements(placed)
+            inactive = inactive_models(placed)
+            used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
             _log_exception(f"could not resolve prefab {entry.pathname}")
@@ -388,6 +406,12 @@ def prepare_package(
         if tables:
             prefab_tables[entry.pathname] = tables
             prefab_whole_models[entry.pathname] = whole
+            if parts:
+                prefab_parts[entry.pathname] = parts
+            if inactive:
+                prefab_inactive_models[entry.pathname] = inactive
+    for m in models:
+        m.collider_only = m.guid in collider_meshes and m.guid not in used_by_prefabs
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
     # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
@@ -400,7 +424,8 @@ def prepare_package(
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, prefab_whole_models=prefab_whole_models, scene_entries=pkg.scenes(), _expander=expander,
+        prefabs=prefabs, prefab_whole_models=prefab_whole_models, prefab_parts=prefab_parts,
+        prefab_inactive_models=prefab_inactive_models, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=pipeline.pipeline,
         pipeline_source=pipeline.source,
     )
@@ -419,15 +444,33 @@ def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str,
     return {m.guid: Path(m.entry.pathname).stem for m in models}, {m.guid: m.info.recycle_names for m in models}
 
 
-def _prefab_reader(pkg: UnityPackage, warn: Callable[[str], None]) -> Callable[[str], RawAsset | None]:
-    """展開器に渡す読み取り関数。prefab 以外と、読めない prefab は None（元の無いインスタンスとして扱う。#69）。"""
+def _sole_nodes(models: list[ModelSummary]) -> dict[str, str]:
+    """FBX のノードが 1 つだけのモデルの GUID → そのノード名（表の無い 1 メッシュの FBX の配置に使う。#181）。"""
+    return {m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node}
+
+
+def _top_nodes(models: list[ModelSummary]) -> dict[str, str]:
+    """FBX の最上位のノードが 1 つだけのモデルの GUID → そのノード名（Unity が畳むノード。#185）。"""
+    return {m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node}
+
+
+def _prefab_reader(
+    pkg: UnityPackage, warn: Callable[[str], None], collider_meshes: set[str] | None = None
+) -> Callable[[str], RawAsset | None]:
+    """展開器に渡す読み取り関数。prefab 以外と、読めない prefab は None（元の無いインスタンスとして扱う。#69）。
+
+    ``collider_meshes`` を渡すと、読んだ prefab の MeshCollider が指すアセットの GUID を加える（#166）。
+    """
     prefab_guids = {e.guid for e in pkg.prefabs()}
 
     def read(guid: str) -> RawAsset | None:
         if guid not in prefab_guids:
             return None
         try:
-            return parse_asset(pkg.read_asset(guid))
+            raw = parse_asset(pkg.read_asset(guid))
+            if collider_meshes is not None:
+                collider_meshes.update(g.lower() for g in raw.collider_meshes)
+            return raw
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので、その prefab だけを外して続ける
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
             _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")
@@ -444,13 +487,14 @@ def _prepare_scenes(
     if not entries:
         return [], {}
     model_names, recycle = _model_tables(models)
+    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:
         contents = None
         try:
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
-            contents = summarize(hierarchy, model_names, recycle)
+            contents = summarize(hierarchy, model_names, recycle, sole_nodes, top_nodes)
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn(f"could not read scene {entry.pathname}: {exc}")
@@ -532,7 +576,12 @@ def _model_objects(objects: list[bpy.types.Object]) -> list[ModelObject]:
             cache[obj] = [p + (obj.name,) for p in above]
         return cache[obj]
 
-    return [ModelObject(o.name, paths(o), o.type == "MESH") for o in objects]
+    return [
+        ModelObject(
+            o.name, paths(o), o.type == "MESH", o.parent.name if o.parent in members else None, o.type == "ARMATURE"
+        )
+        for o in objects
+    ]
 
 
 def _is_removed(datablock) -> bool:
@@ -887,6 +936,8 @@ class _ImportSession:
         self.built_by_guid: dict[str, bpy.types.Material] = {}
         self.imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
         self.node_names: dict[str, Counter | None] = {}  # モデルの GUID → FBX のノードの名前と数（読めなければ None。#31）
+        # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
+        self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
 
         self.model_by_guid = {m.guid: m for m in self.prepared.models}
@@ -918,31 +969,41 @@ class _ImportSession:
                         skipped = self.model_by_guid.get(guid)
                         if skipped is not None and not skipped.supported:
                             self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-                hidden_lods = hidden_unused = removed_unused = 0
+                hidden_lods = hidden_unused = removed_unused = unmatched_parts = 0
                 whole = self.prepared.prefab_whole_models.get(group.prefab.pathname, set()) if group.prefab else set()
+                parts_by_model = self.prepared.prefab_parts.get(group.prefab.pathname, {}) if group.prefab else {}
+                inactive = self.prepared.prefab_inactive_models.get(group.prefab.pathname, set()) if group.prefab else set()
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                     done += 1
                     if summary.guid in self.failed_models:
                         continue
+                    parts = parts_by_model.get(summary.guid, {})
                     try:
-                        objects = self.import_model(summary, prefab_table, target)
+                        objects = self.import_model(summary, prefab_table, target, with_parts=bool(parts))
                     except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
                         _record_failure(self.report, f"could not import {summary.entry.pathname}: {exc}")
                         continue
                     # Models 単位の表は prefab をまたいで統合したものなので、LOD を隠すのは prefab 単位のときだけ
                     if group.prefab is not None:
+                        match = self.last_matcher.match(parts) if parts and self.last_matcher else PartMatch()
+                        unmatched_parts += match.unmatched
+                        # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
+                        unused = set(match.removed)
                         if summary.guid not in whole:
-                            if self.opts.skip_unused_parts:
-                                objects, removed = self.remove_unused(
-                                    objects, unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
-                                )
-                                removed_unused += removed
-                            hidden_unused += self.hide_unused_parts(objects, prefab_table)
-                        hidden_lods += self.hide_prefab_lods(objects, prefab_table)
+                            unused |= unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
+                        if self.opts.skip_unused_parts:
+                            objects, removed = self.remove_unused(objects, unused)
+                            removed_unused += removed
+                        hidden_unused += self.hide_named(objects, unused)
+                        self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
+                        if summary.guid in inactive:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
+                            self.hide_named(objects, {o.name for o in objects})
+                        hidden_lods += self.hide_prefab_rows(objects, prefab_table)
                 if group.prefab is not None:
                     for message in prefab_warnings(
-                        hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods
+                        hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
+                        unmatched_parts=unmatched_parts,
                     ):
                         self.report.warn(f"prefab {group.prefab.pathname}: {message}")
             for scene_summary in scenes:
@@ -970,8 +1031,14 @@ class _ImportSession:
         if self.progress is not None:
             self.progress(fraction, message)
 
-    def build_model(self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before) -> list[bpy.types.Object]:
-        """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。"""
+    def build_model(
+        self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, before, with_parts: bool = False
+    ) -> list[bpy.types.Object]:
+        """モデルを 1 回読み込んでマテリアルを組み、作られたオブジェクトを返す。
+
+        名前を引けない Renderer の行がある表か、``with_parts`` なら、中のオブジェクトの fileID を計算して
+        ``last_matcher`` に置く（#31 / #172）。
+        """
         model = summary.entry
         model_info = summary.info
         self.imported_models.add(model.guid)
@@ -997,13 +1064,17 @@ class _ImportSession:
         fbx_names = [m.name for m in new_materials]
         mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
         prefab_table = prefab_table or {}
-        if has_pending_renderers(prefab_table):
-            # 表で名前を引けないモデルの中へのマテリアルの上書きは、対象の fileID を、読み込んだオブジェクトの名前と
-            # 親子関係から計算した fileID と突き合わせて当てる（#31。メッシュが 1 つだけならそれに当てる。#109）
+        pending = has_pending_renderers(prefab_table)
+        if pending or with_parts:
+            # 表で名前を引けないモデルの中への上書きは、対象の fileID を、読み込んだオブジェクトの名前と
+            # 親子関係から計算した fileID と突き合わせて当てる（#31 / #172）
             if model.guid not in self.node_names:
                 self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
             taken = {strip_numeric_suffix(name) for name in before["objects"]}
-            claims = object_claims(_model_objects(new["objects"]), native=self.node_names[model.guid], taken=taken)
+            self.last_matcher = PartMatcher(_model_objects(new["objects"]), native=self.node_names[model.guid], taken=taken)
+        if pending:
+            # メッシュが 1 つだけならそれに当てる（#109）
+            claims = self.last_matcher.renderer_ids
             prefab_table, unread = resolve_model_renderers(prefab_table, claims, [o.name for o in mesh_objects])
             if unread:
                 self.report.warn(
@@ -1132,17 +1203,21 @@ class _ImportSession:
                 self.report.outlines += added
         return new["objects"]
 
-    def import_model(self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target) -> list[bpy.types.Object]:
+    def import_model(
+        self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, with_parts: bool = False
+    ) -> list[bpy.types.Object]:
         """モデルを 1 回読み込む。途中で失敗したら、そのモデルで作ったものとレポートの行を消してから例外を送る（#70）。
 
-        読み込みは作業用のコレクションで行い、終わったら ``target`` へ移す（#75）。
+        読み込みは作業用のコレクションで行い、終わったら ``target`` へ移す（#75）。``with_parts`` なら、表示の上書きと削除を
+        当てるための ``last_matcher`` も作る（#172）。
         """
+        self.last_matcher = None
         before = _snapshot()
         rows = (self.report.models, self.report.objects, self.report.materials, self.report.images)
         counts = [len(items) for items in rows]
         known = summary.guid in self.imported_models
         try:
-            objects = self.build_model(summary, prefab_table, self.staging, before)
+            objects = self.build_model(summary, prefab_table, self.staging, before, with_parts)
             move_collection_contents(self.staging, target)
             return objects
         except Exception:
@@ -1156,8 +1231,9 @@ class _ImportSession:
             self.failed_models.add(summary.guid)
             raise
 
-    def hide_prefab_lods(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
-        """prefab の LODGroup で遠景用だったメッシュを隠し、隠した数を返す（#104）。
+    def hide_prefab_rows(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
+        """prefab で表示されていない Renderer（非アクティブな GameObject の下か、無効な Renderer。#177）と、LODGroup で
+        遠景用だったメッシュ（#104）を隠し、遠景用として隠した数を返す（表示されていないものは Unity と同じく数えない）。
 
         段はどのオブジェクトにも ``unity_lod`` として残すので、オプションを切っていても LOD0 かどうかは分かる。
         """
@@ -1169,7 +1245,9 @@ class _ImportSession:
             if rm is None:
                 continue
             obj["unity_lod"] = rm.lod_level
-            if rm.lod_level and self.opts.hide_lods:
+            if not rm.visible:
+                defer_hide(obj, self.hidden_objects)
+            elif rm.lod_level and self.opts.hide_lods:
                 defer_hide(obj, self.hidden_objects)
                 hidden += 1
         return hidden
@@ -1187,16 +1265,17 @@ class _ImportSession:
         self.report.objects[:] = [name for name in self.report.objects if name not in removed]
         return remove_parts(objects, removed), len(removed & unused)
 
-    def hide_unused_parts(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
-        """prefab が使っていない FBX の部品を隠し、隠した数を返す（Scenes 単位の #58 と同じ扱い。#151）。
+    def hide_named(self, objects: list[bpy.types.Object], names: set[str]) -> int:
+        """``names`` のオブジェクトを隠し、隠した数を返す（prefab が使っていない部品。#151 / #172）。
 
-        LOD として隠したものは数えない（表にある Renderer なので、ここでは対象にならない）。
+        使っていない部品を読み込まない設定でも、子孫に残すものがある部品は消さずに残るので、ここで隠す。
         """
-        unused = unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
+        hidden = 0
         for obj in objects:
-            if obj.name in unused:
+            if obj.name in names:
                 defer_hide(obj, self.hidden_objects)
-        return len(unused)
+                hidden += 1
+        return hidden
 
     def light_scale(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> float:
         """HDRP のシーンのグローバルな Volume の露出から、そのシーンの HDRP のライトに掛ける倍率を決める（#130）。
@@ -1257,6 +1336,8 @@ class _ImportSession:
         removed_unused = 0  # 同じく、読み込まなかった FBX の部品（#152）
         removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
         hidden_lods = 0  # LODGroup の遠景用の段として隠したオブジェクト
+        unmatched_parts = 0  # モデルの中への表示の上書き・削除で、当てられなかったもの（#172）
+        matchers: dict[tuple, PartMatcher | None] = {}  # テンプレートの key → 中のオブジェクトの fileID の計算
         count = len(scene_summary.placements)
         for index, placement in enumerate(scene_summary.placements):
             if index % 25 == 0:
@@ -1274,7 +1355,9 @@ class _ImportSession:
                 name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
                 for name, r in placement.renderers.items()
             }
-            key = placement.signature()
+            parts = placement.parts
+            # 消した中のオブジェクトは signature に入っている（テンプレートから消すため）
+            key = (placement.signature(), bool(parts))
             if self.opts.skip_unused_parts:
                 # 使われていない部品はテンプレートから消すので、それを決める値もテンプレートを使い回す条件に入れる
                 mesh_ids = tuple(sorted(r.mesh_file_id for r in placement.renderers.values()))
@@ -1282,13 +1365,17 @@ class _ImportSession:
             template = templates.get(key)
             if template is None:
                 try:
-                    objects = self.import_model(summary, table, target)
+                    objects = self.import_model(summary, table, target, with_parts=bool(parts))
                 except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
                     _record_failure(self.report, f"scene {pathname}: could not import {summary.entry.pathname}: {exc}")
                     continue
+                matchers[key] = self.last_matcher
                 if self.opts.skip_unused_parts:
-                    # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）
+                    # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）。
+                    # シーン・prefab がモデルの中から消したオブジェクトも Unity に無いので、同じく消す（#172）
                     unused = unused_in_placement(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
+                    if parts and self.last_matcher is not None:
+                        unused |= self.last_matcher.match(parts).removed
                     objects, removed_by_key[key] = self.remove_unused(objects, unused)
                 template = templates[key] = SceneTemplate.capture(objects)
             else:
@@ -1321,12 +1408,22 @@ class _ImportSession:
             hidden = parts_to_hide(
                 hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods
             )
+            # モデルの中への表示の上書きと削除（#172）。fileID はテンプレートのオブジェクトの名前で計算してあるので、
+            # 複製した配置では並び順で対応させる
+            matcher = matchers.get(key)
+            match = matcher.match(parts) if parts and matcher is not None else PartMatch()
+            unmatched_parts += match.unmatched
+            own = {t.name: o.name for t, o in zip(template.objects, objects)}
+            removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
+            hide_here = {own[n] for n in match.hidden if n in own} | removed_here
             for obj in objects:
                 if obj.name in hidden.lods:
                     obj["unity_lod"] = hidden.lods[obj.name]
-                if obj.name in hidden.names:
+                if obj.name in hidden.names or obj.name in hide_here:
                     defer_hide(obj, self.hidden_objects)
             hidden_unused += hidden.unused
+            if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
+                hidden_unused += len(removed_here - hidden.names)
             if placement.active:  # 非アクティブな配置は、隠したときと同じく数えない
                 removed_unused += removed_by_key.get(key, 0)
             hidden_lods += hidden.hidden_lods
@@ -1371,7 +1468,7 @@ class _ImportSession:
         for message in scene_warnings(
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
             hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
-            skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets,
+            skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets, unmatched_parts=unmatched_parts,
         ):
             self.report.warn(message)
 

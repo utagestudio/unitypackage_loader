@@ -18,13 +18,14 @@ SkinnedMeshRenderer の ``m_Mesh``）の GUID で決める。パッケージ内�
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .hierarchy import (
     CLASS_MESH_RENDERER,
     Hierarchy,
     ModelNames,
     ModelPlacement,
+    PartState,
     built_from_renderers,
     pending_renderer_id,
     placements,
@@ -41,6 +42,8 @@ class RendererMaterials:
     mesh_guid: str | None = None  # メッシュを持つアセット（モデル）の GUID
     mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
     lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
+    # prefab で表示されているか（GameObject が祖先も含めてアクティブで、Renderer が有効。読み込む単位 Prefabs で隠す。#177）
+    visible: bool = True
 
 
 def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
@@ -65,6 +68,18 @@ def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> Rendere
     return candidates[0] if len(candidates) == 1 else None
 
 
+def parts_from_placements(placed: Iterable[ModelPlacement]) -> dict[str, dict[str, PartState]]:
+    """モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（``ModelPlacement.parts``。#172）。
+
+    読み込む単位 Prefabs ではモデルを 1 回だけ読み込むので、同じモデルの配置が複数あれば先の配置のものを採る。
+    """
+    result: dict[str, dict[str, PartState]] = {}
+    for placement in placed:
+        if placement.parts and placement.model_guid not in result:
+            result[placement.model_guid] = dict(placement.parts)
+    return result
+
+
 def tables_from_hierarchy(
     h: Hierarchy,
     model_names: ModelNames,
@@ -76,23 +91,40 @@ def tables_from_hierarchy(
     ``model_names`` と ``name_tables`` は ``hierarchy.placements`` と同じ（モデルの GUID → ルートの名前、.meta の表）。
     同じモデルに同名の GameObject があれば先のもの（配置の順）を採用する。モデルをそのまま置いた PrefabInstance は、
     中へのマテリアルの上書き（名前で引けたものと、対象の fileID で残したもの）だけが表に入る。1 つも無ければ表に入れない
-    （FBX を置いただけの prefab を、モデルを使う prefab として数えない）。
+    （FBX を置いただけの prefab を、モデルを使う prefab として数えない）。中のオブジェクトの表示を上書き・削除していれば
+    （``ModelPlacement.parts``）、空の表で入れる（#172）。
     ``placed`` に ``placements`` の結果を渡すと、配置を求め直さない。
+
+    ``visible`` は、その Renderer が prefab で表示されているか（非アクティブな配置・GameObject の下や、無効な Renderer
+    なら False）。同名の行が複数の配置にあれば、どれかで表示されていれば表示する（#177）。
     """
     result: dict[str, dict[str, RendererMaterials]] = {}
     for placement in placed if placed is not None else placements(h, model_names, name_tables):
-        if not placement.renderers:
+        if not placement.renderers and not placement.parts:
             continue
         table = result.setdefault(placement.model_guid, {})
         for name, renderer in placement.renderers.items():
-            table.setdefault(
-                name,
-                RendererMaterials(
-                    name, list(renderer.materials), renderer.renderer_class, placement.model_guid,
-                    renderer.mesh_file_id, renderer.lod_level,
-                ),
+            visible = placement.active and renderer.visible
+            row = table.get(name)
+            if row is not None:
+                row.visible = row.visible or visible
+                continue
+            table[name] = RendererMaterials(
+                name, list(renderer.materials), renderer.renderer_class, placement.model_guid,
+                renderer.mesh_file_id, renderer.lod_level, visible,
             )
     return result
+
+
+def inactive_models(placed: list[ModelPlacement]) -> set[str]:
+    """prefab の中の配置がすべて非アクティブなモデルの GUID（読み込む単位 Prefabs で、すべての部品を隠す。#177）。
+
+    非アクティブな GameObject の下に FBX を丸ごと置いたときなど。表の行が無くても隠せるよう、行とは別に求める。
+    """
+    active: dict[str, bool] = {}
+    for placement in placed:
+        active[placement.model_guid] = active.get(placement.model_guid, False) or placement.active
+    return {guid for guid, is_active in active.items() if not is_active}
 
 
 def models_placed_whole(h: Hierarchy, placed: list[ModelPlacement]) -> set[str]:
@@ -148,15 +180,12 @@ def _merge_into(result: dict[str, RendererMaterials], name: str, row: RendererMa
     """``row`` のマテリアルをオブジェクト ``name`` の行にする。名前で引けた行があれば、その空いたスロットだけを埋める。"""
     named = find_renderer(result, name)
     if named is None:
-        result[name] = RendererMaterials(name, list(row.materials), row.renderer_class, row.mesh_guid)
+        result[name] = RendererMaterials(name, list(row.materials), row.renderer_class, row.mesh_guid, visible=row.visible)
         return
     size = max(len(named.materials), len(row.materials))
     own = named.materials + [None] * (size - len(named.materials))
     other = row.materials + [None] * (size - len(row.materials))
-    result[named.game_object] = RendererMaterials(
-        named.game_object, [a or b for a, b in zip(own, other)], named.renderer_class, named.mesh_guid,
-        named.mesh_file_id, named.lod_level,
-    )
+    result[named.game_object] = replace(named, materials=[a or b for a, b in zip(own, other)])
 
 
 def resolve_model_renderers(

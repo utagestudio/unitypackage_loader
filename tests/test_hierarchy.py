@@ -15,14 +15,17 @@ from unitypackage_loader.core.hierarchy import (
     components,
     Hierarchy,
     Node,
+    PartState,
     effective_active,
     parse_asset,
+    pending_object,
     pending_renderer,
     placements,
     summarize,
     world_matrices,
 )
 from unitypackage_loader.core.transform import transform_point, unity_to_blender
+from unitypackage_loader.core import unity_ids
 
 MODEL = "a" * 32
 NESTED = "b" * 32
@@ -434,6 +437,148 @@ class ModelRootTest(unittest.TestCase):
         self.assertEqual(set(self.by_root("Wall").renderers), {"Wall", "Wall_LOD1"})
 
 
+class NodeRootWithoutOwnRendererTest(unittest.TestCase):
+    """FBX のノードを配置のルートにしたら、Renderer の有無や並び順によらずノードを単位行列にする（Issue #183）。
+
+    以前は、配置を作るときに最初に見た Renderer がルートの GameObject 自身のときだけ単位行列にしていた。
+    Japanese Train Station の改札（ルートは Renderer の無い FBX の Empty）と時計（子の針の Renderer を先に見る）で、
+    ノードの FBX の中での変換が残っていた。
+    """
+
+    KIT = "f" * 32
+    TABLE = {KIT: {
+        100000: "//RootNode", 100002: "Gate", 100004: "Leaf", 100006: "Clock", 100008: "Hand",
+        4300000: "Leaf", 4300002: "Clock", 4300004: "Hand",
+    }}
+    SCENE = HEADER + "".join([
+        # Renderer の無い FBX のノードがルート（シーンに FBX を展開して置いたもの）
+        game_object(20, "Gate (1)"),
+        transform(21, 20, pos=(1, 0, 0)),
+        game_object(30, "Leaf"),
+        transform(31, 30, father=21, pos=(0, 0.5, 0)),
+        mesh_renderer(32, 33, 30, KIT, MAT_A, mesh_file_id=4300000),
+        # 子の Renderer が先に来る、Renderer のあるルート
+        game_object(50, "Hand"),
+        transform(51, 50, father=41, pos=(0, -0.2, 0)),
+        mesh_renderer(52, 53, 50, KIT, MAT_A, mesh_file_id=4300004),
+        game_object(40, "Clock"),
+        transform(41, 40, pos=(2, 0, 0)),
+        mesh_renderer(42, 43, 40, KIT, MAT_A, mesh_file_id=4300002),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.hierarchy = Expander(lambda guid: None, {cls.KIT: "Kit"}).expand_raw(parse_asset(cls.SCENE))
+        cls.placements = placements(cls.hierarchy, {cls.KIT: "Kit"}, cls.TABLE)
+
+    def by_root(self, name):
+        return next(p for p in self.placements if self.hierarchy.nodes[p.root].name == name)
+
+    def test_node_without_renderer(self):
+        gate = self.by_root("Gate (1)")
+        self.assertEqual(set(gate.renderers), {"Leaf"})
+        self.assertEqual(gate.node_transforms, {"Gate": self.IDENTITY})
+
+    def test_child_renderer_seen_first(self):
+        clock = self.by_root("Clock")
+        self.assertEqual(set(clock.renderers), {"Clock", "Hand"})
+        self.assertEqual(clock.node_transforms, {"Clock": self.IDENTITY})
+
+
+class CollapsedTopNodeTest(unittest.TestCase):
+    """FBX の最上位のノードが 1 つだけなら、子があっても Unity はそれをルートに畳む（Issue #185）。
+
+    FBX を展開した GameObject のルートの行列はノードの変換を含むので、そのノードを単位行列にする。
+    Synty の ``SM_Gen_Prop_Switch_01``（本体の下にスティック。本体のノードが原点から 1.3 cm 離れている）。
+    """
+
+    SWITCH = "a1" * 16
+    SWITCH_MESH = unity_ids.mesh_file_id("Switch")
+    STICK_MESH = unity_ids.mesh_file_id("Stick")
+    SCENE = HEADER + "".join([
+        game_object(10, "Switch"),
+        transform(11, 10, pos=(1, 0, 0)),
+        mesh_renderer(12, 13, 10, SWITCH, MAT_A, mesh_file_id=SWITCH_MESH),
+        game_object(20, "Stick"),
+        transform(21, 20, father=11, pos=(0, 0, -0.013)),
+        mesh_renderer(22, 23, 20, SWITCH, MAT_A, mesh_file_id=STICK_MESH),
+        # 名前を変えたルート（メッシュ参照で判定する）
+        game_object(30, "Lever"),
+        transform(31, 30, pos=(2, 0, 0)),
+        mesh_renderer(32, 33, 30, SWITCH, MAT_A, mesh_file_id=SWITCH_MESH),
+        # シーンで作った入れ物の下にスティックだけ（ルートは最上位のノードではない）
+        game_object(40, "Panel"),
+        transform(41, 40, pos=(3, 0, 0)),
+        game_object(50, "Stick"),
+        transform(51, 50, father=41),
+        mesh_renderer(52, 53, 50, SWITCH, MAT_A, mesh_file_id=STICK_MESH),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    def place(self, top_nodes):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        placed = placements(h, {self.SWITCH: "Switch"}, {self.SWITCH: {}}, None, top_nodes)
+        return {h.nodes[p.root].name: p for p in placed}
+
+    def test_collapsed_top_node_is_reset(self):
+        placed = self.place({self.SWITCH: "Switch"})
+        self.assertEqual(set(placed["Switch"].renderers), {"Switch", "Stick"})
+        self.assertEqual(placed["Switch"].node_transforms, {"Switch": self.IDENTITY})
+        self.assertEqual(placed["Lever"].node_transforms, {"Switch": self.IDENTITY})
+        self.assertEqual(placed["Panel"].node_transforms, {})
+
+    def test_without_the_top_node_nothing_changes(self):
+        placed = self.place(None)
+        self.assertTrue(all(p.node_transforms == {} for p in placed.values()))
+
+
+class SoleNodeWithoutTableTest(unittest.TestCase):
+    """表の無いモデルでも、FBX のノードが 1 つだけなら、表のある 1 メッシュの FBX と同じに置く（Issue #181）。
+
+    Unity はノードを ``//RootNode`` に畳むので、メッシュを直接指す Renderer にはノードの変換が掛からない。表が無いと
+    1 メッシュの FBX か分からず、最上位の祖先にまとめてノードの変換を残していた（UnityJapanOffice のクッション）。
+    """
+
+    BARE = "e" * 32  # 表の無い 1 メッシュの FBX
+    MESH_ID = 1234567890123  # 新しい形式ではメッシュの fileID は名前のハッシュ
+    SCENE = HEADER + "".join([
+        game_object(10, "Sofa"),
+        transform(11, 10),
+        game_object(20, "Cushion_A"),
+        transform(21, 20, father=11, pos=(1, 0, 0)),
+        mesh_renderer(22, 23, 20, BARE, MAT_A, mesh_file_id=MESH_ID),
+        game_object(30, "Cushion_A (1)"),
+        transform(31, 30, father=11, pos=(2, 0, 0)),
+        mesh_renderer(32, 33, 30, BARE, MAT_A, mesh_file_id=MESH_ID),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    def place(self, sole_nodes=None):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        return h, placements(h, {self.BARE: "Cushion"}, {self.BARE: {}}, sole_nodes)
+
+    def test_each_renderer_is_its_own_root_with_the_node_reset(self):
+        h, placed = self.place({self.BARE: "Cushion"})
+        self.assertEqual([h.nodes[p.root].name for p in placed], ["Cushion_A", "Cushion_A (1)"])
+        for placement in placed:
+            self.assertEqual(set(placement.renderers), {"Cushion"})  # ノード名（= Blender のオブジェクト名）で引く
+            self.assertEqual(placement.node_transforms, {"Cushion": self.IDENTITY})
+            self.assertEqual(placement.root_node, "")
+        self.assertEqual([round(v, 6) for v in transform_point(placed[1].world, (0, 0, 0))], [2, 0, 0])
+
+    def test_without_the_node_name_the_top_ancestor_is_used(self):
+        h, placed = self.place()
+        self.assertEqual([h.nodes[p.root].name for p in placed], ["Sofa"])
+        self.assertEqual(placed[0].node_transforms, {})
+
+    def test_a_model_with_a_table_ignores_the_node_name(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        table = {self.BARE: {100000: "//RootNode", 100002: "Seat", 100004: "Back", self.MESH_ID: "Seat"}}
+        placed = placements(h, {self.BARE: "Cushion"}, table, {self.BARE: "Cushion"})
+        self.assertTrue(all("Cushion" not in p.node_transforms for p in placed))
+
+
 class CollapsedModelRootTest(unittest.TestCase):
     """1 メッシュの FBX をモデルの PrefabInstance で置いた配置（Issue #99）。
 
@@ -592,6 +737,91 @@ class LegacyFormatTest(unittest.TestCase):
         flower = next(n for n in h.nodes.values() if n.name == "Flower")
         self.assertEqual(h.nodes[flower.parent].name, "Pot")
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+
+def instance_with_removals(file_id, source, parent, mods, removed_components=(), removed_game_objects=()):
+    def refs(items):
+        return "".join(f"    - {{fileID: {f}, guid: {source}, type: 3}}\n" for f in items) if items else ""
+    return (
+        f"--- !u!1001 &{file_id}\nPrefabInstance:\n  m_Modification:\n"
+        f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
+        f"    m_RemovedComponents:{' []' if not removed_components else ''}\n{refs(removed_components)}"
+        f"    m_RemovedGameObjects:{' []' if not removed_game_objects else ''}\n{refs(removed_game_objects)}"
+        f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
+    )
+
+
+class ModelPartsTest(unittest.TestCase):
+    """モデルの PrefabInstance の中のオブジェクトへの、表示の上書きと削除（Issue #172）。
+
+    表の無いモデルでは対象の fileID ごとに ``PartState`` として残し、読み込み側が fileID の計算で突き合わせる。
+    """
+
+    def test_overrides_on_a_model_instance_are_recorded(self):
+        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+            mod(111, MODEL, "m_IsActive", 0),
+            mod(222, MODEL, "m_IsActive", 1),  # 既定値を書いただけでも記録する（見た目を変えるかは読み込み側が決める）
+            mod(333, MODEL, "m_Enabled", 0),
+            mod(666, MODEL, "m_LocalPosition.x", 1),  # 位置は読まずに数える
+            mod(ROOT_GAME_OBJECT, MODEL, "m_IsActive", 0),  # ルートは配置そのもの
+        ], removed_components=[555], removed_game_objects=[444])
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {
+            pending_object(111): PartState(active=False),
+            pending_object(222): PartState(active=True),
+            pending_renderer(333): PartState(enabled=False),
+            pending_object(444): PartState(removed_object=True),
+            pending_renderer(555): PartState(removed_renderer=True),
+        })
+        self.assertFalse(placement.active)
+        self.assertEqual(h.unresolved_overrides, 1)
+        # 消したものはテンプレートから消すので、使い回しの判定に入る
+        self.assertIn((pending_object(444), pending_renderer(555)), placement.signature())
+
+    def test_overrides_through_a_prefab_reach_the_model(self):
+        # prefab の中にモデルを置き、シーンが prefab の上から中のオブジェクトを指す（PrefabInstance の fileID XOR 中の fileID）
+        prefab = HEADER + game_object(10, "Holder") + transform(11, 10) + instance_with_removals(20, MODEL, 11, [
+            mod(111, MODEL, "m_IsActive", 0),
+        ])
+        scene = HEADER + instance_with_removals(3000, NESTED, 0, [
+            mod(20 ^ 111, NESTED, "m_IsActive", 1),  # prefab で隠したものを、シーンで表示し直す
+            mod(20 ^ 222, NESTED, "m_IsActive", 0),
+            mod(20 ^ 333, NESTED, "m_Enabled", 0),
+        ], removed_components=[20 ^ 555], removed_game_objects=[20 ^ 444])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {
+            pending_object(111): PartState(active=True),
+            pending_object(222): PartState(active=False),
+            pending_renderer(333): PartState(enabled=False),
+            pending_object(444): PartState(removed_object=True),
+            pending_renderer(555): PartState(removed_renderer=True),
+        })
+
+    def test_recycle_table_names_the_parts(self):
+        table = {100000: "//RootNode", 400000: "//RootNode", 100002: "Lid", 400002: "Lid", 2300002: "Lid", 4300002: "Lid"}
+        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+            mod(100002, MODEL, "m_IsActive", 0),
+            mod(2300002, MODEL, "m_Enabled", 0),
+            mod(100004, MODEL, "m_IsActive", 0),  # 表に無い
+        ], removed_components=[6500002])  # コライダー（Renderer でない）
+        h = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table}).expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {"Lid": PartState(active=False, enabled=False)})
+        self.assertEqual(h.unresolved_overrides, 2)
+
+
+class MeshColliderTest(unittest.TestCase):
+    def test_mesh_collider_meshes_are_collected(self):
+        # 当たり判定用のメッシュを指す MeshCollider（Synty の Collision/ の FBX。#166）
+        prefab = HEADER + game_object(10, "Fence") + transform(11, 10) + (
+            "--- !u!64 &12\nMeshCollider:\n  m_GameObject: {fileID: 10}\n"
+            f"  m_Mesh: {{fileID: 4300000, guid: {MODEL}, type: 3}}\n"
+            "--- !u!64 &13\nMeshCollider:\n  m_GameObject: {fileID: 10}\n  m_Mesh: {fileID: 0}\n"
+        )
+        self.assertEqual(parse_asset(prefab).collider_meshes, {MODEL})
 
 
 class ComponentTest(unittest.TestCase):

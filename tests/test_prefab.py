@@ -1,6 +1,7 @@
 import unittest
 
 from tests import _paths  # noqa: F401
+from tests.test_hierarchy import HEADER, game_object, instance, mesh_renderer, transform
 from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
@@ -9,14 +10,21 @@ from unitypackage_loader.core.hierarchy import (
     NAMED_MODEL_ROOT_GAME_OBJECT,
     NAMED_MODEL_ROOT_TRANSFORM,
     Expander,
+    ModelPlacement,
+    PartState,
+    PlacedRenderer,
     parse_asset,
+    pending_object,
     pending_renderer,
     placements,
 )
+from unitypackage_loader.core.transform import IDENTITY
 from unitypackage_loader.core.prefab import (
     RendererMaterials,
     merge_prefab_tables,
+    inactive_models,
     models_placed_whole,
+    parts_from_placements,
     resolve_model_renderers,
     tables_from_hierarchy,
     unused_parts,
@@ -351,6 +359,14 @@ class PrefabVariantTests(unittest.TestCase):
         resolvable = expand(VARIANT, {BASE: PREFAB, VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])})
         self.assertEqual(resolvable.unresolved_overrides, 0)
 
+    def test_visibility_overrides_on_model_objects_are_kept_by_file_id(self):
+        # Synty の SM_Gen_Chr_Underwear_Female_01: FBX を丸ごと置き、27 体のうち 26 体を非アクティブにする（#172）
+        h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_IsActive", "0", None)])})
+        self.assertEqual(h.unresolved_overrides, 0)
+        placed = placements(h, MODELS)
+        self.assertEqual(tables_from_hierarchy(h, MODELS, placed=placed), {MODEL_A: {}})  # 表示の上書きだけでもモデルを使う
+        self.assertEqual(parts_from_placements(placed), {MODEL_A: {pending_object(123456789): PartState(active=False)}})
+
     def test_material_overrides_on_a_model_object_are_kept_by_file_id(self):
         target = -7511558181221131132
         h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [
@@ -448,6 +464,60 @@ class PrefabVariantTests(unittest.TestCase):
         other = pending_renderer(22)
         two = {**table, other: RendererMaterials(other, [MAT_A])}
         self.assertEqual(resolve_model_renderers(two, {}, ["Body"]), ({}, 3))  # 対象が 2 つあるなら Renderer も 2 つあったはず
+
+
+class PrefabVisibilityTests(unittest.TestCase):
+    """prefab 自身の中の非アクティブな GameObject と無効な Renderer（Issue #177）。
+
+    Synty のキャラクターの展開済み prefab は、27 体分の GameObject を持ち、自分以外を非アクティブにしている。
+    """
+
+    PREFAB = HEADER + "".join([
+        game_object(10, "Character"),
+        transform(11, 10),
+        game_object(20, "Chr_Business"),
+        transform(21, 20, father=11),
+        mesh_renderer(22, 23, 20, MODEL_A, MAT_A, mesh_file_id=4300000),
+        game_object(30, "Others", active=0),
+        transform(31, 30, father=11),
+        game_object(40, "Chr_Street"),  # 自分はアクティブだが、親が非アクティブ
+        transform(41, 40, father=31),
+        mesh_renderer(42, 43, 40, MODEL_A, MAT_A, mesh_file_id=4300002),
+        game_object(50, "Chr_Robot"),
+        transform(51, 50, father=11),
+        mesh_renderer(52, 53, 50, MODEL_A, MAT_A, mesh_file_id=4300004).replace("m_Enabled: 1", "m_Enabled: 0"),
+        # 非アクティブな GameObject の下に、別のモデルを丸ごと置く
+        game_object(60, "Spare", active=0),
+        transform(61, 60, father=11),
+        instance(70, MODEL_B, 61, []),
+    ])
+
+    def setUp(self):
+        self.h = expand(BASE, {BASE: self.PREFAB})
+        self.placed = placements(self.h, MODELS)
+
+    def test_rows_know_whether_they_are_shown(self):
+        table = tables_from_hierarchy(self.h, MODELS, placed=self.placed)[MODEL_A]
+        self.assertEqual({name: rm.visible for name, rm in table.items()},
+                         {"Chr_Business": True, "Chr_Street": False, "Chr_Robot": False})
+
+    def test_models_placed_only_under_inactive_objects(self):
+        self.assertEqual(inactive_models(self.placed), {MODEL_B})
+
+    def test_a_row_shown_in_any_placement_is_shown(self):
+        # 同じモデルを 2 か所に置き、片方だけ非アクティブ（Prefabs 単位ではモデルを 1 回だけ読み込む）
+        def placement(active, visible):
+            return ModelPlacement(MODEL_A, 0, IDENTITY, active, {"Body": PlacedRenderer("Body", [MAT_A], 23, visible)})
+
+        for placed in ([placement(False, True), placement(True, True)], [placement(True, False), placement(True, True)]):
+            table = tables_from_hierarchy(self.h, MODELS, placed=placed)[MODEL_A]
+            self.assertTrue(table["Body"].visible)
+            self.assertEqual(inactive_models(placed), set())
+
+    def test_resolved_rows_keep_their_visibility(self):
+        table = {"Body": RendererMaterials("Body", [MAT_A], visible=False), pending_renderer(5): RendererMaterials(pending_renderer(5), [None, MAT_B])}
+        resolved, _ = resolve_model_renderers(table, {5: "Body"}, ["Body"])
+        self.assertEqual((resolved["Body"].materials, resolved["Body"].visible), ([MAT_A, MAT_B], False))
 
 
 class MergeByMeshTests(unittest.TestCase):

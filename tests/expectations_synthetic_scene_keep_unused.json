@@ -20,10 +20,25 @@
       "top": "Partial",
       "object": "Skinned",
       "hidden": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallCollider",
+      "hidden": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallFlag",
+      "hidden": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallSign",
+      "hidden": false
     }
   ],
   "warnings_contain": [
-    "scene Assets/Synthetic/Scenes/Probe.unity: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
     "scene Assets/Synthetic/Scenes/Legacy.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
   ],
   "warnings_exclude": [

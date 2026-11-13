@@ -57,6 +57,9 @@ def _release_prepared() -> None:
         _pending.prepared = None
 
 
+COLLIDER_ONLY_NOTE = "collider only"  # prefab の MeshCollider だけが使うモデルの行に出す（#166）
+
+
 def _short_reason(reason: str) -> str:
     """行の右端に出す、読み込めない理由の短い表記。"""
     from ..blender.importer import BLEND_DISABLED_REASON, COLLADA_UNAVAILABLE_REASON
@@ -122,6 +125,39 @@ def _add_scene_items(items, prepared) -> None:
         item.supported = s.supported
         item.selected = s.supported and not chosen
         chosen = chosen or s.supported
+
+
+def _add_prefab_and_model_items(items, prepared) -> None:
+    """prefab とモデルを候補に加える。読み込めるものには既定でチェックを入れる。
+
+    当たり判定用のメッシュ（prefab の MeshCollider だけが使うモデル）は、候補には残して理由を出し、既定のチェックだけ外す
+    （Models で読み込むと白い箱や板が重なるため。推測で一覧から外すことはしない。#166）。
+    """
+    for p in prepared.prefabs:
+        item = items.add()
+        item.kind = UNIT_PREFABS
+        item.guid = p.guid
+        item.pathname = sanitize_display(p.pathname)
+        if p.supported:
+            item.detail_text = f"{_plural(len(p.model_guids), 'model')} · {len(p.material_guids)} mat"
+        else:
+            item.detail_text = _short_reason(p.skip_reason)
+        item.supported = p.supported
+        item.selected = p.supported
+    for m in prepared.models:
+        item = items.add()
+        item.kind = UNIT_MODELS
+        item.guid = m.guid
+        item.pathname = sanitize_display(m.entry.pathname)
+        item.size_text = human_size(m.entry.size)
+        if not m.supported:
+            item.detail_text = _short_reason(m.skip_reason)
+        elif m.collider_only:
+            item.detail_text = COLLIDER_ONLY_NOTE
+        else:
+            item.detail_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
+        item.supported = m.supported
+        item.selected = m.supported and not m.collider_only
 
 
 def _on_unit_changed(self, context):
@@ -213,29 +249,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         prepared = _pending.prepared
         items = _items(context)
         items.clear()
-        for p in prepared.prefabs:
-            item = items.add()
-            item.kind = UNIT_PREFABS
-            item.guid = p.guid
-            item.pathname = sanitize_display(p.pathname)
-            if p.supported:
-                item.detail_text = f"{_plural(len(p.model_guids), 'model')} · {len(p.material_guids)} mat"
-            else:
-                item.detail_text = _short_reason(p.skip_reason)
-            item.supported = p.supported
-            item.selected = p.supported
-        for m in prepared.models:
-            item = items.add()
-            item.kind = UNIT_MODELS
-            item.guid = m.guid
-            item.pathname = sanitize_display(m.entry.pathname)
-            item.size_text = human_size(m.entry.size)
-            if m.supported:
-                item.detail_text = f"{m.resolved_count}/{m.material_count} mat" if m.material_count else "no mat info"
-            else:
-                item.detail_text = _short_reason(m.skip_reason)
-            item.supported = m.supported
-            item.selected = m.supported
+        _add_prefab_and_model_items(items, prepared)
 
         wm = context.window_manager
         prefs = get_prefs(context)

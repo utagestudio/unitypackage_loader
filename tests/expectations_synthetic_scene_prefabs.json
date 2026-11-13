@@ -66,12 +66,71 @@
           "hidden": false
         }
       }
+    },
+    "Stall": {
+      "prefab": "Assets/Synthetic/Prefabs/Stall.prefab",
+      "objects": 5,
+      "parts": {
+        "StallBase": {
+          "hidden": false
+        },
+        "StallSign": {
+          "hidden": true
+        },
+        "StallTop": {
+          "hidden": true
+        },
+        "StallAwning": {
+          "hidden": true
+        },
+        "StallFlag": {
+          "hidden": true
+        },
+        "StallCollider": {
+          "absent": true
+        }
+      }
+    },
+    "StallSpare": {
+      "prefab": "Assets/Synthetic/Prefabs/StallSpare.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase.001": {
+          "hidden": true
+        },
+        "StallSign.001": {
+          "hidden": true
+        },
+        "StallTop.001": {
+          "hidden": true
+        }
+      }
+    },
+    "StallUnpacked": {
+      "prefab": "Assets/Synthetic/Prefabs/StallUnpacked.prefab",
+      "objects": 4,
+      "parts": {
+        "StallBase.002": {
+          "hidden": false
+        },
+        "StallSign.002": {
+          "hidden": true
+        },
+        "StallAwning.002": {
+          "hidden": true
+        },
+        "StallCollider.002": {
+          "absent": true
+        }
+      }
     }
   },
-  "warnings_max": 6,
+  "warnings_max": 9,
   "warnings_contain": [
     "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
-    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported"
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 visibility override(s) or removal(s) on objects inside a model could not be matched"
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "
@@ -90,5 +149,18 @@
       "alpha_mode": "cutout",
       "smoothness_scale": null
     }
-  ]
+  ],
+  "dialog_selected": {
+    "MODELS": [
+      "Assets/Synthetic/Models/Booth.fbx",
+      "Assets/Synthetic/Models/Kiosk.fbx",
+      "Assets/Synthetic/Models/Probe.fbx",
+      "Assets/Synthetic/Models/Rings.fbx",
+      "Assets/Synthetic/Models/Slab.fbx",
+      "Assets/Synthetic/Models/SlabBare.fbx",
+      "Assets/Synthetic/Models/SlabKnob.fbx",
+      "Assets/Synthetic/Models/Stall.fbx",
+      "Assets/Synthetic/Models/Tower.fbx"
+    ]
+  }
 }

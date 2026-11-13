@@ -43,10 +43,59 @@
           "hidden": false
         }
       }
+    },
+    "Stall": {
+      "prefab": "Assets/Synthetic/Prefabs/Stall.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase": {
+          "hidden": false
+        },
+        "StallCollider": {
+          "hidden": true
+        },
+        "StallFlag": {
+          "hidden": true
+        }
+      }
+    },
+    "StallSpare": {
+      "prefab": "Assets/Synthetic/Prefabs/StallSpare.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase.001": {
+          "hidden": true
+        },
+        "StallSign.001": {
+          "hidden": true
+        },
+        "StallTop.001": {
+          "hidden": true
+        }
+      }
+    },
+    "StallUnpacked": {
+      "prefab": "Assets/Synthetic/Prefabs/StallUnpacked.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase.002": {
+          "hidden": false
+        },
+        "StallSign.002": {
+          "hidden": true
+        },
+        "StallAwning.002": {
+          "hidden": true
+        },
+        "StallCollider.002": {
+          "hidden": true
+        }
+      }
     }
   },
   "warnings_contain": [
-    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
   ],
   "warnings_exclude": [
     "were not imported"

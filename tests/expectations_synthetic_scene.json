@@ -120,6 +120,29 @@
       ]
     },
     {
+      "top": "SlabBareRoot",
+      "object": "Slab",
+      "tip": [
+        -2.9936,
+        -24.0163,
+        1.011
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "SlabKnobRoot",
+      "object": "Slab",
+      "tip": [
+        -2.9936,
+        -34.0163,
+        1.011
+      ],
+      "hidden": false
+    },
+    {
       "top": "SlabInstance",
       "object": "Slab",
       "tip": [
@@ -280,6 +303,36 @@
       "mat_files": [
         "ProbeRed.mat"
       ]
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallBase",
+      "hidden": false
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallSign",
+      "hidden": false
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallTop",
+      "hidden": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallAwning",
+      "hidden": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallCollider",
+      "absent": true
+    },
+    {
+      "top": "StallRoot",
+      "object": "StallFlag",
+      "absent": true
     }
   ],
   "shared_meshes": [
@@ -440,7 +493,9 @@
     }
   ],
   "warnings_contain": [
-    "Booth.fbx: 1 material override(s) on objects inside the model could not be matched"
+    "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 1 visibility override(s) or removal(s) on objects inside a model could not be matched"
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "

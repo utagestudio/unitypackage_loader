@@ -19,7 +19,8 @@
 - 元がモデル（FBX 等）の PrefabInstance は、モデルのルートを表す 1 つの Node にする。ルートの Transform の fileID は
   FBX によらず定数（.meta の世代で 2 通り）なので上書きを当てられる。中のオブジェクトの fileID は名前と階層パスの
   ハッシュで、ここでは名前に結び付けられない。マテリアルの上書きは対象の fileID ごとに残して読み込み側が突き合わせ
-  （``pending_renderer``）、それ以外は読まずに数える（Issue #31）。
+  （``pending_renderer``。Issue #31）、表示（``m_IsActive`` / ``m_Enabled``）の上書きと削除も同じく対象ごとに
+  ``PartState`` として残す（``pending_object``。Issue #172）。位置などそれ以外は読まずに数える。
 - Unity 2018.2 以前の形式も読む。PrefabInstance はクラス名が ``Prefab`` で元を ``m_ParentPrefab`` に持ち、
   stripped ドキュメントの参照は ``m_PrefabParentObject`` / ``m_PrefabInternal``、モデルのルートの fileID は
   GameObject 100000 / Transform 400000。
@@ -44,6 +45,7 @@ from typing import NamedTuple
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
+from .unity_ids import mesh_file_id as _mesh_file_id
 from .unity_yaml import UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
@@ -51,6 +53,7 @@ CLASS_TRANSFORM = 4
 CLASS_CAMERA = 20
 CLASS_MESH_RENDERER = 23
 CLASS_MESH_FILTER = 33
+CLASS_MESH_COLLIDER = 64
 CLASS_LIGHT = 108
 CLASS_SKINNED_MESH_RENDERER = 137
 CLASS_LOD_GROUP = 205
@@ -100,6 +103,41 @@ def pending_renderer_id(name: str) -> int | None:
     if not name.startswith(_PENDING_RENDERER):
         return None
     return int(name[len(_PENDING_RENDERER):])
+
+
+# 同じく、名前を引けなかった GameObject への表示の上書き・削除を記録する名前の接頭辞（#172）
+_PENDING_OBJECT = "\x00object:"
+
+
+def pending_object(uid: int) -> str:
+    """名前を引けなかった GameObject（fileID の上位ビットを落とした値）の行の名前。"""
+    return f"{_PENDING_OBJECT}{uid}"
+
+
+def pending_object_id(name: str) -> int | None:
+    """``pending_object`` の名前なら、その fileID。ふつうの名前なら None。"""
+    if not name.startswith(_PENDING_OBJECT):
+        return None
+    return int(name[len(_PENDING_OBJECT):])
+
+
+@dataclass
+class PartState:
+    """モデルの PrefabInstance の中のオブジェクトへの、表示の上書きと削除（#172）。
+
+    key（``Node.model_parts`` / ``ModelPlacement.parts``）は、古い形式の .meta の表で引いた名前か、
+    ``pending_object`` / ``pending_renderer`` の名前。古い形式では GameObject と Renderer が同じ名前になるので、
+    どちらへのものかをフィールドで分ける。
+    """
+
+    active: bool | None = None  # GameObject の m_IsActive（子孫も含めて表示しない）
+    enabled: bool | None = None  # Renderer の m_Enabled
+    removed_object: bool = False  # m_RemovedGameObjects で消した GameObject（子孫も含めて Unity に無い）
+    removed_renderer: bool = False  # m_RemovedComponents で消した Renderer
+
+    @property
+    def removed(self) -> bool:
+        return self.removed_object or self.removed_renderer
 
 
 # 表の無いモデルの PrefabInstance で、ルートの Transform への位置・回転・スケールの上書きを記録する名前。読み込み側が、
@@ -181,6 +219,7 @@ class RawAsset:
     # ライト・カメラの fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
+    collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
@@ -251,6 +290,10 @@ def parse_asset(data: str | bytes) -> RawAsset:
             renderer_docs.append(doc)
         elif doc.class_id in _COMPONENT_CLASSES:
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
+        elif doc.class_id == CLASS_MESH_COLLIDER:
+            mesh = ref_guid(body.get("m_Mesh"))
+            if mesh:
+                raw.collider_meshes.add(mesh)
         elif doc.class_id == CLASS_LOD_GROUP:
             levels = _lod_levels(body)
             if levels:
@@ -326,6 +369,7 @@ class Node:
     # （名前を引けなかったマテリアルの上書きは、対象の fileID ごとに ``pending_renderer`` の名前で入る。#31）
     model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
     model_transforms: dict[str, dict[str, list[float | None]]] = field(default_factory=dict)  # 名前 → position/rotation/scale
+    model_parts: dict[str, PartState] = field(default_factory=dict)  # 中のオブジェクトの表示の上書きと削除（#172）
     # 1 メッシュの FBX（表で分かる畳まれたノードの名前）か表の無いモデル（``SOLE_NODE``）のモデルの PrefabInstance のルート。
     # このルートへの位置・回転・スケールの上書きは、どの階層のものも成分付きで ``model_transforms`` に記録する（#99 / #111）
     collapsed_key: str | None = None
@@ -347,6 +391,7 @@ class Node:
             components={k: (c, copy.deepcopy(body)) for k, (c, body) in self.components.items()},
             model_materials={k: list(v) for k, v in self.model_materials.items()},
             model_transforms=copy.deepcopy(self.model_transforms),
+            model_parts={k: replace(v) for k, v in self.model_parts.items()},
             **changes,
         )
 
@@ -581,25 +626,43 @@ class Expander:
                 file_id = _LEGACY_MODEL_IDS.get(file_id, file_id)
             return _uid(file_id)
 
+        root_key = scope.transforms.get(_uid(MODEL_ROOT_TRANSFORM)) if is_model else None
+        table = self._recycle.get(source, {}) if is_model else {}
+        # prefab を挟んで、その中のモデルのオブジェクトを指しているかもしれない上書き・削除（#31 / #172）
+        through: list[_Through] = []
+
+        def model_part(file_id: int, uid: int, kind: str, **changes: bool) -> bool:
+            """モデルの中のオブジェクトへの表示の上書き・削除を、ルートに記録する。記録できなければ False。"""
+            key = _part_key(table, file_id, uid, kind)
+            if key is None or root_key not in h.nodes:
+                return False
+            _record_part(h.nodes[root_key], key, **changes)
+            return True
+
         children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
         for file_id, guid in instance.removed_game_objects:
             uid = target(file_id, guid)
-            node_key = scope.game_objects.get(uid) if uid is not None else None
+            if uid is None:
+                continue
+            node_key = scope.game_objects.get(uid)
             if node_key is not None and node_key in h.nodes:
                 if children is None:
                     children = h.children()
                 _remove_subtree(h, node_key, children)
-            elif is_model:
+            elif not is_model:
+                through.append(_Through(uid, "object", lambda root, key: _record_part(root, key, removed_object=True)))
+            elif not model_part(file_id, uid, "object", removed_object=True):
                 h.unresolved_overrides += 1
         for file_id, guid in instance.removed_components:
             uid = target(file_id, guid)
-            if uid is not None and _remove_component(h, scope, uid):
+            if uid is None or _remove_component(h, scope, uid):
                 continue
-            if is_model:
+            # Renderer 以外（コライダーなど）を消したものもここに来る。表の無いモデルでは区別できないので記録だけし、
+            # 読み込み側が Renderer の fileID と突き合わせる
+            if not is_model:
+                through.append(_Through(uid, "renderer", lambda root, key: _record_part(root, key, removed_renderer=True)))
+            elif not model_part(file_id, uid, "renderer", removed_renderer=True):
                 h.unresolved_overrides += 1
-
-        root_key = scope.transforms.get(_uid(MODEL_ROOT_TRANSFORM)) if is_model else None
-        table = self._recycle.get(source, {}) if is_model else {}
         # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
         # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
         collapsed = self._collapsed.get(source) if is_model else None
@@ -608,20 +671,25 @@ class Expander:
             collapsed = SOLE_NODE
         if collapsed is not None and root_key in h.nodes:
             h.nodes[root_key].collapsed_key = collapsed
-        # prefab を挟んで、その中のモデルの Renderer を指しているかもしれないマテリアルの上書き（#31）
-        through: list[tuple[int, int, str | None]] = []
         for file_id, guid, path, value, reference in instance.modifications:
             uid = target(file_id, guid)
             if uid is None:
                 continue
             if _apply_modification(h, scope, uid, path, value, reference) or not _is_tracked(path):
                 continue
+            visibility = _visibility_change(path, value)
             if not is_model:
                 material = _MATERIAL_PATH.fullmatch(path)
                 if material and int(material.group(1)) < MAX_SLOTS:
-                    through.append((uid, int(material.group(1)), ref_guid(reference)))
+                    index, material_guid = int(material.group(1)), ref_guid(reference)
+                    through.append(_Through(uid, "renderer", lambda root, key, i=index, m=material_guid: _set_slot(root.model_materials, key, i, m)))
+                elif visibility is not None:
+                    kind, changes = visibility
+                    through.append(_Through(uid, kind, lambda root, key, c=changes: _record_part(root, key, **c)))
                 continue
             if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
+                continue
+            if visibility is not None and model_part(file_id, uid, visibility[0], **visibility[1]):
                 continue
             material = _MATERIAL_PATH.fullmatch(path)
             if material and uid not in _MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS and root_key in h.nodes:
@@ -635,17 +703,15 @@ class Expander:
             self._override_through(h, sub, added, through)
         return scope
 
-    def _override_through(
-        self, h: Hierarchy, sub: Hierarchy, added: dict[int, int], overrides: list[tuple[int, int, str | None]]
-    ) -> None:
-        """prefab を挟んだ外側からの、モデルの中の Renderer へのマテリアルの上書きを、モデルのルートに記録する（#31）。
+    def _override_through(self, h: Hierarchy, sub: Hierarchy, added: dict[int, int], overrides: list[_Through]) -> None:
+        """prefab を挟んだ外側からの、モデルの中のオブジェクトへの上書き・削除を、モデルのルートに記録する（#31 / #172）。
 
         外側のアセットは、prefab の中のモデルのオブジェクトを「PrefabInstance の fileID XOR モデルの中の fileID」で指す
-        （Prefab Variant をシーンに置き、シーンが部品のマテリアルを替えたときなど）。展開した Renderer のどれにも
+        （Prefab Variant をシーンに置き、シーンが部品のマテリアルを替えたときなど）。展開したオブジェクトのどれにも
         当たらなかった上書きの対象を、差し込んだ prefab の中のモデルのルートごとに XOR で戻し、次の順で当てる。
 
         1. 古い形式の .meta の表で名前を引ける
-        2. 内側のアセットが同じ Renderer を上書きしていて、その fileID の行がある
+        2. 内側のアセットが同じオブジェクトを上書きしていて、その fileID の行がある
         3. どちらでもなく、prefab の中のモデルが 1 つだけなら、そのモデルの中の fileID として行を足す。モデルが複数あると
            どのモデルの中かを決められないので、当てない（今までと同じ）
 
@@ -653,24 +719,63 @@ class Expander:
         """
         roots = [(node.id_mask, h.nodes[added[key]]) for key, node in sub.nodes.items() if node.model_guid is not None]
         roots = [(mask, root) for mask, root in roots if root.key in h.nodes]
-        for uid, index, material_guid in overrides:
+        for override in overrides:
+            pending = pending_object if override.kind == "object" else pending_renderer
             for step in range(3):
                 found = False
                 for mask, root in roots:
-                    inner = (uid ^ mask) & _MASK
+                    inner = (override.uid ^ mask) & _MASK
                     if step == 0:
-                        table = self._recycle.get(root.model_guid or "", {})
-                        name = _model_object_name(table, inner) if inner // 100000 in _RENDERER_CLASSES else None
+                        name = _part_key(self._recycle.get(root.model_guid or "", {}), inner, inner, override.kind, named_only=True)
                     elif step == 1:
-                        name = pending_renderer(inner) if pending_renderer(inner) in root.model_materials else None
+                        key = pending(inner)
+                        name = key if key in root.model_materials or key in root.model_parts else None
                     else:
-                        name = pending_renderer(inner) if len(roots) == 1 and inner not in _MODEL_ROOT_UIDS else None
+                        name = pending(inner) if len(roots) == 1 and inner not in _MODEL_ROOT_UIDS else None
                     if name is not None:
-                        _set_slot(root.model_materials, name, index, material_guid)
+                        override.apply(root, name)
                         found = True
                         break
                 if found:
                     break
+
+
+class _Through(NamedTuple):
+    """prefab を挟んだ外側からの、モデルの中のオブジェクトへの上書き・削除 1 つ（``Expander._override_through``）。"""
+
+    uid: int  # 対象の fileID（外側のアセットでの値）
+    kind: str  # "object"（GameObject）か "renderer"
+    apply: Callable[[Node, str], None]  # モデルのルートと、対象の行の名前を受け取って記録する
+
+
+def _record_part(root: Node, key: str, **changes: bool) -> None:
+    state = root.model_parts.setdefault(key, PartState())
+    for name, value in changes.items():
+        setattr(state, name, value)
+
+
+def _part_key(table: dict[int, str], file_id: int, uid: int, kind: str, named_only: bool = False) -> str | None:
+    """モデルの中のオブジェクトへの表示の上書き・削除を記録する行の名前（#172）。
+
+    ``kind`` は "object"（GameObject）か "renderer"。古い形式の .meta の表があれば、そのクラスの行の名前を引く
+    （引けなければ None）。表が無ければ ``pending_object`` / ``pending_renderer`` の名前にする（``named_only`` なら None）。
+    ルートは配置そのものなので、ここでは扱わない。
+    """
+    if table:
+        classes = (CLASS_GAME_OBJECT,) if kind == "object" else _RENDERER_CLASSES
+        return _model_object_name(table, file_id) if file_id // 100000 in classes else None
+    if named_only or uid in _MODEL_ROOT_UIDS:
+        return None
+    return pending_object(uid) if kind == "object" else pending_renderer(uid)
+
+
+def _visibility_change(path: str, value: object) -> tuple[str, dict[str, bool]] | None:
+    """表示の上書きなら (対象の種類, ``PartState`` に記録する値)。"""
+    if path == "m_IsActive":
+        return "object", {"active": to_float(value, 1.0) != 0}
+    if path == "m_Enabled":
+        return "renderer", {"enabled": to_float(value, 1.0) != 0}
+    return None
 
 
 def _set_slot(rows: dict[str, list[str | None]], name: str, index: int, material_guid: str | None) -> None:
@@ -997,10 +1102,16 @@ class ModelPlacement:
     # このとき ``world`` は上書きの無い成分に FBX のノードの値が入っていないので、読み込み側が
     # ``node_transforms[root_node]`` とオブジェクトの元の行列から組み立て直す（#99）
     root_node: str = ""
+    # モデルの PrefabInstance の中のオブジェクトへの表示の上書きと削除（``PartState``。#172）
+    parts: dict[str, PartState] = field(default_factory=dict)
 
     def signature(self) -> tuple:
-        """読み込み結果を使い回せるかの判定に使う値（モデルと、名前ごとのマテリアル）。"""
-        return (self.model_guid, tuple(sorted((name, tuple(r.materials)) for name, r in self.renderers.items())))
+        """読み込み結果を使い回せるかの判定に使う値（モデル、名前ごとのマテリアル、消した中のオブジェクト）。"""
+        return (
+            self.model_guid,
+            tuple(sorted((name, tuple(r.materials)) for name, r in self.renderers.items())),
+            tuple(sorted(key for key, state in self.parts.items() if state.removed)),
+        )
 
 
 def built_from_renderers(h: Hierarchy, placement: ModelPlacement) -> bool:
@@ -1061,6 +1172,20 @@ def _fbx_node_name(node: Node, model_guid: str, table: dict[int, str], names: se
     return None
 
 
+def _is_top_node(node: Node, model_guid: str, top: str, table: dict[int, str]) -> bool:
+    """Node が、FBX のただ 1 つの最上位のノード ``top`` を展開した GameObject か（#185）。
+
+    GameObject 名で引き、名前を変えてあれば、Node 自身の Renderer のメッシュ参照（表の名前か、名前から求めた fileID）で引く。
+    """
+    if unity_base_name(node.name) == top:
+        return True
+    renderer = node.renderer
+    if renderer is None or renderer.mesh_guid != model_guid or not renderer.mesh_file_id:
+        return False
+    named = table.get(renderer.mesh_file_id)
+    return named == top if named is not None else renderer.mesh_file_id == _mesh_file_id(top)
+
+
 def _root_candidates(
     h: Hierarchy, key: int, model_guid: str, table: dict[int, str], names: set[str] | None
 ) -> tuple[int, int]:
@@ -1117,7 +1242,11 @@ class _RendererRow(NamedTuple):
 
 
 def placements(
-    h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None
+    h: Hierarchy,
+    model_guids: ModelNames,
+    name_tables: dict[str, dict[int, str]] | None = None,
+    sole_nodes: Mapping[str, str] | None = None,
+    top_nodes: Mapping[str, str] | None = None,
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
@@ -1127,7 +1256,7 @@ def placements(
     メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
     変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
 
-    Renderer をまとめるモデルのルート（Issue #60）: 表の無いモデルは最上位の祖先（scope）。表のあるモデルは
+    Renderer をまとめるモデルのルート（Issue #60）: 表の無いモデルは最上位の祖先（scope。下の ``sole_nodes`` を除く）。表のあるモデルは
     ``_root_candidates`` の候補にまとめるが、次のときは候補をモデルのルートとみなさず、Renderer の GameObject
     （たどった FBX のノード）自身をルートにする。シーンの共通の親の下に、FBX から切り離した小物を複製して並べた場合。
 
@@ -1139,17 +1268,41 @@ def placements(
     1 メッシュの FBX（Renderer の GameObject 自身がルート）も同じで、Unity はノードを ``//RootNode`` に畳んで
     その変換をモデルのルートの Transform に載せ、メッシュの頂点はノード空間のままにするため、メッシュを直接指す
     Renderer にはノードの変換が掛からない（Unity 6000.6.0f1 で確認。Issue #98）。
+
+    ``sole_nodes``（モデルの GUID → FBX のただ 1 つのノードの名前）は、表の無いモデルのうち FBX のノードが 1 つだけの
+    もの。表では 1 メッシュの FBX と分からないが、Unity での置かれ方は同じなので、メッシュを直接指す Renderer の配置は
+    表のある 1 メッシュの FBX と同じに扱う（メッシュはこのノードのものしか無いので、メッシュ参照の名前もこのノード名）。
+    モデルの PrefabInstance の配置は今までどおり（読み込み側がオブジェクトの数で決める。#111）。Issue #181。
+
+    ``top_nodes``（モデルの GUID → FBX のただ 1 つの最上位のノードの名前）: Unity は最上位のノードが 1 つだけの FBX で、
+    子があってもそのノードをモデルのルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
+    Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer のメッシュ参照で判定）なら、
+    そのノードを単位行列にする。表の有無によらない（表ではルートが ``//RootNode`` になり、ノード名として引けないため）。Issue #185。
     """
     root_names = _model_names(model_guids)
     models = set(root_names)
+    tops = {g.lower(): name for g, name in (top_nodes or {}).items() if name}
     tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
+    # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
+    sole = {
+        g.lower(): name for g, name in (sole_nodes or {}).items()
+        if name and not tables.get(g.lower()) and g.lower() in models
+    }
+    renderer_tables = {g: table for g, table in tables.items() if g not in sole}
+    for node in h.nodes.values():
+        renderer = node.renderer
+        if renderer is not None and renderer.mesh_guid in sole and renderer.mesh_file_id:
+            renderer_tables.setdefault(renderer.mesh_guid, {})[renderer.mesh_file_id] = sole[renderer.mesh_guid]
+    for g in sole:
+        if g in renderer_tables:
+            node_names[g] = set()
     # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
     for node in h.nodes.values():
         renderer = node.renderer
         if (
             renderer is not None and renderer.mesh_guid in node_names
-            and renderer.mesh_file_id and renderer.mesh_file_id not in tables[renderer.mesh_guid]
+            and renderer.mesh_file_id and renderer.mesh_file_id not in renderer_tables[renderer.mesh_guid]
         ):
             del node_names[renderer.mesh_guid]
     worlds = world_matrices(h)
@@ -1165,6 +1318,7 @@ def placements(
             for name, slots in node.model_materials.items():
                 placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
             placement.node_transforms = copy.deepcopy(node.model_transforms)
+            placement.parts = {k: replace(v) for k, v in node.model_parts.items()}
             # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
             collapsed = collapsed_root_name(tables.get(node.model_guid, {}))
             if collapsed is not None:
@@ -1180,11 +1334,12 @@ def placements(
             continue
         # FBX のノード名と同じ GameObject 名を優先する（複数のノードが 1 つのメッシュを共有する FBX もあるため）
         names = node_names.get(renderer.mesh_guid)
-        mesh_name = tables.get(renderer.mesh_guid, {}).get(renderer.mesh_file_id)
+        table = renderer_tables.get(renderer.mesh_guid, {})
+        mesh_name = table.get(renderer.mesh_file_id)
         name = unity_base_name(node.name)
         if not (names and name in names) and mesh_name and mesh_name != _ROOT_NODE_NAME:
             name = mesh_name
-        candidate, own = _root_candidates(h, key, renderer.mesh_guid, tables.get(renderer.mesh_guid, {}), names)
+        candidate, own = _root_candidates(h, key, renderer.mesh_guid, table, names)
         item = _RendererRow(key, name, candidate, own)
         groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
         items.append(item)
@@ -1218,10 +1373,15 @@ def placements(
         if placement is None:
             placement = ModelPlacement(guid, root, worlds[root], active[root])
             names = node_names.get(guid)
-            if names is not None and root == own:
-                label = _fbx_node_name(h.nodes[root], guid, tables.get(guid, {}), names)
-                if label is not None:  # FBX の中のノードをルートにした
+            if names is not None:
+                label = _fbx_node_name(h.nodes[root], guid, renderer_tables.get(guid, {}), names)
+                # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
+                if label is not None:
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
+            top = tops.get(guid)
+            if top and not placement.node_transforms and _is_top_node(h.nodes[root], guid, top, renderer_tables.get(guid, {})):
+                placement.node_transforms[top] = copy.deepcopy(_IDENTITY_NODE)
             by_root[(root, guid)] = placement
             result.append(placement)
         if name in placement.renderers:
@@ -1259,11 +1419,17 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None) -> SceneContents:
+def summarize(
+    h: Hierarchy,
+    model_guids: ModelNames,
+    name_tables: dict[str, dict[int, str]] | None = None,
+    sole_nodes: Mapping[str, str] | None = None,
+    top_nodes: Mapping[str, str] | None = None,
+) -> SceneContents:
     """シーンの概要。引数は ``placements`` と同じ。"""
     names = _model_names(model_guids)
     models = set(names)
-    found = placements(h, names, name_tables)
+    found = placements(h, names, name_tables, sole_nodes, top_nodes)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )
