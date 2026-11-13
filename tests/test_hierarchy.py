@@ -15,8 +15,10 @@ from unitypackage_loader.core.hierarchy import (
     components,
     Hierarchy,
     Node,
+    PartState,
     effective_active,
     parse_asset,
+    pending_object,
     pending_renderer,
     placements,
     summarize,
@@ -592,6 +594,80 @@ class LegacyFormatTest(unittest.TestCase):
         flower = next(n for n in h.nodes.values() if n.name == "Flower")
         self.assertEqual(h.nodes[flower.parent].name, "Pot")
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+
+def instance_with_removals(file_id, source, parent, mods, removed_components=(), removed_game_objects=()):
+    def refs(items):
+        return "".join(f"    - {{fileID: {f}, guid: {source}, type: 3}}\n" for f in items) if items else ""
+    return (
+        f"--- !u!1001 &{file_id}\nPrefabInstance:\n  m_Modification:\n"
+        f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
+        f"    m_RemovedComponents:{' []' if not removed_components else ''}\n{refs(removed_components)}"
+        f"    m_RemovedGameObjects:{' []' if not removed_game_objects else ''}\n{refs(removed_game_objects)}"
+        f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
+    )
+
+
+class ModelPartsTest(unittest.TestCase):
+    """モデルの PrefabInstance の中のオブジェクトへの、表示の上書きと削除（Issue #172）。
+
+    表の無いモデルでは対象の fileID ごとに ``PartState`` として残し、読み込み側が fileID の計算で突き合わせる。
+    """
+
+    def test_overrides_on_a_model_instance_are_recorded(self):
+        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+            mod(111, MODEL, "m_IsActive", 0),
+            mod(222, MODEL, "m_IsActive", 1),  # 既定値を書いただけでも記録する（見た目を変えるかは読み込み側が決める）
+            mod(333, MODEL, "m_Enabled", 0),
+            mod(666, MODEL, "m_LocalPosition.x", 1),  # 位置は読まずに数える
+            mod(ROOT_GAME_OBJECT, MODEL, "m_IsActive", 0),  # ルートは配置そのもの
+        ], removed_components=[555], removed_game_objects=[444])
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {
+            pending_object(111): PartState(active=False),
+            pending_object(222): PartState(active=True),
+            pending_renderer(333): PartState(enabled=False),
+            pending_object(444): PartState(removed_object=True),
+            pending_renderer(555): PartState(removed_renderer=True),
+        })
+        self.assertFalse(placement.active)
+        self.assertEqual(h.unresolved_overrides, 1)
+        # 消したものはテンプレートから消すので、使い回しの判定に入る
+        self.assertIn((pending_object(444), pending_renderer(555)), placement.signature())
+
+    def test_overrides_through_a_prefab_reach_the_model(self):
+        # prefab の中にモデルを置き、シーンが prefab の上から中のオブジェクトを指す（PrefabInstance の fileID XOR 中の fileID）
+        prefab = HEADER + game_object(10, "Holder") + transform(11, 10) + instance_with_removals(20, MODEL, 11, [
+            mod(111, MODEL, "m_IsActive", 0),
+        ])
+        scene = HEADER + instance_with_removals(3000, NESTED, 0, [
+            mod(20 ^ 111, NESTED, "m_IsActive", 1),  # prefab で隠したものを、シーンで表示し直す
+            mod(20 ^ 222, NESTED, "m_IsActive", 0),
+            mod(20 ^ 333, NESTED, "m_Enabled", 0),
+        ], removed_components=[20 ^ 555], removed_game_objects=[20 ^ 444])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {
+            pending_object(111): PartState(active=True),
+            pending_object(222): PartState(active=False),
+            pending_renderer(333): PartState(enabled=False),
+            pending_object(444): PartState(removed_object=True),
+            pending_renderer(555): PartState(removed_renderer=True),
+        })
+
+    def test_recycle_table_names_the_parts(self):
+        table = {100000: "//RootNode", 400000: "//RootNode", 100002: "Lid", 400002: "Lid", 2300002: "Lid", 4300002: "Lid"}
+        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+            mod(100002, MODEL, "m_IsActive", 0),
+            mod(2300002, MODEL, "m_Enabled", 0),
+            mod(100004, MODEL, "m_IsActive", 0),  # 表に無い
+        ], removed_components=[6500002])  # コライダー（Renderer でない）
+        h = Expander(lambda g: None, {MODEL: "Probe"}, {MODEL: table}).expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(placement.parts, {"Lid": PartState(active=False, enabled=False)})
+        self.assertEqual(h.unresolved_overrides, 2)
 
 
 class ComponentTest(unittest.TestCase):
