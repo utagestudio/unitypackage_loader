@@ -123,7 +123,8 @@ ticked):
   Color variants that share a model can be imported together. When two or more prefabs are selected, **Arrange** places
   them `Side by Side` (next to each other without overlapping, wrapping into a grid when there are many) or
   `Stack at Origin`. Prefabs with an LODGroup hide their distant LOD levels, and parts of a model file that the prefab
-  does not use are not imported, as in scenes.
+  does not use are not imported, as in scenes. Parts under an inactive GameObject in the prefab and parts with a disabled
+  renderer are imported hidden.
 - **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
   [Matching meshes to materials](#matching-meshes-to-materials).
 
