@@ -670,6 +670,17 @@ class ModelPartsTest(unittest.TestCase):
         self.assertEqual(h.unresolved_overrides, 2)
 
 
+class MeshColliderTest(unittest.TestCase):
+    def test_mesh_collider_meshes_are_collected(self):
+        # 当たり判定用のメッシュを指す MeshCollider（Synty の Collision/ の FBX。#166）
+        prefab = HEADER + game_object(10, "Fence") + transform(11, 10) + (
+            "--- !u!64 &12\nMeshCollider:\n  m_GameObject: {fileID: 10}\n"
+            f"  m_Mesh: {{fileID: 4300000, guid: {MODEL}, type: 3}}\n"
+            "--- !u!64 &13\nMeshCollider:\n  m_GameObject: {fileID: 10}\n  m_Mesh: {fileID: 0}\n"
+        )
+        self.assertEqual(parse_asset(prefab).collider_meshes, {MODEL})
+
+
 class ComponentTest(unittest.TestCase):
     """ライト・カメラは中身を持ち、prefab の上書き（強さ・色・有効）を当ててから配置する。"""
 

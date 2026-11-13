@@ -52,6 +52,7 @@ CLASS_TRANSFORM = 4
 CLASS_CAMERA = 20
 CLASS_MESH_RENDERER = 23
 CLASS_MESH_FILTER = 33
+CLASS_MESH_COLLIDER = 64
 CLASS_LIGHT = 108
 CLASS_SKINNED_MESH_RENDERER = 137
 CLASS_LOD_GROUP = 205
@@ -217,6 +218,7 @@ class RawAsset:
     # ライト・カメラの fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
+    collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
 
 
@@ -287,6 +289,10 @@ def parse_asset(data: str | bytes) -> RawAsset:
             renderer_docs.append(doc)
         elif doc.class_id in _COMPONENT_CLASSES:
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
+        elif doc.class_id == CLASS_MESH_COLLIDER:
+            mesh = ref_guid(body.get("m_Mesh"))
+            if mesh:
+                raw.collider_meshes.add(mesh)
         elif doc.class_id == CLASS_LOD_GROUP:
             levels = _lod_levels(body)
             if levels:
