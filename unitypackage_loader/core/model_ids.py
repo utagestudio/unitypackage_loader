@@ -77,12 +77,55 @@ def parse_fbx_node_names(data: bytes) -> Counter[str] | None:
 
 def _binary_string_ending_at(data: bytes, end: int) -> str | None:
     """``end`` で名前が終わる文字列属性（``S`` + 長さ + 「<名前>\\0\\1Model」）の名前。"""
+    start = _binary_string_start(data, end)
+    return data[start:end].decode("utf-8", "replace") if start is not None else None
+
+
+def _binary_string_start(data: bytes, end: int) -> int | None:
+    """``end`` で名前が終わる文字列属性の、名前の始まりの位置。"""
     tail = len(_BINARY_MODEL)
     for length in range(0, min(_MAX_NAME, end - 5) + 1):
         start = end - length
         if data[start - 5 : start - 4] == b"S" and struct.unpack_from("<I", data, start - 4)[0] == length + tail:
-            return data[start:end].decode("utf-8", "replace")
+            return start
     return None
+
+
+_BINARY_CONNECTION = re.compile(rb"S\x02\x00\x00\x00OOL(.{8})L(.{8})", re.DOTALL)  # C: "OO", 子, 親
+_ASCII_MODEL_ID = re.compile(rb'^[ \t]*Model:\s*(-?\d+)\s*,\s*"Model::([^"\r\n]*)"', re.MULTILINE)
+_ASCII_CONNECTION = re.compile(rb'C:\s*"OO"\s*,\s*(-?\d+)\s*,\s*(-?\d+)')
+
+
+def parse_fbx_top_nodes(data: bytes) -> list[str] | None:
+    """FBX の中身から、最上位のノード（Connections でシーンのルート = 0 につながる Model）の名前を返す。
+
+    Unity は最上位のノードが 1 つだけの FBX で、子があってもそのノードをモデルのルートに畳む（#185）。
+    ノードの ID か Connections が読めない形（ID の無い古い FBX など）は None。
+    """
+    models: dict[int, str] = {}
+    parents: dict[int, int] = {}
+    if data.startswith(_BINARY_MAGIC):
+        position = data.find(_BINARY_MODEL)
+        while position >= 0:
+            start = _binary_string_start(data, position)
+            # 名前の前は「L + 8 バイトの ID」と「S + 4 バイトの長さ」
+            if start is not None and start >= 14 and data[start - 14 : start - 13] == b"L":
+                models[struct.unpack_from("<q", data, start - 13)[0]] = data[start:position].decode("utf-8", "replace")
+            position = data.find(_BINARY_MODEL, position + 1)
+        for match in _BINARY_CONNECTION.finditer(data):
+            child, parent = struct.unpack("<q", match.group(1))[0], struct.unpack("<q", match.group(2))[0]
+            if child in models:
+                parents.setdefault(child, parent)
+    else:
+        for match in _ASCII_MODEL_ID.finditer(data):
+            models[int(match.group(1))] = match.group(2).decode("utf-8", "replace")
+        for match in _ASCII_CONNECTION.finditer(data):
+            child, parent = int(match.group(1)), int(match.group(2))
+            if child in models:
+                parents.setdefault(child, parent)
+    if not models or set(parents) != set(models):
+        return None
+    return [name for key, name in models.items() if parents[key] == 0]
 
 
 def fbx_node_names(path: str | Path) -> Counter[str] | None:

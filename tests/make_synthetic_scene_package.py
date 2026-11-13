@@ -20,6 +20,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
 - SlabBareRoot: 表の無い同じ FBX（SlabBare.fbx）のメッシュを直接指す prefab を、SlabRoot から Unity の Z に 10 ずらして
   同じ向きで（Issue #181。表が無くても、FBX のノードが 1 つだけならノードの変換を掛けない）
+- SlabKnobRoot: Slab.fbx の本体の下に子の SlabKnob を付けた FBX（SlabKnob.fbx。表なし）を展開した prefab を、SlabRoot から
+  Unity の Z に 20 ずらして同じ向きで（Issue #185。最上位のノードが 1 つなら、子があっても Unity はそれをルートに畳む）
 - SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
 - SlabBareInstance: 同じ FBX を表の無い .meta で別のモデル（SlabBare.fbx）にし、SlabInstance から Unity の X に 10 ずらして
@@ -129,6 +131,26 @@ def export_slab_fbx(path: Path) -> None:
     obj.location = (0, 4, 0.2)  # Unity では (0, 0.2, -4)
     obj.rotation_euler = (0, 0, math.radians(90))
     obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_slab_knob_fbx(path: Path) -> None:
+    """``export_slab_fbx`` と同じ本体の下に、子の SlabKnob（本体のノード空間の原点・回転なし）を付けた FBX（Issue #185）。
+
+    最上位のノードは 1 つだけなので、Unity は子があっても本体のノードをルートに畳む。
+    """
+    export_slab_fbx(path)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.wm.fbx_import(filepath=str(path))
+    slab = bpy.data.objects["Slab"]
+    bpy.ops.mesh.primitive_cube_add(size=0.2)
+    knob = bpy.context.active_object
+    knob.name = "SlabKnob"
+    knob.data.name = "SlabKnob_Mesh"
+    knob.data.materials.append(slab.data.materials[0])
+    knob.parent = slab
+    knob.matrix_parent_inverse.identity()
+    knob.matrix_basis.identity()
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
 
@@ -401,6 +423,12 @@ def main() -> None:
     bare_path = "Assets/Synthetic/Models/SlabBare.fbx"
     bare_model = add(bare_path, slab_fbx.read_bytes(), model_meta(guid_of(bare_path), {"ProbeMat": mats["ProbeMat"]}))
 
+    # 最上位のノードの下に子がある FBX（#185）。表の無い新しい形式の .meta
+    knob_fbx = tmp / "slab_knob.fbx"
+    export_slab_knob_fbx(knob_fbx)
+    knob_path = "Assets/Synthetic/Models/SlabKnob.fbx"
+    knob_model = add(knob_path, knob_fbx.read_bytes(), model_meta(guid_of(knob_path), {"ProbeMat": mats["ProbeMat"]}))
+
     # 1 メッシュの FBX をそのまま置き、ルートの位置 0・回転なしに上書きした prefab（#111: Shibuya の地下鉄の入口と同じ形）。
     # 表の無いモデル（SlabBare）と表のあるモデル（Slab）で 1 つずつ作る
     wrapped = {}
@@ -422,6 +450,16 @@ def main() -> None:
         transform(11, 10),
         mesh_renderer(12, 13, 10, slab_model, mats["ProbeMat"], 4300000),
     ])).encode(), prefab_meta(slab_prefab_path))
+    # SlabKnob.fbx を展開した prefab（#185。Synty のスイッチと同じ形）。ルートは畳まれた本体のノード、子は SlabKnob
+    knob_prefab_path = "Assets/Synthetic/Prefabs/SlabKnob.prefab"
+    knob_prefab = add(knob_prefab_path, (HEADER + "".join([
+        game_object(10, "Slab"),
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, knob_model, mats["ProbeMat"], mesh_file_id("Slab")),
+        game_object(20, "SlabKnob"),
+        transform(21, 20, father=11),
+        mesh_renderer(22, 23, 20, knob_model, mats["ProbeMat"], mesh_file_id("SlabKnob")),
+    ])).encode(), prefab_meta(knob_prefab_path))
     # 同じ形で、表の無いモデルのメッシュを指す prefab（#181。UnityJapanOffice のクッションと同じ形）
     slab_bare_prefab_path = "Assets/Synthetic/Prefabs/SlabBare.prefab"
     slab_bare_prefab = add(slab_bare_prefab_path, (HEADER + "".join([
@@ -650,6 +688,15 @@ def main() -> None:
             mod(11, slab_bare_prefab, "m_LocalRotation.y", 0.38268346),
             mod(11, slab_bare_prefab, "m_LocalRotation.w", 0.9238795),
             mod(10, slab_bare_prefab, "m_Name", "SlabBareRoot"),
+        ]),
+        # 最上位のノードの下に子がある FBX を展開した prefab（#185）。SlabRoot から Unity の Z に 20 ずらす
+        instance(5060, knob_prefab, 0, [
+            mod(11, knob_prefab, "m_LocalPosition.x", 3),
+            mod(11, knob_prefab, "m_LocalPosition.y", 1),
+            mod(11, knob_prefab, "m_LocalPosition.z", 34),
+            mod(11, knob_prefab, "m_LocalRotation.y", 0.38268346),
+            mod(11, knob_prefab, "m_LocalRotation.w", 0.9238795),
+            mod(10, knob_prefab, "m_Name", "SlabKnobRoot"),
         ]),
         # 1 メッシュの FBX をモデルの PrefabInstance で置く（#99）。位置と回転だけを上書きし、スケールは
         # FBX のノードの値（Unity では 100）のままにする

@@ -25,6 +25,7 @@ from unitypackage_loader.core.hierarchy import (
     world_matrices,
 )
 from unitypackage_loader.core.transform import transform_point, unity_to_blender
+from unitypackage_loader.core import unity_ids
 
 MODEL = "a" * 32
 NESTED = "b" * 32
@@ -483,6 +484,53 @@ class NodeRootWithoutOwnRendererTest(unittest.TestCase):
         clock = self.by_root("Clock")
         self.assertEqual(set(clock.renderers), {"Clock", "Hand"})
         self.assertEqual(clock.node_transforms, {"Clock": self.IDENTITY})
+
+
+class CollapsedTopNodeTest(unittest.TestCase):
+    """FBX の最上位のノードが 1 つだけなら、子があっても Unity はそれをルートに畳む（Issue #185）。
+
+    FBX を展開した GameObject のルートの行列はノードの変換を含むので、そのノードを単位行列にする。
+    Synty の ``SM_Gen_Prop_Switch_01``（本体の下にスティック。本体のノードが原点から 1.3 cm 離れている）。
+    """
+
+    SWITCH = "a1" * 16
+    SWITCH_MESH = unity_ids.mesh_file_id("Switch")
+    STICK_MESH = unity_ids.mesh_file_id("Stick")
+    SCENE = HEADER + "".join([
+        game_object(10, "Switch"),
+        transform(11, 10, pos=(1, 0, 0)),
+        mesh_renderer(12, 13, 10, SWITCH, MAT_A, mesh_file_id=SWITCH_MESH),
+        game_object(20, "Stick"),
+        transform(21, 20, father=11, pos=(0, 0, -0.013)),
+        mesh_renderer(22, 23, 20, SWITCH, MAT_A, mesh_file_id=STICK_MESH),
+        # 名前を変えたルート（メッシュ参照で判定する）
+        game_object(30, "Lever"),
+        transform(31, 30, pos=(2, 0, 0)),
+        mesh_renderer(32, 33, 30, SWITCH, MAT_A, mesh_file_id=SWITCH_MESH),
+        # シーンで作った入れ物の下にスティックだけ（ルートは最上位のノードではない）
+        game_object(40, "Panel"),
+        transform(41, 40, pos=(3, 0, 0)),
+        game_object(50, "Stick"),
+        transform(51, 50, father=41),
+        mesh_renderer(52, 53, 50, SWITCH, MAT_A, mesh_file_id=STICK_MESH),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    def place(self, top_nodes):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        placed = placements(h, {self.SWITCH: "Switch"}, {self.SWITCH: {}}, None, top_nodes)
+        return {h.nodes[p.root].name: p for p in placed}
+
+    def test_collapsed_top_node_is_reset(self):
+        placed = self.place({self.SWITCH: "Switch"})
+        self.assertEqual(set(placed["Switch"].renderers), {"Switch", "Stick"})
+        self.assertEqual(placed["Switch"].node_transforms, {"Switch": self.IDENTITY})
+        self.assertEqual(placed["Lever"].node_transforms, {"Switch": self.IDENTITY})
+        self.assertEqual(placed["Panel"].node_transforms, {})
+
+    def test_without_the_top_node_nothing_changes(self):
+        placed = self.place(None)
+        self.assertTrue(all(p.node_transforms == {} for p in placed.values()))
 
 
 class SoleNodeWithoutTableTest(unittest.TestCase):

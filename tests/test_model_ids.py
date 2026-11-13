@@ -17,7 +17,7 @@ from unitypackage_loader.core.hierarchy import (
     pending_object,
     pending_renderer,
 )
-from unitypackage_loader.core.model_ids import ModelObject, PartMatcher, object_claims, parse_fbx_node_names
+from unitypackage_loader.core.model_ids import ModelObject, PartMatcher, object_claims, parse_fbx_node_names, parse_fbx_top_nodes
 from unitypackage_loader.core.unity_ids import hierarchy_file_id, named_file_id
 
 MASK = 0x7FFF_FFFF_FFFF_FFFF
@@ -253,6 +253,45 @@ class FbxNodeNameTests(unittest.TestCase):
     def test_broken_input(self):
         for data in (b"", b"Kaydara FBX Binary", b"Kaydara FBX Binary  \x00\x01Model", b"\x00\x01Model", b"S\xff\xff\xff\xffx\x00\x01Model"):
             self.assertIsNone(parse_fbx_node_names(data))
+
+
+class FbxTopNodeTests(unittest.TestCase):
+    """FBX の最上位のノード（Connections でシーンのルート = 0 につながる Model）。#185。"""
+
+    @staticmethod
+    def binary(nodes):
+        """``nodes`` は (ID, 名前, 親の ID) の並び。親の ID が 0 なら最上位。"""
+        data = b"Kaydara FBX Binary  \x00\x1a\x00" + struct.pack("<I", 7500)
+        for key, name, _ in nodes:
+            value = name.encode() + b"\x00\x01Model"
+            data += b"\x05Model" + b"L" + struct.pack("<q", key) + b"S" + struct.pack("<I", len(value)) + value
+            data += b"S" + struct.pack("<I", 4) + b"Mesh"
+        for key, _, parent in nodes:
+            data += b"\x01C" + b"S" + struct.pack("<I", 2) + b"OO" + b"L" + struct.pack("<q", key) + b"L" + struct.pack("<q", parent)
+        return data
+
+    def test_binary(self):
+        data = self.binary([(101, "Switch", 0), (102, "Stick", 101), (103, "Knob", 102)])
+        self.assertEqual(parse_fbx_top_nodes(data), ["Switch"])
+        data = self.binary([(101, "Wall", 0), (102, "Door", 0), (103, "Handle", 102)])
+        self.assertEqual(parse_fbx_top_nodes(data), ["Wall", "Door"])
+
+    def test_ascii(self):
+        text = (
+            '; FBX 7.4.0 project file\nObjects:  {\n'
+            '\tModel: 11, "Model::Switch", "Mesh" {\n\t}\n'
+            '\tModel: 12, "Model::Stick", "Mesh" {\n\t}\n'
+            '}\nConnections:  {\n'
+            '\tC: "OO",11,0\n\tC: "OO",12,11\n\tC: "OO",900,11\n'
+            '}\n'
+        )
+        self.assertEqual(parse_fbx_top_nodes(text.encode()), ["Switch"])
+
+    def test_unknown_parents(self):
+        # 親の分からない Model がある（Connections が無い古い形など）
+        self.assertIsNone(parse_fbx_top_nodes(FbxNodeNameTests.binary(["Body"])))
+        self.assertIsNone(parse_fbx_top_nodes(b""))
+        self.assertIsNone(parse_fbx_top_nodes(b'Model: "Model::Old", "Mesh" {\n}\n'))
 
 
 if __name__ == "__main__":

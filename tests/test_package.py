@@ -400,6 +400,11 @@ class FbxSoleNodeTests(unittest.TestCase):
             # FBX でないモデル
             _add(tar, f"{GUID_VRM}/asset", test_model_ids.FbxNodeNameTests.binary(["Avatar"]))
             _add(tar, f"{GUID_VRM}/pathname", b"Assets/Fbx/Avatar.obj")
+            # 最上位のノードが 1 つで、子を持つ（#185）
+            _add(tar, f"{GUID_SCENE}/asset", test_model_ids.FbxTopNodeTests.binary([(1, "Switch", 0), (2, "Stick", 1)]))
+            _add(tar, f"{GUID_SCENE}/pathname", b"Assets/Fbx/Switch.fbx")
+            _add(tar, f"{GUID_TEX}/asset", test_model_ids.FbxTopNodeTests.binary([(1, "Wall", 0), (2, "Door", 0)]))
+            _add(tar, f"{GUID_TEX}/pathname", b"Assets/Fbx/House.fbx")
 
     def test_sole_node_is_recorded(self):
         pkg = UnityPackage(self.path)
@@ -409,6 +414,13 @@ class FbxSoleNodeTests(unittest.TestCase):
         self.assertEqual(pkg.entries[GUID_OTHER].fbx_sole_node, "")
         self.assertEqual(pkg.entries[GUID_VRM].fbx_sole_node, "")
         self.assertIsNone(pkg.entries[GUID_FBX]._cache, "the FBX itself is not kept in memory")
+
+    def test_single_top_node_is_recorded(self):
+        pkg = UnityPackage(self.path)
+        pkg.scan()
+        self.assertEqual((pkg.entries[GUID_SCENE].fbx_sole_node, pkg.entries[GUID_SCENE].fbx_top_node), ("", "Switch"))
+        self.assertEqual(pkg.entries[GUID_TEX].fbx_top_node, "")
+        self.assertEqual(pkg.entries[GUID_FBX].fbx_top_node, "")  # Connections の無い FBX は分からない扱い
 
     def test_fbx_over_read_limit_is_not_read(self):
         with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 16):
