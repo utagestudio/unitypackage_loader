@@ -126,7 +126,9 @@ ticked):
   does not use are not imported, as in scenes. Parts under an inactive GameObject in the prefab and parts with a disabled
   renderer are imported hidden.
 - **Models**: imports the model files (FBX etc.) as they are. Materials are resolved as described in
-  [Matching meshes to materials](#matching-meshes-to-materials).
+  [Matching meshes to materials](#matching-meshes-to-materials). Model files that prefabs use only for collision
+  (MeshCollider) and never display are marked `collider only` and are unticked by default (they stay in the list, so
+  you can tick them to import them).
 
 One import uses one unit, so the same model is not imported twice by accident. Items that cannot be imported stay in
 the list, greyed out with the reason (for example `no mesh in package` or `.blend import disabled`). The dialog
