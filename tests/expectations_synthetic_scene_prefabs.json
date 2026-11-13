@@ -149,5 +149,17 @@
       "alpha_mode": "cutout",
       "smoothness_scale": null
     }
-  ]
+  ],
+  "dialog_selected": {
+    "MODELS": [
+      "Assets/Synthetic/Models/Booth.fbx",
+      "Assets/Synthetic/Models/Kiosk.fbx",
+      "Assets/Synthetic/Models/Probe.fbx",
+      "Assets/Synthetic/Models/Rings.fbx",
+      "Assets/Synthetic/Models/Slab.fbx",
+      "Assets/Synthetic/Models/SlabBare.fbx",
+      "Assets/Synthetic/Models/Stall.fbx",
+      "Assets/Synthetic/Models/Tower.fbx"
+    ]
+  }
 }

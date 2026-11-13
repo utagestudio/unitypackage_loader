@@ -41,7 +41,9 @@ Ring.001 だけを指す色違い（ProbeRed / ProbeMat）。読み込む単位 
 それでも prefab のマテリアルを当て、Rod は使われていない部品として扱う（Issue #155）。
 StallUnpacked は Stall.fbx を展開した prefab で、StallSign の Renderer が無効、StallTop（子に StallAwning）が非アクティブ。
 StallSpare は非アクティブな GameObject の下に Stall.fbx を丸ごと置いた prefab。読み込む単位 Prefabs で、どちらも
-prefab で表示されていない部品を読み込んだうえで隠す（Issue #177）。
+prefab で表示されていない部品を読み込んだうえで隠す（Issue #177）。StallUnpacked の MeshCollider は、当たり判定用の
+StallCollision.fbx（ほかからは使われない）と Stall.fbx を指す。選択ダイアログの Models では、StallCollision.fbx だけが
+既定でチェックを外される（Issue #166）。
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -540,13 +542,30 @@ def main() -> None:
     ])).encode(), prefab_meta(stall_prefab_path))
     # 屋台を展開した prefab と、非アクティブな GameObject の下に丸ごと置いた prefab（#177。シーンには置かない）
     probe_mat = mats["ProbeMat"]
+    # 当たり判定用のメッシュ（Synty の Collision/ の FBX と同じく、prefab の MeshCollider だけが使う。#166）
+    collision_fbx = tmp / "stall_collision.fbx"
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    bpy.context.active_object.name = "StallCollision"
+    bpy.ops.export_scene.fbx(filepath=str(collision_fbx), use_selection=False, add_leaf_bones=False, bake_anim=False)
+    collision_path = "Assets/Synthetic/Models/Collision/StallCollision.fbx"
+    collision_model = add(collision_path, collision_fbx.read_bytes(), model_meta(guid_of(collision_path), {}))
+
+    def mesh_collider(file_id, go, model_guid, name):
+        return (
+            f"--- !u!64 &{file_id}\nMeshCollider:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+            f"  m_Mesh: {{fileID: {mesh_file_id(name)}, guid: {model_guid}, type: 3}}\n"
+        )
+
     stall_unpacked_path = "Assets/Synthetic/Prefabs/StallUnpacked.prefab"
     add(stall_unpacked_path, (HEADER + "".join([
         game_object(10, "StallUnpacked"),
         transform(11, 10),
+        mesh_collider(12, 10, collision_model, "StallCollision"),
         game_object(20, "StallBase"),
         transform(21, 20, father=11),
         mesh_renderer(22, 23, 20, stall_model, probe_mat, mesh_file_id("StallBase")),
+        mesh_collider(24, 20, stall_model, "StallBase"),  # 描画にも使うモデル（チェックは外さない）
         game_object(30, "StallSign"),
         transform(31, 30, father=11, pos=(0, 0.5, 0.8)),
         mesh_renderer(32, 33, 30, stall_model, probe_mat, mesh_file_id("StallSign"), enabled=0),

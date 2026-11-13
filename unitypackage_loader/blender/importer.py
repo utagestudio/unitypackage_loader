@@ -158,6 +158,9 @@ class ModelSummary:
     supported: bool
     skip_reason: str = ""  # supported が False の理由
     info: ModelImporterInfo = field(default_factory=ModelImporterInfo)  # .meta の設定（読み込みのたびに解析し直さない。#75）
+    # prefab の MeshCollider だけが使い、prefab の Renderer も配置も使っていない（当たり判定用のメッシュ。選択ダイアログの
+    # Models で、既定のチェックを外して理由を出す。読み込めないわけではないので supported は変えない。#166）
+    collider_only: bool = False
 
     @property
     def guid(self) -> str:
@@ -372,7 +375,9 @@ def prepare_package(
     # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
     model_names, recycle = _model_tables(models)
-    expander = Expander(_prefab_reader(pkg, warnings.append), model_names, recycle)
+    collider_meshes: set[str] = set()
+    expander = Expander(_prefab_reader(pkg, warnings.append, collider_meshes), model_names, recycle)
+    used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     prefab_whole_models: dict[str, set[str]] = {}
     prefab_parts: dict[str, dict[str, dict[str, PartState]]] = {}
@@ -387,6 +392,7 @@ def prepare_package(
             whole = models_placed_whole(hierarchy, placed)
             parts = parts_from_placements(placed)
             inactive = inactive_models(placed)
+            used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
             _log_exception(f"could not resolve prefab {entry.pathname}")
@@ -403,6 +409,8 @@ def prepare_package(
                 prefab_parts[entry.pathname] = parts
             if inactive:
                 prefab_inactive_models[entry.pathname] = inactive
+    for m in models:
+        m.collider_only = m.guid in collider_meshes and m.guid not in used_by_prefabs
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
     # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
@@ -435,15 +443,23 @@ def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str,
     return {m.guid: Path(m.entry.pathname).stem for m in models}, {m.guid: m.info.recycle_names for m in models}
 
 
-def _prefab_reader(pkg: UnityPackage, warn: Callable[[str], None]) -> Callable[[str], RawAsset | None]:
-    """展開器に渡す読み取り関数。prefab 以外と、読めない prefab は None（元の無いインスタンスとして扱う。#69）。"""
+def _prefab_reader(
+    pkg: UnityPackage, warn: Callable[[str], None], collider_meshes: set[str] | None = None
+) -> Callable[[str], RawAsset | None]:
+    """展開器に渡す読み取り関数。prefab 以外と、読めない prefab は None（元の無いインスタンスとして扱う。#69）。
+
+    ``collider_meshes`` を渡すと、読んだ prefab の MeshCollider が指すアセットの GUID を加える（#166）。
+    """
     prefab_guids = {e.guid for e in pkg.prefabs()}
 
     def read(guid: str) -> RawAsset | None:
         if guid not in prefab_guids:
             return None
         try:
-            return parse_asset(pkg.read_asset(guid))
+            raw = parse_asset(pkg.read_asset(guid))
+            if collider_meshes is not None:
+                collider_meshes.update(g.lower() for g in raw.collider_meshes)
+            return raw
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので、その prefab だけを外して続ける
             warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
             _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")

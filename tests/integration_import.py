@@ -425,6 +425,7 @@ def main() -> int:
         prepared = importer.prepare_package(str(package))
         items = getattr(bpy.context.window_manager, select_models._ITEMS_PROP)
         items.clear()
+        select_models._add_prefab_and_model_items(items, prepared)
         select_models._add_scene_items(items, prepared)
         for kind, expected in exp["dialog_selected"].items():
             actual = sorted(it.pathname for it in items if it.kind == kind and it.selected)
