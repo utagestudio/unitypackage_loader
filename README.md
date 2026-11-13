@@ -103,8 +103,8 @@ ticked):
   gets its own Collection; the GameObjects above the models are recreated as Empties, and inactive objects are hidden.
   Only the scene's contents are imported. Copies of the same model with the same materials share their mesh data.
   Small props copied side by side under a common parent in Unity (for example several cups in a room) are placed one by one.
-  Parts of a model file that a prefab or the scene does not use (for example unused LODs, extra nodes, or the other
-  pieces of a model file that bundles many props) are not imported, matched by the mesh each Unity renderer references
+  Parts of a model file that a prefab or the scene does not use (for example unused LODs, extra nodes, the other
+  pieces of a model file that bundles many props, or parts a prefab or the scene removed from a model) are not imported, matched by the mesh each Unity renderer references
   (turn off **Unused Parts** in the dialog to import them hidden instead). Where Unity has an LODGroup, only the most
   detailed level (LOD0) stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the
   dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property).
@@ -182,9 +182,10 @@ variants), their assignments are merged, with the first one by path taking prece
 assignments, import that prefab with the Prefabs unit. Material overrides in Prefab Variants and nested prefabs are read when the source is a prefab in
 the package; overrides applied directly to a model (FBX) instance are applied when a scene is imported and the model's
 `.meta` is in the Unity 2018.2-and-earlier format (which has a name table). Without a name table, material overrides are
-matched to the imported objects by their names and hierarchy (Unity derives the internal IDs from them). Objects whose names are
-not unique inside the model cannot be matched; those overrides, and position or visibility overrides on parts inside such a model,
-are reported as a warning.
+matched to the imported objects by their names and hierarchy (Unity derives the internal IDs from them). Visibility overrides
+and removals of parts inside such a model are matched the same way: deactivated parts and disabled renderers are hidden, and
+removed parts are treated like unused parts (Scenes and Prefabs). Objects whose names are not unique inside the model cannot be
+matched; those overrides, and position overrides on parts inside such a model, are reported as a warning.
 A prefab lists its materials in Unity's submesh order (the order in which the mesh's polygons first use each material),
 which can differ from Blender's slot order, so the entries are matched to slots in that order.
 

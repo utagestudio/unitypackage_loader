@@ -12,6 +12,7 @@ from .unity_ids import mesh_file_id
 __all__ = [
     "HiddenParts",
     "lod_warning",
+    "parts_warning",
     "parts_to_hide",
     "parts_to_remove",
     "prefab_warnings",
@@ -141,6 +142,7 @@ def scene_warnings(
     hidden_lods: int = 0,
     skipped_nodes: int = 0,
     skipped_offsets: int = 0,
+    unmatched_parts: int = 0,
 ) -> list[str]:
     """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。"""
     prefix = f"scene {pathname}: "
@@ -170,6 +172,8 @@ def scene_warnings(
             messages.append(unused_warning(hidden_unused))
         if hidden_lods:
             messages.append(lod_warning(hidden_lods))
+        if unmatched_parts:
+            messages.append(parts_warning(unmatched_parts))
         if skipped_nodes:
             messages.append(
                 f"{skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
@@ -182,7 +186,9 @@ def scene_warnings(
     return [prefix + m for m in messages]
 
 
-def prefab_warnings(*, hidden_unused: int = 0, removed_unused: int = 0, hidden_lods: int = 0) -> list[str]:
+def prefab_warnings(
+    *, hidden_unused: int = 0, removed_unused: int = 0, hidden_lods: int = 0, unmatched_parts: int = 0
+) -> list[str]:
     """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
     messages: list[str] = []
     if removed_unused:
@@ -191,7 +197,17 @@ def prefab_warnings(*, hidden_unused: int = 0, removed_unused: int = 0, hidden_l
         messages.append(unused_warning(hidden_unused))
     if hidden_lods:
         messages.append(lod_warning(hidden_lods))
+    if unmatched_parts:
+        messages.append(parts_warning(unmatched_parts))
     return messages
+
+
+def parts_warning(unmatched_parts: int) -> str:
+    """モデルの中への表示の上書き・削除を当てられなかったときの文言（#172）。"""
+    return (
+        f"{unmatched_parts} visibility override(s) or removal(s) on objects inside a model could not be matched "
+        "to an imported object (the object is not in the model, or its name is not unique); those objects are shown"
+    )
 
 
 def unused_warning(hidden_unused: int) -> str:

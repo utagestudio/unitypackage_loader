@@ -25,6 +25,7 @@ from .hierarchy import (
     Hierarchy,
     ModelNames,
     ModelPlacement,
+    PartState,
     built_from_renderers,
     pending_renderer_id,
     placements,
@@ -65,6 +66,18 @@ def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> Rendere
     return candidates[0] if len(candidates) == 1 else None
 
 
+def parts_from_placements(placed: Iterable[ModelPlacement]) -> dict[str, dict[str, PartState]]:
+    """モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（``ModelPlacement.parts``。#172）。
+
+    読み込む単位 Prefabs ではモデルを 1 回だけ読み込むので、同じモデルの配置が複数あれば先の配置のものを採る。
+    """
+    result: dict[str, dict[str, PartState]] = {}
+    for placement in placed:
+        if placement.parts and placement.model_guid not in result:
+            result[placement.model_guid] = dict(placement.parts)
+    return result
+
+
 def tables_from_hierarchy(
     h: Hierarchy,
     model_names: ModelNames,
@@ -76,12 +89,13 @@ def tables_from_hierarchy(
     ``model_names`` と ``name_tables`` は ``hierarchy.placements`` と同じ（モデルの GUID → ルートの名前、.meta の表）。
     同じモデルに同名の GameObject があれば先のもの（配置の順）を採用する。モデルをそのまま置いた PrefabInstance は、
     中へのマテリアルの上書き（名前で引けたものと、対象の fileID で残したもの）だけが表に入る。1 つも無ければ表に入れない
-    （FBX を置いただけの prefab を、モデルを使う prefab として数えない）。
+    （FBX を置いただけの prefab を、モデルを使う prefab として数えない）。中のオブジェクトの表示を上書き・削除していれば
+    （``ModelPlacement.parts``）、空の表で入れる（#172）。
     ``placed`` に ``placements`` の結果を渡すと、配置を求め直さない。
     """
     result: dict[str, dict[str, RendererMaterials]] = {}
     for placement in placed if placed is not None else placements(h, model_names, name_tables):
-        if not placement.renderers:
+        if not placement.renderers and not placement.parts:
             continue
         table = result.setdefault(placement.model_guid, {})
         for name, renderer in placement.renderers.items():

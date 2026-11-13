@@ -43,10 +43,26 @@
           "hidden": false
         }
       }
+    },
+    "Stall": {
+      "prefab": "Assets/Synthetic/Prefabs/Stall.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase": {
+          "hidden": false
+        },
+        "StallCollider": {
+          "hidden": true
+        },
+        "StallFlag": {
+          "hidden": true
+        }
+      }
     }
   },
   "warnings_contain": [
-    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
   ],
   "warnings_exclude": [
     "were not imported"

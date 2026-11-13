@@ -9,7 +9,9 @@ from unitypackage_loader.core.hierarchy import (
     NAMED_MODEL_ROOT_GAME_OBJECT,
     NAMED_MODEL_ROOT_TRANSFORM,
     Expander,
+    PartState,
     parse_asset,
+    pending_object,
     pending_renderer,
     placements,
 )
@@ -17,6 +19,7 @@ from unitypackage_loader.core.prefab import (
     RendererMaterials,
     merge_prefab_tables,
     models_placed_whole,
+    parts_from_placements,
     resolve_model_renderers,
     tables_from_hierarchy,
     unused_parts,
@@ -350,6 +353,14 @@ class PrefabVariantTests(unittest.TestCase):
         self.assertEqual(tables_from_hierarchy(moved, MODELS), {})  # FBX を置いただけの prefab はモデルを使うものとして数えない
         resolvable = expand(VARIANT, {BASE: PREFAB, VARIANT: variant_yaml(5000, BASE, [(201, "m_Materials.Array.data[0]", "", MAT_C)])})
         self.assertEqual(resolvable.unresolved_overrides, 0)
+
+    def test_visibility_overrides_on_model_objects_are_kept_by_file_id(self):
+        # Synty の SM_Gen_Chr_Underwear_Female_01: FBX を丸ごと置き、27 体のうち 26 体を非アクティブにする（#172）
+        h = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_IsActive", "0", None)])})
+        self.assertEqual(h.unresolved_overrides, 0)
+        placed = placements(h, MODELS)
+        self.assertEqual(tables_from_hierarchy(h, MODELS, placed=placed), {MODEL_A: {}})  # 表示の上書きだけでもモデルを使う
+        self.assertEqual(parts_from_placements(placed), {MODEL_A: {pending_object(123456789): PartState(active=False)}})
 
     def test_material_overrides_on_a_model_object_are_kept_by_file_id(self):
         target = -7511558181221131132

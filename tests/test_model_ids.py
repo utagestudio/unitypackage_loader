@@ -13,8 +13,11 @@ from unitypackage_loader.core.hierarchy import (
     MODEL_ROOT_TRANSFORM,
     NAMED_MODEL_ROOT_GAME_OBJECT,
     NAMED_MODEL_ROOT_TRANSFORM,
+    PartState,
+    pending_object,
+    pending_renderer,
 )
-from unitypackage_loader.core.model_ids import ModelObject, object_claims, parse_fbx_node_names
+from unitypackage_loader.core.model_ids import ModelObject, PartMatcher, object_claims, parse_fbx_node_names
 from unitypackage_loader.core.unity_ids import hierarchy_file_id, named_file_id
 
 MASK = 0x7FFF_FFFF_FFFF_FFFF
@@ -149,6 +152,78 @@ class ClaimTests(unittest.TestCase):
         claims = object_claims([ModelObject("Armature", [("Armature",)], False), obj("Body"), prop])
         self.assertEqual(claims[uid(hierarchy_file_id("MeshRenderer", ["Armature", "Hips", "Spine", "Prop"]))], "Prop")
         self.assertEqual(claims[uid(hierarchy_file_id("MeshRenderer", ["Hips", "Spine", "Prop"]))], "Prop")
+
+
+def part(*path: str, mesh: bool = True, armature: bool = False) -> ModelObject:
+    return ModelObject(path[-1], [tuple(path)], mesh, path[-2] if len(path) > 1 else None, armature)
+
+
+def go_key(*path: str) -> str:
+    return pending_object(uid(hierarchy_file_id("GameObject", list(path))))
+
+
+def renderer_key(*path: str, type_name: str = "MeshRenderer") -> str:
+    return pending_renderer(uid(hierarchy_file_id(type_name, list(path))))
+
+
+class PartMatcherTests(unittest.TestCase):
+    """モデルの中への表示の上書きと削除を、読み込んだオブジェクトに当てる（#172）。"""
+
+    # 最上位が 2 つあるので、ルートに畳まれない
+    OBJECTS = [
+        part("Group", mesh=False), part("Group", "Body"), part("Group", "Body", "Badge"),
+        part("Collider"),
+        part("Armature", mesh=False, armature=True), part("Armature", "Skin"),
+    ]
+
+    def setUp(self):
+        self.matcher = PartMatcher(self.OBJECTS)
+
+    def test_inactive_game_object_hides_its_subtree(self):
+        match = self.matcher.match({go_key("Group"): PartState(active=False)})
+        self.assertEqual((match.hidden, match.removed, match.unmatched), ({"Group", "Body", "Badge"}, set(), 0))
+
+    def test_disabled_renderer_hides_only_itself(self):
+        match = self.matcher.match({renderer_key("Group", "Body"): PartState(enabled=False)})
+        self.assertEqual(match.hidden, {"Body"})
+
+    def test_removed_parts(self):
+        # UnityJapanOffice の Collider.fbx: 置いたシーンが MeshRenderer を消している
+        match = self.matcher.match({
+            renderer_key("Collider"): PartState(removed_renderer=True),
+            go_key("Group", "Body"): PartState(removed_object=True, active=False),
+        })
+        self.assertEqual(match.removed, {"Collider", "Body", "Badge"})
+        self.assertEqual(match.hidden, set())  # 消したものは隠す側に入れない
+
+    def test_armature_children_are_not_followed(self):
+        # Blender はスキンメッシュをアーマチュアの子にするが、Unity では別の枝にある
+        match = self.matcher.match({go_key("Armature"): PartState(active=False)})
+        self.assertEqual(match.hidden, {"Armature"})
+
+    def test_overrides_that_change_nothing_are_ignored(self):
+        match = self.matcher.match({go_key("Missing"): PartState(active=True), renderer_key("Missing"): PartState(enabled=True)})
+        self.assertEqual((match.hidden, match.removed, match.unmatched), (set(), set(), 0))
+
+    def test_unmatched_overrides_are_counted_except_removed_components(self):
+        match = self.matcher.match({
+            go_key("Missing"): PartState(active=False),
+            renderer_key("Missing"): PartState(enabled=False),
+            go_key("Gone"): PartState(removed_object=True),
+            pending_renderer(12345): PartState(removed_renderer=True),  # コライダーなど、Renderer でないかもしれない
+        })
+        self.assertEqual(match.unmatched, 3)
+
+    def test_named_parts_from_recycle_tables(self):
+        matcher = PartMatcher([part("Lid.001"), part("Pot")])
+        match = matcher.match({"Lid": PartState(active=False), "Pot": PartState(removed_renderer=True)})
+        self.assertEqual((match.hidden, match.removed), ({"Lid.001"}, {"Pot"}))
+
+    def test_collapsed_skinned_model(self):
+        # Synty の Generic_Characters.fbx の形: 最上位はアーマチュア 1 つで、ルートに畳まれる
+        objects = [part("Root", mesh=False, armature=True), part("Root", "Chr_A"), part("Root", "Chr_B")]
+        match = PartMatcher(objects).match({go_key("Chr_B"): PartState(active=False)})
+        self.assertEqual(match.hidden, {"Chr_B"})
 
 
 class FbxNodeNameTests(unittest.TestCase):

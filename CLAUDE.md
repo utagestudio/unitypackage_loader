@@ -26,7 +26,8 @@
   元が FBX の新しい形式（.meta に表が無い）では、中のオブジェクトの fileID は名前と階層パスのハッシュ（`core/unity_ids.py`。
   `fileIdsGeneration` で 2 通り）。マテリアルの上書きは対象の fileID ごとに残し、読み込んだオブジェクトから計算した fileID と
   突き合わせて当てる（`core/model_ids.py` と `prefab.resolve_model_renderers`。同名ノードなど決められないものは当てずに警告。#31 / #109）。
-  中のノードの位置・表示の上書きは未対応。
+  中のオブジェクトの表示の上書き（`m_IsActive` / `m_Enabled`）と削除も対象ごとに `hierarchy.PartState` で残し、`model_ids.PartMatcher` で当てる
+  （非アクティブ・無効は非表示、削除は使われていない部品と同じ扱い。Scenes / Prefabs 単位。#172）。中のノードの位置の上書きは未対応。
 - **読み込む単位**: 選択ダイアログで Scenes / Prefabs / Models を選ぶ（排他。候補は推測で外さず、読めないものは理由付きで灰色）。
   Scenes は `core/hierarchy.py` で .unity を展開し、モデルの配置ごとに Empty の下へ読み込む。Unity のモデル空間の (x, y, z) は
   Blender では (-x, -z, y)、ルートの行列 M は C·M·C⁻¹（`core/transform.py`。Unity 6 で作ったシーンと突き合わせて確認済み）。
