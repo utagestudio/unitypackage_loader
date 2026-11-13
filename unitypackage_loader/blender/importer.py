@@ -46,6 +46,7 @@ from ..core.prefab import (
     merge_prefab_tables,
     models_placed_whole,
     has_pending_renderers,
+    inactive_models,
     parts_from_placements,
     resolve_model_renderers,
     tables_from_hierarchy,
@@ -180,6 +181,8 @@ class PreparedPackage:
     prefab_whole_models: dict[str, set[str]] = field(default_factory=dict)
     # prefab の pathname → モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（#172）
     prefab_parts: dict[str, dict[str, dict[str, PartState]]] = field(default_factory=dict)
+    # prefab の pathname → prefab の中の配置がすべて非アクティブなモデルの GUID（すべての部品を隠す。#177）
+    prefab_inactive_models: dict[str, set[str]] = field(default_factory=dict)
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
@@ -373,6 +376,7 @@ def prepare_package(
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     prefab_whole_models: dict[str, set[str]] = {}
     prefab_parts: dict[str, dict[str, dict[str, PartState]]] = {}
+    prefab_inactive_models: dict[str, set[str]] = {}
     for entry in pkg.prefabs():
         try:
             hierarchy = expander.expand_asset(entry.guid)
@@ -382,6 +386,7 @@ def prepare_package(
             tables = tables_from_hierarchy(hierarchy, model_names, recycle, placed)
             whole = models_placed_whole(hierarchy, placed)
             parts = parts_from_placements(placed)
+            inactive = inactive_models(placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
             _log_exception(f"could not resolve prefab {entry.pathname}")
@@ -396,6 +401,8 @@ def prepare_package(
             prefab_whole_models[entry.pathname] = whole
             if parts:
                 prefab_parts[entry.pathname] = parts
+            if inactive:
+                prefab_inactive_models[entry.pathname] = inactive
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
     # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
@@ -408,7 +415,8 @@ def prepare_package(
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, prefab_whole_models=prefab_whole_models, prefab_parts=prefab_parts, scene_entries=pkg.scenes(), _expander=expander,
+        prefabs=prefabs, prefab_whole_models=prefab_whole_models, prefab_parts=prefab_parts,
+        prefab_inactive_models=prefab_inactive_models, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=pipeline.pipeline,
         pipeline_source=pipeline.source,
     )
@@ -936,6 +944,7 @@ class _ImportSession:
                 hidden_lods = hidden_unused = removed_unused = unmatched_parts = 0
                 whole = self.prepared.prefab_whole_models.get(group.prefab.pathname, set()) if group.prefab else set()
                 parts_by_model = self.prepared.prefab_parts.get(group.prefab.pathname, {}) if group.prefab else {}
+                inactive = self.prepared.prefab_inactive_models.get(group.prefab.pathname, set()) if group.prefab else set()
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                     done += 1
@@ -960,7 +969,9 @@ class _ImportSession:
                             removed_unused += removed
                         hidden_unused += self.hide_named(objects, unused)
                         self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
-                        hidden_lods += self.hide_prefab_lods(objects, prefab_table)
+                        if summary.guid in inactive:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
+                            self.hide_named(objects, {o.name for o in objects})
+                        hidden_lods += self.hide_prefab_rows(objects, prefab_table)
                 if group.prefab is not None:
                     for message in prefab_warnings(
                         hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
@@ -1192,8 +1203,9 @@ class _ImportSession:
             self.failed_models.add(summary.guid)
             raise
 
-    def hide_prefab_lods(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
-        """prefab の LODGroup で遠景用だったメッシュを隠し、隠した数を返す（#104）。
+    def hide_prefab_rows(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
+        """prefab で表示されていない Renderer（非アクティブな GameObject の下か、無効な Renderer。#177）と、LODGroup で
+        遠景用だったメッシュ（#104）を隠し、遠景用として隠した数を返す（表示されていないものは Unity と同じく数えない）。
 
         段はどのオブジェクトにも ``unity_lod`` として残すので、オプションを切っていても LOD0 かどうかは分かる。
         """
@@ -1205,7 +1217,9 @@ class _ImportSession:
             if rm is None:
                 continue
             obj["unity_lod"] = rm.lod_level
-            if rm.lod_level and self.opts.hide_lods:
+            if not rm.visible:
+                defer_hide(obj, self.hidden_objects)
+            elif rm.lod_level and self.opts.hide_lods:
                 defer_hide(obj, self.hidden_objects)
                 hidden += 1
         return hidden
