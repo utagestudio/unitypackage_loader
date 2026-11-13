@@ -31,6 +31,10 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   ProbeDecal（Standard の _Mode: 0 が残った、半透明＋アルファクリップの URP Lit。Issue #112）に上書きする。表が無いので名前は引けないが、Renderer が 1 つなので対象は確定する（Issue #109）
 - BoothRoot: メッシュが 2 つの FBX（Booth.fbx。屋根は Empty の子）をそのまま置いた prefab（Booth.prefab）を、位置 (-8, 0, 8) に。
   モデルの中の Renderer へのマテリアルの上書きは、fileID を名前と階層パスから計算して屋根と壁に当てる。モデルに無いオブジェクトを指す上書きは当てずに警告する（Issue #31）
+- StallRoot: 屋台の FBX（Stall.fbx。表なし）をそのまま置いた prefab（Stall.prefab）を、位置 (8, 0, -8) に（Issue #172）。
+  prefab はモデルの中の StallTop（Empty。子に StallAwning と StallFlag）を非アクティブに、StallSign の Renderer を無効にし、
+  StallCollider の Renderer を消す。モデルに無い GameObject を非アクティブにする上書きもある（当てずに警告する）。
+  シーンは prefab の上から StallSign の Renderer を有効に戻し、StallFlag の GameObject を消す
 
 シーンには置かない prefab: RingRed / RingPlain は、ノード名がもともと連番付きの FBX（Rings.fbx の Ring.001 と Rod.001）の
 Ring.001 だけを指す色違い（ProbeRed / ProbeMat）。読み込む単位 Prefabs で 2 つ目を読むと Blender が Ring.002 に付け替えるが、
@@ -273,6 +277,32 @@ assert KIOSK_RENDERER == -7511558181221131132
 BOOTH_ROOF_RENDERER = hierarchy_file_id("MeshRenderer", ["BoothFrame", "BoothRoof"])
 BOOTH_WALL_RENDERER = named_file_id("MeshRenderer", "BoothWall")
 BOOTH_GONE_RENDERER = 3713382542316546517  # モデルに無いオブジェクトを指したままの上書き（当てずに警告する）
+# Stall の中のオブジェクト（Issue #172）。最上位が 4 つあるのでルートに畳まれない。コライダーは名前で決まる世代で指す
+STALL_TOP_OBJECT = hierarchy_file_id("GameObject", ["StallTop"])
+STALL_FLAG_OBJECT = hierarchy_file_id("GameObject", ["StallTop", "StallFlag"])
+STALL_SIGN_RENDERER = hierarchy_file_id("MeshRenderer", ["StallSign"])
+STALL_COLLIDER_RENDERER = named_file_id("MeshRenderer", "StallCollider")
+STALL_GHOST_OBJECT = hierarchy_file_id("GameObject", ["StallGhost"])  # モデルに無い
+
+
+def export_stall_fbx(path: Path) -> None:
+    """表示の上書きと削除を確かめる屋台の FBX（Issue #172）。StallTop は Empty で、StallAwning と StallFlag を子に持つ。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    material = bpy.data.materials.new("ProbeMat")  # 名前で .mat に結び付く（.mat が無いという警告を出さない）
+    top = bpy.data.objects.new("StallTop", None)
+    bpy.context.collection.objects.link(top)
+    top.location = (0, 0, 2)
+    for name, location, parent in (
+        ("StallBase", (0, 0, 0), None), ("StallSign", (0, -0.8, 0.5), None), ("StallCollider", (0, 0, 1), None),
+        ("StallAwning", (0, 0, 0), top), ("StallFlag", (0.8, 0, 0.6), top),
+    ):
+        bpy.ops.mesh.primitive_cube_add(size=0.5, location=location)
+        obj = bpy.context.active_object
+        obj.name = name
+        obj.data.name = name
+        obj.data.materials.append(material)
+        obj.parent = parent
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
 
 
 def mod(target, guid, path, value="", reference="{fileID: 0}"):
@@ -282,11 +312,16 @@ def mod(target, guid, path, value="", reference="{fileID: 0}"):
     )
 
 
-def instance(file_id, source, parent, mods):
+def instance(file_id, source, parent, mods, removed_components=(), removed_game_objects=()):
+    def refs(key, items):
+        if not items:
+            return f"    {key}: []\n"
+        return f"    {key}:\n" + "".join(f"    - {{fileID: {f}, guid: {source}, type: 3}}\n" for f in items)
+
     return (
         f"--- !u!1001 &{file_id}\nPrefabInstance:\n  m_Modification:\n"
         f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
-        f"    m_RemovedComponents: []\n    m_RemovedGameObjects: []\n"
+        f"{refs('m_RemovedComponents', removed_components)}{refs('m_RemovedGameObjects', removed_game_objects)}"
         f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
     )
 
@@ -485,6 +520,22 @@ def main() -> None:
             stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, fbx_model, 100),
         ])).encode(), prefab_meta(fbx_prefab_path))
 
+    # 屋台: モデルの中のオブジェクトの表示を上書きし、コライダーの Renderer を消した prefab（#172）
+    stall_fbx = tmp / "stall.fbx"
+    export_stall_fbx(stall_fbx)
+    stall_model_path = "Assets/Synthetic/Models/Stall.fbx"
+    stall_model = add(stall_model_path, stall_fbx.read_bytes(), model_meta(guid_of(stall_model_path), {}))
+    stall_prefab_path = "Assets/Synthetic/Prefabs/Stall.prefab"
+    stall_prefab = add(stall_prefab_path, (HEADER + "".join([
+        instance(100, stall_model, 0, [
+            mod(ROOT_GAME_OBJECT, stall_model, "m_Name", "Stall"),
+            mod(STALL_TOP_OBJECT, stall_model, "m_IsActive", 0),
+            mod(STALL_SIGN_RENDERER, stall_model, "m_Enabled", 0),
+            mod(STALL_GHOST_OBJECT, stall_model, "m_IsActive", 0),
+        ], removed_components=[STALL_COLLIDER_RENDERER]),
+        stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, stall_model, 100),
+    ])).encode(), prefab_meta(stall_prefab_path))
+
     # 点光源だけの prefab。シーンで強さを上書きして置く
     lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
     lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
@@ -580,6 +631,13 @@ def main() -> None:
             mod(ROOT_TRANSFORM ^ 100, fbx_prefabs["Booth"], "m_LocalPosition.z", 8),
             mod(ROOT_GAME_OBJECT ^ 100, fbx_prefabs["Booth"], "m_Name", "BoothRoot"),
         ]),
+        # prefab の上から、中のモデルのオブジェクトの表示を戻し、別のオブジェクトを消す（#172）
+        instance(5500, stall_prefab, 0, [
+            mod(ROOT_TRANSFORM ^ 100, stall_prefab, "m_LocalPosition.x", 8),
+            mod(ROOT_TRANSFORM ^ 100, stall_prefab, "m_LocalPosition.z", -8),
+            mod(ROOT_GAME_OBJECT ^ 100, stall_prefab, "m_Name", "StallRoot"),
+            mod(STALL_SIGN_RENDERER ^ 100, stall_prefab, "m_Enabled", 1),
+        ], removed_game_objects=[STALL_FLAG_OBJECT ^ 100]),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),

@@ -66,12 +66,38 @@
           "hidden": false
         }
       }
+    },
+    "Stall": {
+      "prefab": "Assets/Synthetic/Prefabs/Stall.prefab",
+      "objects": 5,
+      "parts": {
+        "StallBase": {
+          "hidden": false
+        },
+        "StallSign": {
+          "hidden": true
+        },
+        "StallTop": {
+          "hidden": true
+        },
+        "StallAwning": {
+          "hidden": true
+        },
+        "StallFlag": {
+          "hidden": true
+        },
+        "StallCollider": {
+          "absent": true
+        }
+      }
     }
   },
-  "warnings_max": 6,
+  "warnings_max": 8,
   "warnings_contain": [
     "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
-    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported"
+    "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "prefab Assets/Synthetic/Prefabs/Stall.prefab: 1 visibility override(s) or removal(s) on objects inside a model could not be matched"
   ],
   "warnings_exclude": [
     "Kiosk.fbx: "
