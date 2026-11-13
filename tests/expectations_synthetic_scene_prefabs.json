@@ -90,9 +90,42 @@
           "absent": true
         }
       }
+    },
+    "StallSpare": {
+      "prefab": "Assets/Synthetic/Prefabs/StallSpare.prefab",
+      "objects": 6,
+      "parts": {
+        "StallBase.001": {
+          "hidden": true
+        },
+        "StallSign.001": {
+          "hidden": true
+        },
+        "StallTop.001": {
+          "hidden": true
+        }
+      }
+    },
+    "StallUnpacked": {
+      "prefab": "Assets/Synthetic/Prefabs/StallUnpacked.prefab",
+      "objects": 4,
+      "parts": {
+        "StallBase.002": {
+          "hidden": false
+        },
+        "StallSign.002": {
+          "hidden": true
+        },
+        "StallAwning.002": {
+          "hidden": true
+        },
+        "StallCollider.002": {
+          "absent": true
+        }
+      }
     }
   },
-  "warnings_max": 8,
+  "warnings_max": 9,
   "warnings_contain": [
     "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
     "prefab Assets/Synthetic/Prefabs/Partial.prefab: 2 object(s) from model files are not used by the Unity prefabs or scene and were not imported",

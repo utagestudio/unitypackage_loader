@@ -39,6 +39,9 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 シーンには置かない prefab: RingRed / RingPlain は、ノード名がもともと連番付きの FBX（Rings.fbx の Ring.001 と Rod.001）の
 Ring.001 だけを指す色違い（ProbeRed / ProbeMat）。読み込む単位 Prefabs で 2 つ目を読むと Blender が Ring.002 に付け替えるが、
 それでも prefab のマテリアルを当て、Rod は使われていない部品として扱う（Issue #155）。
+StallUnpacked は Stall.fbx を展開した prefab で、StallSign の Renderer が無効、StallTop（子に StallAwning）が非アクティブ。
+StallSpare は非アクティブな GameObject の下に Stall.fbx を丸ごと置いた prefab。読み込む単位 Prefabs で、どちらも
+prefab で表示されていない部品を読み込んだうえで隠す（Issue #177）。
 
 Assets/Synthetic/Scenes/Menu.unity は UI（RectTransform）だけのシーン（候補には読み込めない理由付きで残る）。
 """
@@ -167,11 +170,11 @@ def transform(file_id, go, father=0, pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=(1, 
     )
 
 
-def mesh_renderer(filter_id, renderer_id, go, model_guid, mat_guid, mesh_file_id=4300000):
+def mesh_renderer(filter_id, renderer_id, go, model_guid, mat_guid, mesh_file_id=4300000, enabled=1):
     return (
         f"--- !u!33 &{filter_id}\nMeshFilter:\n  m_GameObject: {{fileID: {go}}}\n"
         f"  m_Mesh: {{fileID: {mesh_file_id}, guid: {model_guid}, type: 3}}\n"
-        f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: {enabled}\n"
         f"  m_Materials:\n  - {{fileID: 2100000, guid: {mat_guid}, type: 2}}\n"
     )
 
@@ -535,6 +538,35 @@ def main() -> None:
         ], removed_components=[STALL_COLLIDER_RENDERER]),
         stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, stall_model, 100),
     ])).encode(), prefab_meta(stall_prefab_path))
+    # 屋台を展開した prefab と、非アクティブな GameObject の下に丸ごと置いた prefab（#177。シーンには置かない）
+    probe_mat = mats["ProbeMat"]
+    stall_unpacked_path = "Assets/Synthetic/Prefabs/StallUnpacked.prefab"
+    add(stall_unpacked_path, (HEADER + "".join([
+        game_object(10, "StallUnpacked"),
+        transform(11, 10),
+        game_object(20, "StallBase"),
+        transform(21, 20, father=11),
+        mesh_renderer(22, 23, 20, stall_model, probe_mat, mesh_file_id("StallBase")),
+        game_object(30, "StallSign"),
+        transform(31, 30, father=11, pos=(0, 0.5, 0.8)),
+        mesh_renderer(32, 33, 30, stall_model, probe_mat, mesh_file_id("StallSign"), enabled=0),
+        game_object(40, "StallTop", active=0),
+        transform(41, 40, father=11, pos=(0, 2, 0)),
+        game_object(50, "StallAwning"),
+        transform(51, 50, father=41),
+        mesh_renderer(52, 53, 50, stall_model, probe_mat, mesh_file_id("StallAwning")),
+    ])).encode(), prefab_meta(stall_unpacked_path))
+    stall_spare_path = "Assets/Synthetic/Prefabs/StallSpare.prefab"
+    add(stall_spare_path, (HEADER + "".join([
+        game_object(10, "StallSpare"),
+        transform(11, 10),
+        game_object(20, "Spare", active=0),
+        transform(21, 20, father=11),
+        instance(100, stall_model, 21, [
+            mod(STALL_SIGN_RENDERER, stall_model, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {probe_mat}, type: 2}}"),
+        ]),
+        stripped_transform(ROOT_TRANSFORM ^ 100, ROOT_TRANSFORM, stall_model, 100),
+    ])).encode(), prefab_meta(stall_spare_path))
 
     # 点光源だけの prefab。シーンで強さを上書きして置く
     lamp_path = "Assets/Synthetic/Prefabs/Lamp.prefab"
