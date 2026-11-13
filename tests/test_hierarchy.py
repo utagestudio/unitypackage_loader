@@ -436,6 +436,52 @@ class ModelRootTest(unittest.TestCase):
         self.assertEqual(set(self.by_root("Wall").renderers), {"Wall", "Wall_LOD1"})
 
 
+class SoleNodeWithoutTableTest(unittest.TestCase):
+    """表の無いモデルでも、FBX のノードが 1 つだけなら、表のある 1 メッシュの FBX と同じに置く（Issue #181）。
+
+    Unity はノードを ``//RootNode`` に畳むので、メッシュを直接指す Renderer にはノードの変換が掛からない。表が無いと
+    1 メッシュの FBX か分からず、最上位の祖先にまとめてノードの変換を残していた（UnityJapanOffice のクッション）。
+    """
+
+    BARE = "e" * 32  # 表の無い 1 メッシュの FBX
+    MESH_ID = 1234567890123  # 新しい形式ではメッシュの fileID は名前のハッシュ
+    SCENE = HEADER + "".join([
+        game_object(10, "Sofa"),
+        transform(11, 10),
+        game_object(20, "Cushion_A"),
+        transform(21, 20, father=11, pos=(1, 0, 0)),
+        mesh_renderer(22, 23, 20, BARE, MAT_A, mesh_file_id=MESH_ID),
+        game_object(30, "Cushion_A (1)"),
+        transform(31, 30, father=11, pos=(2, 0, 0)),
+        mesh_renderer(32, 33, 30, BARE, MAT_A, mesh_file_id=MESH_ID),
+    ])
+    IDENTITY = {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+    def place(self, sole_nodes=None):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        return h, placements(h, {self.BARE: "Cushion"}, {self.BARE: {}}, sole_nodes)
+
+    def test_each_renderer_is_its_own_root_with_the_node_reset(self):
+        h, placed = self.place({self.BARE: "Cushion"})
+        self.assertEqual([h.nodes[p.root].name for p in placed], ["Cushion_A", "Cushion_A (1)"])
+        for placement in placed:
+            self.assertEqual(set(placement.renderers), {"Cushion"})  # ノード名（= Blender のオブジェクト名）で引く
+            self.assertEqual(placement.node_transforms, {"Cushion": self.IDENTITY})
+            self.assertEqual(placement.root_node, "")
+        self.assertEqual([round(v, 6) for v in transform_point(placed[1].world, (0, 0, 0))], [2, 0, 0])
+
+    def test_without_the_node_name_the_top_ancestor_is_used(self):
+        h, placed = self.place()
+        self.assertEqual([h.nodes[p.root].name for p in placed], ["Sofa"])
+        self.assertEqual(placed[0].node_transforms, {})
+
+    def test_a_model_with_a_table_ignores_the_node_name(self):
+        h = expander().expand_raw(parse_asset(self.SCENE))
+        table = {self.BARE: {100000: "//RootNode", 100002: "Seat", 100004: "Back", self.MESH_ID: "Seat"}}
+        placed = placements(h, {self.BARE: "Cushion"}, table, {self.BARE: "Cushion"})
+        self.assertTrue(all("Cushion" not in p.node_transforms for p in placed))
+
+
 class CollapsedModelRootTest(unittest.TestCase):
     """1 メッシュの FBX をモデルの PrefabInstance で置いた配置（Issue #99）。
 
