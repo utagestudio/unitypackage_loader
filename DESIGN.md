@@ -71,6 +71,14 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     メッシュを直接指す prefab で、ノードの移動・回転が残っていた。UnityJapanOffice の NoonA の `Cussion_01`（0.76 m）、Synty Starter の Overview の岩（9〜17 m）、
     Japanese Street の `AE_Tablet_08`（向きが 90 度違い、隣の札と面がそろわなかった）。メッシュのワールド座標を前後で比べ、動いたのはこれらだけだった
     （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs は prefab の中の位置で並べないので対象外。
+  - 最上位のノードが 1 つだけで子を持つ FBX（Issue #185）: Unity は子があってもそのノードをルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
+    走査のときに FBX の Connections（`C: "OO", 子, 親`。親が 0 なら最上位）から最上位のノードを求め（`model_ids.parse_fbx_top_nodes`）、1 つだけならその名前を
+    `AssetEntry.fbx_top_node` に残して `placements` の `top_nodes` で渡す。Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer の
+    メッシュ参照で判定）なら、ほかの規則で単位行列にするノードが無いときに限り、そのノードを単位行列にする。表の有無によらない（表ではルートが `//RootNode` になり、
+    ノード名として引けないため）。Synty Starter の Overview の `SM_Gen_Prop_Switch_01`（本体の下にスティック。本体のノードが 1.3 cm 離れている）で、本体とスティックが
+    Unity の位置に合った。Farm の Demo、Train Station、Office、Apartment、Gothic Lights、Street の Day_Showcase は変わらない。
+  - 展開した後に中の部品を Unity 上で動かしたもの（Transform の値そのものが FBX のノードと違うもの）は、上書き前の行列も同じ値なので検出できず、FBX の中の位置のまま
+    読み込まれる（Issue #186。未対応）。
   - 複数のノードが 1 つのメッシュを共有する FBX もあるので、Renderer の名前は、GameObject 名が FBX のノード名にあればそれを優先し、無ければメッシュ名にする。
   - Japanese Apartment のシーンで、Unity が書き出した Renderer の外形の中心と比べた。FBX との対応が切れた Renderer 18 個のうち、共通の親の下にあった 13 個はすべて 1 mm 未満で一致した。Japanese Street と Unity Japan Office の配置は変わらない。Gothic Lights のデモシーンでは、潰れて抜けていた 161 個の Renderer が残るようになった。
 - 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。

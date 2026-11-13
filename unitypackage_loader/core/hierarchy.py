@@ -45,6 +45,7 @@ from typing import NamedTuple
 
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
+from .unity_ids import mesh_file_id as _mesh_file_id
 from .unity_yaml import UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
@@ -1171,6 +1172,20 @@ def _fbx_node_name(node: Node, model_guid: str, table: dict[int, str], names: se
     return None
 
 
+def _is_top_node(node: Node, model_guid: str, top: str, table: dict[int, str]) -> bool:
+    """Node が、FBX のただ 1 つの最上位のノード ``top`` を展開した GameObject か（#185）。
+
+    GameObject 名で引き、名前を変えてあれば、Node 自身の Renderer のメッシュ参照（表の名前か、名前から求めた fileID）で引く。
+    """
+    if unity_base_name(node.name) == top:
+        return True
+    renderer = node.renderer
+    if renderer is None or renderer.mesh_guid != model_guid or not renderer.mesh_file_id:
+        return False
+    named = table.get(renderer.mesh_file_id)
+    return named == top if named is not None else renderer.mesh_file_id == _mesh_file_id(top)
+
+
 def _root_candidates(
     h: Hierarchy, key: int, model_guid: str, table: dict[int, str], names: set[str] | None
 ) -> tuple[int, int]:
@@ -1231,6 +1246,7 @@ def placements(
     model_guids: ModelNames,
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
+    top_nodes: Mapping[str, str] | None = None,
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
@@ -1257,9 +1273,15 @@ def placements(
     もの。表では 1 メッシュの FBX と分からないが、Unity での置かれ方は同じなので、メッシュを直接指す Renderer の配置は
     表のある 1 メッシュの FBX と同じに扱う（メッシュはこのノードのものしか無いので、メッシュ参照の名前もこのノード名）。
     モデルの PrefabInstance の配置は今までどおり（読み込み側がオブジェクトの数で決める。#111）。Issue #181。
+
+    ``top_nodes``（モデルの GUID → FBX のただ 1 つの最上位のノードの名前）: Unity は最上位のノードが 1 つだけの FBX で、
+    子があってもそのノードをモデルのルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
+    Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer のメッシュ参照で判定）なら、
+    そのノードを単位行列にする。表の有無によらない（表ではルートが ``//RootNode`` になり、ノード名として引けないため）。Issue #185。
     """
     root_names = _model_names(model_guids)
     models = set(root_names)
+    tops = {g.lower(): name for g, name in (top_nodes or {}).items() if name}
     tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
     # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
@@ -1356,6 +1378,10 @@ def placements(
                 # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
                 if label is not None:
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
+            top = tops.get(guid)
+            if top and not placement.node_transforms and _is_top_node(h.nodes[root], guid, top, renderer_tables.get(guid, {})):
+                placement.node_transforms[top] = copy.deepcopy(_IDENTITY_NODE)
             by_root[(root, guid)] = placement
             result.append(placement)
         if name in placement.renderers:
@@ -1398,11 +1424,12 @@ def summarize(
     model_guids: ModelNames,
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
+    top_nodes: Mapping[str, str] | None = None,
 ) -> SceneContents:
     """シーンの概要。引数は ``placements`` と同じ。"""
     names = _model_names(model_guids)
     models = set(names)
-    found = placements(h, names, name_tables, sole_nodes)
+    found = placements(h, names, name_tables, sole_nodes, top_nodes)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )

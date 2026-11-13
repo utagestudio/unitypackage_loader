@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from .model_ids import parse_fbx_node_names
+from .model_ids import parse_fbx_node_names, parse_fbx_top_nodes
 
 __all__ = [
     "AssetEntry",
@@ -70,6 +70,8 @@ class AssetEntry:
     meta_text: str | None = None
     # FBX のノード（Model）が 1 つだけなら、その名前。scan で中身を読めた .fbx だけ（それ以外は空。#181）
     fbx_sole_node: str = ""
+    # FBX の最上位のノードが 1 つだけなら、その名前（子があってもよい。Unity はこのノードをルートに畳む。#185）
+    fbx_top_node: str = ""
     _cache: bytes | None = field(default=None, repr=False)
 
     @property
@@ -289,15 +291,18 @@ def _open_for_write(target: Path):
 
 
 def _note_fbx(entry: AssetEntry, data: bytes) -> None:
-    """FBX の中身から、ノードが 1 つだけならその名前を覚える（表の無い 1 メッシュの FBX の配置に使う。#181）。"""
+    """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。"""
     if entry.ext != ".fbx":
         return
     try:
         names = parse_fbx_node_names(data)
+        tops = parse_fbx_top_nodes(data)
     except (ValueError, IndexError, struct.error):
         return
     if names and sum(names.values()) == 1:
         entry.fbx_sole_node = next(iter(names))
+    if tops is not None and len(tops) == 1:
+        entry.fbx_top_node = tops[0]
 
 
 def _drop_cache(entry: AssetEntry) -> None:

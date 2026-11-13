@@ -133,6 +133,16 @@
       ]
     },
     {
+      "top": "SlabKnobRoot",
+      "object": "Slab",
+      "tip": [
+        -2.9936,
+        -34.0163,
+        1.011
+      ],
+      "hidden": false
+    },
+    {
       "top": "SlabInstance",
       "object": "Slab",
       "tip": [

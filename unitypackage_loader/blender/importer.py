@@ -375,7 +375,7 @@ def prepare_package(
     # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
     model_names, recycle = _model_tables(models)
-    sole_nodes = _sole_nodes(models)
+    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
     collider_meshes: set[str] = set()
     expander = Expander(_prefab_reader(pkg, warnings.append, collider_meshes), model_names, recycle)
     used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
@@ -388,7 +388,7 @@ def prepare_package(
             hierarchy = expander.expand_asset(entry.guid)
             if hierarchy is None:  # 読めなかった（警告は読むときに出している）
                 continue
-            placed = placements(hierarchy, model_names, recycle, sole_nodes)
+            placed = placements(hierarchy, model_names, recycle, sole_nodes, top_nodes)
             tables = tables_from_hierarchy(hierarchy, model_names, recycle, placed)
             whole = models_placed_whole(hierarchy, placed)
             parts = parts_from_placements(placed)
@@ -449,6 +449,11 @@ def _sole_nodes(models: list[ModelSummary]) -> dict[str, str]:
     return {m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node}
 
 
+def _top_nodes(models: list[ModelSummary]) -> dict[str, str]:
+    """FBX の最上位のノードが 1 つだけのモデルの GUID → そのノード名（Unity が畳むノード。#185）。"""
+    return {m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node}
+
+
 def _prefab_reader(
     pkg: UnityPackage, warn: Callable[[str], None], collider_meshes: set[str] | None = None
 ) -> Callable[[str], RawAsset | None]:
@@ -482,14 +487,14 @@ def _prepare_scenes(
     if not entries:
         return [], {}
     model_names, recycle = _model_tables(models)
-    sole_nodes = _sole_nodes(models)
+    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:
         contents = None
         try:
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
-            contents = summarize(hierarchy, model_names, recycle, sole_nodes)
+            contents = summarize(hierarchy, model_names, recycle, sole_nodes, top_nodes)
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn(f"could not read scene {entry.pathname}: {exc}")
