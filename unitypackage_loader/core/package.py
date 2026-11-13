@@ -15,10 +15,13 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import tarfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+
+from .model_ids import parse_fbx_node_names
 
 __all__ = [
     "AssetEntry",
@@ -65,6 +68,8 @@ class AssetEntry:
     size: int = 0
     mtime: int = 0  # tar メンバーの更新時刻（展開済みファイルが同じものかの判定に使う）
     meta_text: str | None = None
+    # FBX のノード（Model）が 1 つだけなら、その名前。scan で中身を読めた .fbx だけ（それ以外は空。#181）
+    fbx_sole_node: str = ""
     _cache: bytes | None = field(default=None, repr=False)
 
     @property
@@ -283,13 +288,32 @@ def _open_for_write(target: Path):
     return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
+def _note_fbx(entry: AssetEntry, data: bytes) -> None:
+    """FBX の中身から、ノードが 1 つだけならその名前を覚える（表の無い 1 メッシュの FBX の配置に使う。#181）。"""
+    if entry.ext != ".fbx":
+        return
+    try:
+        names = parse_fbx_node_names(data)
+    except (ValueError, IndexError, struct.error):
+        return
+    if names and sum(names.values()) == 1:
+        entry.fbx_sole_node = next(iter(names))
+
+
+def _drop_cache(entry: AssetEntry) -> None:
+    """キャッシュしない拡張子の実体を捨てる。捨てる前に FBX のノード名だけ見ておく。"""
+    if entry._cache is not None:
+        _note_fbx(entry, entry._cache)
+    entry._cache = None
+
+
 def _settle_cache(entry: AssetEntry) -> None:
     """scan で読んだ実体を残すか決める。拡張子が分かればそれで、分からなければ小さいものだけ残す（最後に決め直す）。"""
     if entry._cache is None:
         return
     if entry.pathname:
         if entry.ext not in _CACHE_EXTS:
-            entry._cache = None
+            _drop_cache(entry)
     elif len(entry._cache) > _CACHE_MAX_SIZE:
         entry._cache = None
 
@@ -349,6 +373,8 @@ class UnityPackage:
                             entry._cache = tar.extractfile(member).read()
                             if not known:
                                 held = entry
+                        elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext == ".fbx":
+                            _note_fbx(entry, tar.extractfile(member).read())
                     if progress is not None:
                         progress(0.0, entry.pathname or guid)
         except (tarfile.TarError, EOFError, OSError) as exc:
@@ -360,7 +386,7 @@ class UnityPackage:
         # pathname が離れた位置にあったものも、判明した拡張子で残すか決め直す
         for entry in entries.values():
             if entry._cache is not None and entry.ext not in _CACHE_EXTS:
-                entry._cache = None
+                _drop_cache(entry)
 
         self.entries = entries
         self._scanned = True

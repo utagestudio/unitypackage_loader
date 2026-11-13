@@ -1227,7 +1227,10 @@ class _RendererRow(NamedTuple):
 
 
 def placements(
-    h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None
+    h: Hierarchy,
+    model_guids: ModelNames,
+    name_tables: dict[str, dict[int, str]] | None = None,
+    sole_nodes: Mapping[str, str] | None = None,
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
@@ -1237,7 +1240,7 @@ def placements(
     メッシュの名前（= FBX のノード名、Blender のオブジェクト名）を使う。展開した prefab で GameObject の名前を
     変えていても、モデルのオブジェクトと照合できる（#58）。引けなければ GameObject の名前。
 
-    Renderer をまとめるモデルのルート（Issue #60）: 表の無いモデルは最上位の祖先（scope）。表のあるモデルは
+    Renderer をまとめるモデルのルート（Issue #60）: 表の無いモデルは最上位の祖先（scope。下の ``sole_nodes`` を除く）。表のあるモデルは
     ``_root_candidates`` の候補にまとめるが、次のときは候補をモデルのルートとみなさず、Renderer の GameObject
     （たどった FBX のノード）自身をルートにする。シーンの共通の親の下に、FBX から切り離した小物を複製して並べた場合。
 
@@ -1249,17 +1252,35 @@ def placements(
     1 メッシュの FBX（Renderer の GameObject 自身がルート）も同じで、Unity はノードを ``//RootNode`` に畳んで
     その変換をモデルのルートの Transform に載せ、メッシュの頂点はノード空間のままにするため、メッシュを直接指す
     Renderer にはノードの変換が掛からない（Unity 6000.6.0f1 で確認。Issue #98）。
+
+    ``sole_nodes``（モデルの GUID → FBX のただ 1 つのノードの名前）は、表の無いモデルのうち FBX のノードが 1 つだけの
+    もの。表では 1 メッシュの FBX と分からないが、Unity での置かれ方は同じなので、メッシュを直接指す Renderer の配置は
+    表のある 1 メッシュの FBX と同じに扱う（メッシュはこのノードのものしか無いので、メッシュ参照の名前もこのノード名）。
+    モデルの PrefabInstance の配置は今までどおり（読み込み側がオブジェクトの数で決める。#111）。Issue #181。
     """
     root_names = _model_names(model_guids)
     models = set(root_names)
     tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := _node_names(table)) is not None}
+    # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
+    sole = {
+        g.lower(): name for g, name in (sole_nodes or {}).items()
+        if name and not tables.get(g.lower()) and g.lower() in models
+    }
+    renderer_tables = {g: table for g, table in tables.items() if g not in sole}
+    for node in h.nodes.values():
+        renderer = node.renderer
+        if renderer is not None and renderer.mesh_guid in sole and renderer.mesh_file_id:
+            renderer_tables.setdefault(renderer.mesh_guid, {})[renderer.mesh_file_id] = sole[renderer.mesh_guid]
+    for g in sole:
+        if g in renderer_tables:
+            node_names[g] = set()
     # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
     for node in h.nodes.values():
         renderer = node.renderer
         if (
             renderer is not None and renderer.mesh_guid in node_names
-            and renderer.mesh_file_id and renderer.mesh_file_id not in tables[renderer.mesh_guid]
+            and renderer.mesh_file_id and renderer.mesh_file_id not in renderer_tables[renderer.mesh_guid]
         ):
             del node_names[renderer.mesh_guid]
     worlds = world_matrices(h)
@@ -1291,11 +1312,12 @@ def placements(
             continue
         # FBX のノード名と同じ GameObject 名を優先する（複数のノードが 1 つのメッシュを共有する FBX もあるため）
         names = node_names.get(renderer.mesh_guid)
-        mesh_name = tables.get(renderer.mesh_guid, {}).get(renderer.mesh_file_id)
+        table = renderer_tables.get(renderer.mesh_guid, {})
+        mesh_name = table.get(renderer.mesh_file_id)
         name = unity_base_name(node.name)
         if not (names and name in names) and mesh_name and mesh_name != _ROOT_NODE_NAME:
             name = mesh_name
-        candidate, own = _root_candidates(h, key, renderer.mesh_guid, tables.get(renderer.mesh_guid, {}), names)
+        candidate, own = _root_candidates(h, key, renderer.mesh_guid, table, names)
         item = _RendererRow(key, name, candidate, own)
         groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
         items.append(item)
@@ -1330,7 +1352,7 @@ def placements(
             placement = ModelPlacement(guid, root, worlds[root], active[root])
             names = node_names.get(guid)
             if names is not None and root == own:
-                label = _fbx_node_name(h.nodes[root], guid, tables.get(guid, {}), names)
+                label = _fbx_node_name(h.nodes[root], guid, renderer_tables.get(guid, {}), names)
                 if label is not None:  # FBX の中のノードをルートにした
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
             by_root[(root, guid)] = placement
@@ -1370,11 +1392,16 @@ class SceneContents:
         return list(seen)
 
 
-def summarize(h: Hierarchy, model_guids: ModelNames, name_tables: dict[str, dict[int, str]] | None = None) -> SceneContents:
+def summarize(
+    h: Hierarchy,
+    model_guids: ModelNames,
+    name_tables: dict[str, dict[int, str]] | None = None,
+    sole_nodes: Mapping[str, str] | None = None,
+) -> SceneContents:
     """シーンの概要。引数は ``placements`` と同じ。"""
     names = _model_names(model_guids)
     models = set(names)
-    found = placements(h, names, name_tables)
+    found = placements(h, names, name_tables, sole_nodes)
     other = sum(
         1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
     )

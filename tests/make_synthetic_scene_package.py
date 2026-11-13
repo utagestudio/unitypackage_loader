@@ -18,6 +18,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
 - SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
+- SlabBareRoot: 表の無い同じ FBX（SlabBare.fbx）のメッシュを直接指す prefab を、SlabRoot から Unity の Z に 10 ずらして
+  同じ向きで（Issue #181。表が無くても、FBX のノードが 1 つだけならノードの変換を掛けない）
 - SlabInstance: 同じ FBX をモデルの PrefabInstance で、位置 (2, 0.5, -6)・Y 30 度に。スケールは上書きせず、FBX の
   ノードの値のままにする（Issue #99。Unity のルートの Transform はノードの変換に上書きを当てたもの）
 - SlabBareInstance: 同じ FBX を表の無い .meta で別のモデル（SlabBare.fbx）にし、SlabInstance から Unity の X に 10 ずらして
@@ -420,6 +422,13 @@ def main() -> None:
         transform(11, 10),
         mesh_renderer(12, 13, 10, slab_model, mats["ProbeMat"], 4300000),
     ])).encode(), prefab_meta(slab_prefab_path))
+    # 同じ形で、表の無いモデルのメッシュを指す prefab（#181。UnityJapanOffice のクッションと同じ形）
+    slab_bare_prefab_path = "Assets/Synthetic/Prefabs/SlabBare.prefab"
+    slab_bare_prefab = add(slab_bare_prefab_path, (HEADER + "".join([
+        game_object(10, "Slab"),
+        transform(11, 10),
+        mesh_renderer(12, 13, 10, bare_model, mats["ProbeMat"], mesh_file_id("Slab")),
+    ])).encode(), prefab_meta(slab_bare_prefab_path))
 
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
     def unpacked_prefab(name, mat_guid, spike_only=False):
@@ -632,6 +641,15 @@ def main() -> None:
             mod(11, slab_prefab, "m_LocalRotation.y", 0.38268346),
             mod(11, slab_prefab, "m_LocalRotation.w", 0.9238795),
             mod(10, slab_prefab, "m_Name", "SlabRoot"),
+        ]),
+        # 表の無い 1 メッシュの FBX をメッシュ参照で使う prefab（#181）。SlabRoot から Unity の Z に 10 ずらす
+        instance(5050, slab_bare_prefab, 0, [
+            mod(11, slab_bare_prefab, "m_LocalPosition.x", 3),
+            mod(11, slab_bare_prefab, "m_LocalPosition.y", 1),
+            mod(11, slab_bare_prefab, "m_LocalPosition.z", 24),
+            mod(11, slab_bare_prefab, "m_LocalRotation.y", 0.38268346),
+            mod(11, slab_bare_prefab, "m_LocalRotation.w", 0.9238795),
+            mod(10, slab_bare_prefab, "m_Name", "SlabBareRoot"),
         ]),
         # 1 メッシュの FBX をモデルの PrefabInstance で置く（#99）。位置と回転だけを上書きし、スケールは
         # FBX のノードの値（Unity では 100）のままにする
