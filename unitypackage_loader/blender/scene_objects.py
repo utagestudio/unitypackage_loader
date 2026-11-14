@@ -17,6 +17,7 @@ from ..core.arrange import arrange_offsets
 from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
+from ..core.prefab import RendererMaterials, find_renderer
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
 
@@ -330,6 +331,73 @@ def _world_matrix(obj: bpy.types.Object | None) -> Matrix | None:
         matrix = obj.matrix_parent_inverse @ obj.matrix_basis @ matrix
         obj, count = obj.parent, count + 1
     return matrix if obj is None else None
+
+
+def _same_placement(a: Matrix, b: Matrix) -> bool:
+    """2 つの行列が、float の誤差を除いて同じ置き方か（列の長さに対する相対誤差と、位置の誤差）。
+
+    位置は 0.1 mm に、座標の大きさに比例する float の誤差（100 万分の 1）を足した範囲で比べる。座標に比例させるだけだと、
+    原点から離れた部品の数 cm のずれを見逃す（Farm の 216 m 先の門扉で 2 cm）。
+    """
+    size = max(1.0, *(a.col[i].xyz.length for i in range(3)))
+    if any(abs(a[r][c] - b[r][c]) > 1e-4 * size for r in range(3) for c in range(3)):
+        return False
+    return all(abs(a[r][3] - b[r][3]) <= 1e-4 + 1e-6 * abs(a[r][3]) for r in range(3))
+
+
+def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dict, unit_scale: float | None) -> int:
+    """FBX を展開した配置で、Renderer の GameObject が FBX のノードと違う位置にあるオブジェクトを、Unity の位置に置き直す。
+
+    ``renderers`` は配置の Renderer（``PlacedRenderer``）。``relative`` が Unity でのルートから GameObject までの行列 R。
+    原点に読み込んだオブジェクトの行列は C·L·A（``_node_basis``）なので、ルートの Empty の行列 E の下では E·C·R·A が
+    Unity と同じ置き方になる。展開した Transform の値そのものを Unity 上で動かした部品（上書き前の行列も同じなので、
+    上書きからは分からない）と、上書きで動かした部品の両方をこれで扱う。いまの置き方と同じ（誤差の範囲）なら触らない。
+
+    オブジェクトと Renderer の対応は prefab の表と同じ照合（``find_renderer``。Blender が連番を付け替えた名前も引ける。#155）で、
+    テンプレートのオブジェクト名で引く（複製した配置は名前に連番が付くため）。1 つの Renderer に複数のオブジェクトが
+    当たるときは、どれか決められないので触らない。親から順に置き、アーマチュアで変形するものは触らずに、
+    ずれていたものだけを数えて返す（Issue #186）。
+    """
+    if root is None or not any(r.relative is not None for r in renderers.values()):
+        return 0
+    f = _file_scale(unit_scale)
+    basis_a = Matrix.Diagonal((-f, f, f, 1.0))
+    base = _world_matrix(root)
+    if base is None:
+        return 0
+    base = base @ Matrix(UNITY_TO_BLENDER)
+    table = {name: RendererMaterials(name, mesh_file_id=r.mesh_file_id) for name, r in renderers.items()}
+    claimed: dict[str, list] = {}
+    for original, obj in zip(template.objects, objects):
+        found = find_renderer(table, original.name)
+        if found is not None:
+            claimed.setdefault(found.game_object, []).append(obj)
+    targets = []
+    for name, found in claimed.items():
+        relative = renderers[name].relative
+        if relative is not None and len(found) == 1:
+            targets.append((found[0], Matrix(relative)))
+
+    def depth(obj) -> int:
+        count = 0
+        while obj.parent is not None and count < 1000:
+            obj, count = obj.parent, count + 1
+        return count
+
+    skipped = 0
+    for obj, relative in sorted(targets, key=lambda item: depth(item[0])):
+        current = _world_matrix(obj)
+        target = base @ relative @ basis_a
+        if current is not None and _same_placement(current, target):
+            continue
+        deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
+        parent_world = _world_matrix(obj.parent)  # 親を先に動かしているので、ここで求め直す
+        if deformed or obj.type == "ARMATURE" or current is None or parent_world is None:
+            skipped += 1
+            continue
+        frame = parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
+        obj.matrix_basis = frame.inverted_safe() @ target
+    return skipped
 
 
 def apply_offsets(objects, root_world, offsets, scale: float) -> int:

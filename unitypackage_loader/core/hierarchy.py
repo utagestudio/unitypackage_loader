@@ -29,8 +29,10 @@
 
 - モデルの PrefabInstance: そのルートの Node。
 - モデルのメッシュを直接指す Renderer（FBX を展開した prefab やシーン）: モデルのルートとみなす Node を Renderer ごとに
-  決め、同じルート・同じモデルの Renderer をまとめる。中のノードが上書きで動いていれば、Renderer ごとに
-  「そのノードから逆算したルートの行列」を ``offsets`` に持つ。ルートの決め方は ``placements`` を参照（Issue #60）。
+  決め、同じルート・同じモデルの Renderer をまとめる。Renderer ごとに、ルートから GameObject までの Unity での行列を
+  ``PlacedRenderer.relative`` に持ち、読み込み側が FBX のオブジェクトと比べて、Unity 上で動かした部品を置き直す（Issue #186）。
+  FBX 以外のモデルでは、中のノードが上書きで動いていれば、Renderer ごとに「そのノードから逆算したルートの行列」を
+  ``offsets`` に持つ。ルートの決め方は ``placements`` を参照（Issue #60）。
 """
 
 from __future__ import annotations
@@ -1085,6 +1087,10 @@ class PlacedRenderer:
     visible: bool  # GameObject がアクティブで Renderer が有効
     mesh_file_id: int = 0  # メッシュ参照の fileID（表で名前を引けなかったとき、読み込み側がハッシュで照合する）
     lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
+    # Unity でのモデルのルートからこの GameObject までの行列（ルートのワールド行列の逆 · GameObject のワールド行列）。
+    # 展開した Renderer の配置で、ルートより下の Renderer だけが持つ。同じ配置に同名の Renderer があれば、どれのものか
+    # 決められないので None（#186）
+    relative: Mat4 | None = None
 
 
 @dataclass
@@ -1385,10 +1391,15 @@ def placements(
             by_root[(root, guid)] = placement
             result.append(placement)
         if name in placement.renderers:
+            placement.renderers[name].relative = None
             continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
+        # ルート自身の Renderer は置き直さない。FBX の最上位のノードを Unity がルートに畳んだもので、ルートの Transform が
+        # ノードの変換を含むため、オブジェクトの行列との関係が中のノードと違う（置き方は #98 / #181 / #185 で決まっている）
+        root_inverse = inverse_affine(placement.world) if key != root else None
         placement.renderers[name] = PlacedRenderer(
             name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
             renderer.mesh_file_id, renderer.lod_level,
+            multiply(root_inverse, worlds[key]) if root_inverse is not None else None,
         )
         # ルートからこの Node までの、上書き前の行列の積で逆算する
         inverse = inverse_affine(node.scope_matrix)
