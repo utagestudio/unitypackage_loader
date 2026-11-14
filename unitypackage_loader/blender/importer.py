@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import traceback
 from collections import Counter
+from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -25,6 +26,7 @@ from ..core.hierarchy import (
     Expander,
     Hierarchy,
     ModelCatalog,
+    PartState,
     RawAsset,
     built_from_renderers,
     effective_active,
@@ -850,21 +852,92 @@ class _ImportSession:
 
     以前は ``run_import`` から呼ぶ関数の中の入れ子の関数（``build_model`` / ``import_model`` / ``import_scene``）が、外側の変数を
     20 個取り込んでいた。読み込みの間に共有する状態（展開したファイル、読み込んだ画像、組み立てたマテリアル、
-    作業用のコレクションなど）をフィールドにし、手順をメソッドにする（#78）。フィールドは ``run`` の中で順に作る。
+    作業用のコレクションなど）をフィールドにし、手順をメソッドにする（#78）。フィールドは ``__init__`` で宣言し、
+    パッケージの解析や展開の結果は ``run`` の中で入れる（#198）。
     """
 
     def __init__(self, context, filepath, opts, progress, prepared, report):
         self.context = context
         self.filepath = filepath
+        self.package_path = Path(filepath)
         self.opts = opts
         self.progress = progress
-        self.prepared = prepared
-        self.report = report
+        self.prepared: PreparedPackage | None = prepared
+        self.report: ImportReport = report
+        # 以下は run の中で、パッケージを解析した後に入れる
+        self.pkg: UnityPackage | None = None
+        self.unity_mats: dict[str, UnityMaterial] = {}
+        self.normalized: dict[str, NormalizedMaterial] = {}
+        self.supported_models: dict[str, ModelSummary] = {}
+        self.model_by_guid: dict[str, ModelSummary] = {}
+        self.extract_root: Path | None = None
+        self.paths: dict[str, Path] = {}  # 展開したファイルの GUID → パス
+        self.images: _TextureImages | None = None
+        self.tex_infos: dict[str, TextureImporterInfo] = {}
+        self.build_opts = mat_builder.MaterialBuildOptions(
+            mode=opts.material_mode,
+            force_opaque=opts.force_opaque,
+            backface_culling=opts.backface_culling,
+            use_normal_maps=opts.use_normal_maps,
+            use_emission=opts.use_emission,
+            store_props=opts.store_props,
+        )
+        self.scene = context.scene
+        self.collection: bpy.types.Collection | None = None  # パッケージ用のコレクション
+        self.staging: bpy.types.Collection | None = None  # 読み込み中だけ使う作業用のコレクション
+        self.hidden_objects: list[bpy.types.Object] = []  # 読み込みの後で hide_set するもの
+        # 同じ .mat は、この回の読み込みの中で 1 つの Blender マテリアルを共有する（別のモデル同士、同じモデルの読み直し、
+        # 1 つのモデルの複数のスロット、prefab のスロット分割のどれでも。#77）
+        self.built_by_guid: dict[str, bpy.types.Material] = {}
+        self.imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
+        self.node_names: dict[str, Counter | None] = {}  # モデルの GUID → FBX のノードの名前と数（読めなければ None。#31）
+        # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
+        self.last_matcher: PartMatcher | None = None
+        self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
+        self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
+        self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
+        self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
+        self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
 
     def run(self) -> None:
-        package_path = Path(self.filepath)
-
         self.step(0.0, "Scanning package")
+        self.analyze()
+        groups = [] if self.opts.unit == UNIT_SCENES else _plan_groups(self.prepared, self.opts)
+        scenes = _select_scenes(self.prepared, self.opts) if self.opts.unit == UNIT_SCENES else []
+        models = self.models_to_import(groups, scenes)
+        needed_tex, written = self.extract(groups, scenes, models)
+        self.step(0.5, "Loading textures")
+        self.images = _TextureImages(self.pkg)
+        self.load_textures(needed_tex, written)
+
+        self.collection = bpy.data.collections.new(self.package_path.stem)
+        self.scene.collection.children.link(self.collection)
+        self.staging = bpy.data.collections.new(f"{self.package_path.stem} (importing)")
+        self.scene.collection.children.link(self.staging)
+        total = sum(len(group.models) for group in groups) + len(scenes)
+        done = 0
+        with self.collections_out_of_view_layer():
+            for group in groups:
+                self.import_group(group, done, total)
+                done += len(group.models)
+            for scene_summary in scenes:
+                try:
+                    self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+                except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
+                    _record_failure(self.report, f"could not import scene {scene_summary.pathname}: {exc}")
+                done += 1
+        self.fill_missed_textures()
+        for obj in self.hidden_objects:
+            if not _is_removed(obj):
+                obj.hide_set(True)
+        if self.opts.arrange == "SIDE_BY_SIDE" and len(self.prefab_collections) > 1:
+            arrange_collections(self.context, self.prefab_collections)
+
+        self.collection["unity_package"] = self.package_path.name
+        self.step(1.0, "Done")
+
+    def analyze(self) -> None:
+        """パッケージを解析し（ダイアログで解析済みなら使う）、解析中の警告と読み込めないモデルをレポートに写す。"""
         if self.prepared is None:
             self.prepared = prepare_package(
                 self.filepath, build_shader_table(self.opts.shader_table_path), import_blend=self.opts.import_blend
@@ -877,33 +950,38 @@ class _ImportSession:
         for m in self.prepared.models:
             if not m.supported:
                 self.report.warn(f"skipped {m.entry.pathname}: {m.skip_reason}")
-
-        groups = [] if self.opts.unit == UNIT_SCENES else _plan_groups(self.prepared, self.opts)
-        scenes = _select_scenes(self.prepared, self.opts) if self.opts.unit == UNIT_SCENES else []
+        self.unity_mats, self.normalized = self.prepared.unity_mats, self.prepared.normalized
         self.supported_models = {m.guid: m for m in self.prepared.supported_models}
+        self.model_by_guid = {m.guid: m for m in self.prepared.models}
+
+    def models_to_import(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> list[ModelSummary]:
+        """読み込む prefab・シーンが使うモデル。1 つも無ければ、読み込めない理由を添えて PackageError を送る。"""
         selected: dict[str, ModelSummary] = {summary.guid: summary for group in groups for summary, _ in group.models}
         for scene_summary in scenes:
             for placement in scene_summary.placements:
                 if placement.model_guid in self.supported_models:
                     selected.setdefault(placement.model_guid, self.supported_models[placement.model_guid])
-        models = list(selected.values())
-        if not models:
-            reasons = {m.skip_reason for m in self.prepared.models if not m.supported}
-            what = "models"
-            if self.opts.unit == UNIT_PREFABS:
-                reasons |= {p.skip_reason for p in self.prepared.prefabs if not p.supported}
-                what = "prefabs"
-            elif self.opts.unit == UNIT_SCENES:
-                reasons |= {s.skip_reason for s in self.prepared.scenes if not s.supported}
-                what = "scenes"
-            reasons_text = "; ".join(sorted(reasons))
-            raise PackageError(f"no importable {what} selected" + (f" ({reasons_text})" if reasons_text else ""))
+        if selected:
+            return list(selected.values())
+        reasons = {m.skip_reason for m in self.prepared.models if not m.supported}
+        what = "models"
+        if self.opts.unit == UNIT_PREFABS:
+            reasons |= {p.skip_reason for p in self.prepared.prefabs if not p.supported}
+            what = "prefabs"
+        elif self.opts.unit == UNIT_SCENES:
+            reasons |= {s.skip_reason for s in self.prepared.scenes if not s.supported}
+            what = "scenes"
+        reasons_text = "; ".join(sorted(reasons))
+        raise PackageError(f"no importable {what} selected" + (f" ({reasons_text})" if reasons_text else ""))
 
-        self.unity_mats, self.normalized = self.prepared.unity_mats, self.prepared.normalized
+    def extract(
+        self, groups: list[_ImportGroup], scenes: list[SceneSummary], models: list[ModelSummary]
+    ) -> tuple[set[str], set[str]]:
+        """モデルと付随ファイル、必要なテクスチャを展開する。(読み込むテクスチャの GUID, 実際に書き出したファイルの GUID) を返す。
 
-        # --- 必要なテクスチャを決めて展開 ---
-        # 読み込むモデル・prefab・シーンで割り当てる .mat のテクスチャだけにする（#164）。予測から漏れたものは、
-        # 組み立てで足りなかったところで覚えておき、最後にまとめて展開して組み直す（fill_missed_textures）
+        テクスチャは、読み込むモデル・prefab・シーンで割り当てる .mat のものだけにする（#164）。予測から漏れたものは、
+        組み立てで足りなかったところで覚えておき、最後にまとめて展開して組み直す（``fill_missed_textures``）。
+        """
         needed_tex = material_textures(self.expected_materials(groups, scenes), self.normalized)
         if self.opts.import_unreferenced:
             needed_tex.update(e.guid for e in self.pkg.textures())
@@ -912,66 +990,31 @@ class _ImportSession:
             self.report.warn(f"texture {g} is referenced but not included in the package")
         needed_tex -= missing
 
-        extract_root = resolve_extract_root(self.opts, package_path)
-        self.report.extract_root = str(extract_root)
-        self.extract_root = extract_root
+        self.extract_root = resolve_extract_root(self.opts, self.package_path)
+        self.report.extract_root = str(self.extract_root)
         self.step(0.2, "Extracting files")
         sidecars = [g for m in models for g in _sidecar_guids(self.pkg, m.entry)]
         written: set[str] = set()  # 実際に書き出した（展開し直した）ファイル
         self.paths = self.pkg.extract(
             [m.guid for m in models] + sidecars + sorted(needed_tex),
-            extract_root,
+            self.extract_root,
             overwrite=self.opts.overwrite_extracted,
             progress=lambda f, n: self.step(0.2 + 0.3 * f, f"Extracting {n}"),
             max_total_size=self.opts.max_extract_size,
             written=written,
         )
+        return needed_tex, written
 
-        # --- 画像の読み込み ---
-        self.step(0.5, "Loading textures")
-        self.images = _TextureImages(self.pkg)
-        self.tex_infos: dict[str, TextureImporterInfo] = {}
-        self.load_textures(needed_tex, written)
+    @contextmanager
+    def collections_out_of_view_layer(self):
+        """読み込みの間、パッケージのコレクションをビューレイヤーから外し、作業用のコレクションをアクティブにする（#75）。
 
-        # --- パッケージ用コレクション ---
-        self.scene = self.context.scene
-        self.collection = bpy.data.collections.new(package_path.stem)
-        self.scene.collection.children.link(self.collection)
-        self.staging = bpy.data.collections.new(f"{package_path.stem} (importing)")  # 読み込み中だけ使う作業用のコレクション
-        self.scene.collection.children.link(self.staging)
-        self.hidden_objects: list[bpy.types.Object] = []  # 読み込みの後で hide_set するもの
+        インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのものが増えるほど 1 回が重くなる
+        （Japanese Street の Day_Showcase では 1 回 70 ms。3000 オブジェクトで 180 ms、ビューレイヤーから外すと 5 ms）。
+        モデルは空の作業用コレクションに読み込んでから移す。終わったら（失敗しても）元に戻し、作業用のコレクションを消す。
+        """
         view_layer = self.context.view_layer
         prev_active = view_layer.active_layer_collection
-
-        self.build_opts = mat_builder.MaterialBuildOptions(
-            mode=self.opts.material_mode,
-            force_opaque=self.opts.force_opaque,
-            backface_culling=self.opts.backface_culling,
-            use_normal_maps=self.opts.use_normal_maps,
-            use_emission=self.opts.use_emission,
-            store_props=self.opts.store_props,
-        )
-
-        # 同じ .mat は、この回の読み込みの中で 1 つの Blender マテリアルを共有する（別のモデル同士、同じモデルの読み直し、
-        # 1 つのモデルの複数のスロット、prefab のスロット分割のどれでも。#77）
-        self.built_by_guid: dict[str, bpy.types.Material] = {}
-        self.imported_models: set[str] = set()  # この回で読み込み済みのモデル（prefab ごとに同じモデルを読み直すことがある）
-        self.node_names: dict[str, Counter | None] = {}  # モデルの GUID → FBX のノードの名前と数（読めなければ None。#31）
-        # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
-        self.last_matcher: PartMatcher | None = None
-        self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
-        self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
-        self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
-        self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
-
-        self.model_by_guid = {m.guid: m for m in self.prepared.models}
-
-        prefab_collections: list[bpy.types.Collection] = []
-        total = sum(len(group.models) for group in groups) + len(scenes)
-        done = 0
-        # インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのものが増えるほど 1 回が重くなる
-        # （Japanese Street の Day_Showcase では 1 回 70 ms。3000 オブジェクトで 180 ms、ビューレイヤーから外すと 5 ms）。
-        # パッケージのコレクションは読み込みが終わるまでビューレイヤーから外し、モデルは空の作業用コレクションに読み込んでから移す（#75）
         package_layer = find_layer_collection(view_layer.layer_collection, self.collection)
         staging_layer = find_layer_collection(view_layer.layer_collection, self.staging)
         if staging_layer is not None:
@@ -979,73 +1022,72 @@ class _ImportSession:
         if package_layer is not None:
             package_layer.exclude = True
         try:
-            for group in groups:
-                target = self.collection
-                if group.prefab is not None:
-                    prefab = group.prefab
-                    target = bpy.data.collections.new(prefab.name)
-                    self.collection.children.link(target)
-                    target["unity_prefab"] = prefab.pathname
-                    target["unity_prefab_guid"] = prefab.guid
-                    prefab_collections.append(target)
-                    self.report.prefabs.append(prefab.pathname)
-                    for guid in prefab.model_guids:
-                        skipped = self.model_by_guid.get(guid)
-                        if skipped is not None and not skipped.supported:
-                            self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-                stats = PlacementStats()
-                whole, parts_by_model, inactive = group.analysis.whole_models, group.analysis.parts, group.analysis.inactive_models
-                for summary, prefab_table in group.models:
-                    self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
-                    done += 1
-                    if summary.guid in self.failed_models:
-                        continue
-                    parts = parts_by_model.get(summary.guid, {})
-                    try:
-                        objects = self.import_model(summary, prefab_table, target, with_parts=bool(parts))
-                    except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
-                        _record_failure(self.report, f"could not import {summary.entry.pathname}: {exc}")
-                        continue
-                    # Models 単位の表は prefab をまたいで統合したものなので、LOD を隠すのは prefab 単位のときだけ
-                    if group.prefab is not None:
-                        match = self.last_matcher.match(parts) if parts and self.last_matcher else PartMatch()
-                        stats.unmatched_parts += match.unmatched
-                        # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
-                        unused = set(match.removed)
-                        if summary.guid not in whole:
-                            unused |= unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
-                        if self.opts.skip_unused_parts:
-                            objects, removed = self.remove_unused(objects, unused)
-                            stats.removed_unused += removed
-                        stats.hidden_unused += self.hide_named(objects, unused)
-                        self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
-                        if summary.guid in inactive:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
-                            self.hide_named(objects, {o.name for o in objects})
-                        stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
-                if group.prefab is not None:
-                    for message in prefab_warnings(stats):
-                        self.report.warn(f"prefab {group.prefab.pathname}: {message}")
-            for scene_summary in scenes:
-                try:
-                    self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
-                except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
-                    _record_failure(self.report, f"could not import scene {scene_summary.pathname}: {exc}")
-                done += 1
+            yield
         finally:
             if package_layer is not None:
                 package_layer.exclude = False
             bpy.data.collections.remove(self.staging)
             if prev_active is not None:
                 view_layer.active_layer_collection = prev_active
-        self.fill_missed_textures()
-        for obj in self.hidden_objects:
-            if not _is_removed(obj):
-                obj.hide_set(True)
-        if self.opts.arrange == "SIDE_BY_SIDE" and len(prefab_collections) > 1:
-            arrange_collections(self.context, prefab_collections)
 
-        self.collection["unity_package"] = package_path.name
-        self.step(1.0, "Done")
+    def prefab_collection(self, prefab: PrefabSummary) -> bpy.types.Collection:
+        """読み込む単位 Prefabs で、prefab 1 つ分のコレクションを作る。読み込めないモデルはここで警告する。"""
+        target = bpy.data.collections.new(prefab.name)
+        self.collection.children.link(target)
+        target["unity_prefab"] = prefab.pathname
+        target["unity_prefab_guid"] = prefab.guid
+        self.prefab_collections.append(target)
+        self.report.prefabs.append(prefab.pathname)
+        for guid in prefab.model_guids:
+            skipped = self.model_by_guid.get(guid)
+            if skipped is not None and not skipped.supported:
+                self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+        return target
+
+    def import_group(self, group: _ImportGroup, done: int, total: int) -> None:
+        """1 つのコレクションにまとめるモデルを読み込む（読み込む単位 Prefabs なら prefab 1 つ、Models ならすべてのモデル）。
+
+        prefab では、prefab が使っていない部品・中から消した部品・表示されていない部品・遠景用の LOD を隠すか消す。
+        Models 単位の表は prefab をまたいで統合したものなので、これは prefab 単位のときだけ行う。
+        """
+        prefab = group.prefab
+        target = self.prefab_collection(prefab) if prefab is not None else self.collection
+        stats = PlacementStats()
+        for index, (summary, prefab_table) in enumerate(group.models):
+            self.step(0.55 + 0.4 * (done + index) / max(total, 1), f"Importing {summary.entry.name}")
+            if summary.guid in self.failed_models:
+                continue
+            parts = group.analysis.parts.get(summary.guid, {})
+            try:
+                objects = self.import_model(summary, prefab_table, target, with_parts=bool(parts))
+            except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
+                _record_failure(self.report, f"could not import {summary.entry.pathname}: {exc}")
+                continue
+            if prefab is not None:
+                self.apply_prefab_visibility(summary, prefab_table, group.analysis, parts, objects, stats)
+        if prefab is not None:
+            for message in prefab_warnings(stats):
+                self.report.warn(f"prefab {prefab.pathname}: {message}")
+
+    def apply_prefab_visibility(
+        self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], analysis: PrefabAnalysis,
+        parts: dict[str, PartState], objects: list[bpy.types.Object], stats: PlacementStats,
+    ) -> None:
+        """prefab に合わせて、読み込んだモデルの部品を隠すか消す。"""
+        match = self.last_matcher.match(parts) if parts and self.last_matcher else PartMatch()
+        stats.unmatched_parts += match.unmatched
+        # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
+        unused = set(match.removed)
+        if summary.guid not in analysis.whole_models:
+            unused |= unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
+        if self.opts.skip_unused_parts:
+            objects, removed = self.remove_unused(objects, unused)
+            stats.removed_unused += removed
+        stats.hidden_unused += self.hide_named(objects, unused)
+        self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
+        if summary.guid in analysis.inactive_models:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
+            self.hide_named(objects, {o.name for o in objects})
+        stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
 
     def expected_materials(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> set[str]:
         """読み込む前に分かる、この回で組む .mat の GUID（#164）。
