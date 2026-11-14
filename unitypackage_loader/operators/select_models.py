@@ -28,6 +28,7 @@ from ..core.units import (
     available_units,
     default_unit,
 )
+from ..blender import log
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
 if TYPE_CHECKING:
@@ -369,6 +370,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             opts.model_guids = [m.guid for m in prepared.models if m.guid in chosen]
 
         prefs = get_prefs(context)
+        log.set_verbose(prefs is None or prefs.verbose_log)
         if prefs is not None:
             # 次に開いたときの既定にする（並べ方は Preferences の既定値そのものを更新する）
             prefs.last_import_unit = unit

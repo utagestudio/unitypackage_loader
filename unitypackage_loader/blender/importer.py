@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import math
-import traceback
 from collections import Counter
 from contextlib import contextmanager
 from collections.abc import Callable
@@ -82,8 +81,9 @@ from ..core.units import (
     summarize_prefabs,
     summarize_scene,
 )
-from ..ui.preferences import get_prefs
 from . import materials as mat_builder
+from .log import log_exception as _log_exception
+from .log import warn_skipped as _warn_skipped
 from . import outline as outline_builder
 from .scene_objects import (
     SceneTemplate,
@@ -279,23 +279,6 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
     merged.by_guid.update(extra.by_guid)
     merged.by_builtin_id.update(extra.by_builtin_id)
     return merged
-
-
-def _log_exception(message: str) -> None:
-    """捕まえて続けた例外の traceback を、verbose ログが有効ならコンソールに出す（警告には要約だけを出す）。"""
-    prefs = get_prefs(bpy.context)
-    if prefs is None or prefs.verbose_log:
-        print(f"[Unitypackage Importer] {message}")
-        traceback.print_exc()
-
-
-def _warn_skipped(warn: Callable[[str], None], what: str, exc: Exception) -> None:
-    """補助データを読めずに外したり既定値で続けたりするときに、except の中で呼ぶ（#69）。
-
-    警告には ``what: 例外の文`` だけを出し、traceback は verbose ログが有効ならコンソールに出す。
-    """
-    warn(f"{what}: {exc}")
-    _log_exception(what)
 
 
 def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:

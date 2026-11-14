@@ -11,6 +11,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
 from ..core.report import describe_exception, sanitize_display
+from ..blender import log
 from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
 from . import select_models
 
@@ -213,6 +214,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         from ..core.report import ImportReport
 
         prefs = get_prefs(context)
+        log.set_verbose(prefs is None or prefs.verbose_log)
         paths = self._selected_paths()
         if not paths:
             self.report({"ERROR"}, "No package selected")
