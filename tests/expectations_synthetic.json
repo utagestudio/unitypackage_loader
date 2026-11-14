@@ -21,7 +21,7 @@
     { "name": "PebbleMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "Pebble.png" },
     { "name": "NoMatMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ColorA.png" },
     { "name": "HdrpEmissiveMat", "shader_name": "HDRP/Lit", "mode": "PRINCIPLED", "emission_strength": 1.0, "emission_color": [1.0, 0.5, 0.25] },
-    { "name": "GraphMat", "mode": "PRINCIPLED", "alpha_mode": "opaque", "base_image": "ColorA.png", "emission_strength": 0.0, "normalized": { "base_color": [1.0, 1.0, 1.0, 1.0], "metallic": 0.0, "roughness": 0.5 } },
+    { "name": "GraphMat", "mode": "PRINCIPLED", "alpha_mode": "opaque", "base_image": "ColorA.png", "emission_strength": 0.0, "normalized": { "base_color": [1.0, 1.0, 1.0, 1.0], "metallic": 0.0, "roughness": 0.5, "uv_scale": [3.0, 2.0], "uv_offset": [0.25, 0.5] }, "node_types": ["ShaderNodeMapping"] },
     { "name": "CustomMat", "mode": "PRINCIPLED", "alpha_mode": "opaque", "base_image": null, "normalized": { "base_color": [0.2, 0.6, 0.4, 1.0], "metallic": 0.0 } }
   ]
 }
