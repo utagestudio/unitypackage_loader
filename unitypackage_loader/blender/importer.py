@@ -843,7 +843,7 @@ def run_import(
     report = ImportReport(package=Path(filepath).name)
     before = _snapshot()
     try:
-        _run_import(context, filepath, opts, progress, prepared, report)
+        _ImportSession(context, filepath, opts, progress, prepared, report).run()
         if report.errors and not (report.objects or report.lights or report.cameras):
             raise _NothingImported(f"nothing could be imported: {report.errors[0]}")
     except Exception as exc:
@@ -861,7 +861,7 @@ def run_import(
 class _ImportSession:
     """1 回のインポートの状態と手順。
 
-    以前は ``_run_import`` の中の入れ子の関数（``build_model`` / ``import_model`` / ``import_scene``）が、外側の変数を
+    以前は ``run_import`` から呼ぶ関数の中の入れ子の関数（``build_model`` / ``import_model`` / ``import_scene``）が、外側の変数を
     20 個取り込んでいた。読み込みの間に共有する状態（展開したファイル、読み込んだ画像、組み立てたマテリアル、
     作業用のコレクションなど）をフィールドにし、手順をメソッドにする（#78）。フィールドは ``run`` の中で順に作る。
     """
@@ -1695,17 +1695,6 @@ class _ImportSession:
             skipped_decals=skipped_decals,
         ):
             self.report.warn(message)
-
-
-def _run_import(
-    context,
-    filepath: str,
-    opts: ImportOptions,
-    progress,
-    prepared: PreparedPackage | None,
-    report: ImportReport,
-) -> None:
-    _ImportSession(context, filepath, opts, progress, prepared, report).run()
 
 
 _DECAL_ROUGHNESS = 0.8  # デカールの板のつや（下の面の値は分からないので、つや消し寄りにする。#165）

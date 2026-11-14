@@ -18,7 +18,7 @@ from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
 from ..core.prefab import RendererMaterials, find_renderer
-from ..core.decals import SCALE_INVARIANT, Decal, decal_plane
+from ..core.decals import Decal, decal_plane
 from ..core.primitives import PrimitiveMesh, build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef

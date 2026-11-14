@@ -91,7 +91,3 @@ def inverse_affine(m: Mat4) -> Mat4 | None:
 def unity_to_blender(m: Mat4) -> Mat4:
     """Unity のモデル空間で掛かる行列を、Blender のワールドで同じ働きをする行列にする（C · M · C⁻¹）。"""
     return multiply(multiply(UNITY_TO_BLENDER, m), BLENDER_TO_UNITY)
-
-
-def is_finite(m: Mat4) -> bool:
-    return all(math.isfinite(v) for row in m for v in row)
