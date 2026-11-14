@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import struct
 import sys
 import tarfile
@@ -240,7 +239,7 @@ Material:
 
 
 def model_meta(guid: str, materials: dict[str, str]) -> str:
-    lines = [f"fileFormatVersion: 2", f"guid: {guid}", "ModelImporter:", "  serializedVersion: 22200", "  externalObjects:"]
+    lines = ["fileFormatVersion: 2", f"guid: {guid}", "ModelImporter:", "  serializedVersion: 22200", "  externalObjects:"]
     for name, mat_guid in materials.items():
         lines += [
             "  - first:",
