@@ -18,6 +18,7 @@ from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
 from ..core.prefab import RendererMaterials, find_renderer
+from ..core.primitives import build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
 
@@ -154,6 +155,37 @@ def make_camera(name: str, values: BlenderCamera) -> bpy.types.Object:
     data.shift_x = values.shift_x
     data.shift_y = values.shift_y
     return bpy.data.objects.new(name or "Camera", data)
+
+
+def primitive_mesh(kind: str, cache: dict) -> bpy.types.Mesh:
+    """Unity の組み込みメッシュ ``kind`` の Blender のメッシュ（読み込みの回ごとに 1 つ作って共有する。#190）。
+
+    マテリアルのスロットを 1 つ持たせ、マテリアルはオブジェクト側のスロットに付ける（同じメッシュを別の .mat で使うため）。
+    """
+    mesh = cache.get(kind)
+    if mesh is not None:
+        return mesh
+    data = build_primitive(kind)
+    mesh = bpy.data.meshes.new(data.name)
+    mesh.from_pydata(data.vertices, [], data.faces)
+    uv_layer = mesh.uv_layers.new(name="UVMap")
+    uvs = [component for face in data.uvs for corner in face for component in corner]
+    uv_layer.data.foreach_set("uv", uvs)
+    mesh.polygons.foreach_set("use_smooth", data.smooth)
+    mesh.materials.append(None)
+    mesh.update()
+    mesh["unity_builtin_mesh"] = kind
+    cache[kind] = mesh
+    return mesh
+
+
+def make_primitive(name: str, mesh: bpy.types.Mesh, material) -> bpy.types.Object:
+    """組み込みメッシュのオブジェクト。マテリアルはオブジェクトのスロットに付ける（無ければ空のまま）。"""
+    obj = bpy.data.objects.new(name or mesh.name, mesh)
+    obj.material_slots[0].link = "OBJECT"
+    obj.material_slots[0].material = material
+    obj["unity_builtin_mesh"] = mesh.get("unity_builtin_mesh", mesh.name)
+    return obj
 
 
 def attach_to_empty(objects: list[bpy.types.Object], root, scale: float) -> None:

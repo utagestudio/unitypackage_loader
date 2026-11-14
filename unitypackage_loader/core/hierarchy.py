@@ -45,6 +45,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
+from .primitives import builtin_mesh_kind
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
 from .unity_binary import load_documents
 from .unity_ids import mesh_file_id as _mesh_file_id
@@ -1411,6 +1412,19 @@ def placements(
 
 
 @dataclass
+class PrimitivePlacement:
+    """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う MeshRenderer（Issue #190）。
+
+    メッシュはパッケージに無いので、読み込み側が ``core/primitives.py`` で同じ形を作り、``key`` の Node の Empty の下に置く。
+    """
+
+    key: int  # Renderer の Node
+    kind: str  # 組み込みメッシュの名前（``primitives.BUILTIN_MESHES`` の値）
+    materials: list[str | None]
+    visible: bool  # GameObject が祖先も含めてアクティブで、Renderer が有効
+
+
+@dataclass
 class SceneContents:
     """ダイアログに出すシーンの概要。"""
 
@@ -1418,7 +1432,8 @@ class SceneContents:
     lights: int = 0
     cameras: int = 0
     ui_elements: int = 0
-    other_renderers: int = 0  # パッケージ外のメッシュ（Unity 組み込みの Cube など）を指す Renderer
+    other_renderers: int = 0  # パッケージ外のメッシュを指す Renderer（組み込みメッシュの MeshRenderer は ``primitives``）
+    primitives: list[PrimitivePlacement] = field(default_factory=list)
     unresolved_overrides: int = 0
     missing_sources: int = 0
 
@@ -1441,15 +1456,25 @@ def summarize(
     names = _model_names(model_guids)
     models = set(names)
     found = placements(h, names, name_tables, sole_nodes, top_nodes)
-    other = sum(
-        1 for n in h.nodes.values() if n.renderer is not None and n.model_guid is None and n.renderer.mesh_guid not in models
-    )
+    active = effective_active(h)
+    primitives: list[PrimitivePlacement] = []
+    other = 0
+    for key, n in h.nodes.items():
+        renderer = n.renderer
+        if renderer is None or n.model_guid is not None or renderer.mesh_guid in models:
+            continue
+        kind = builtin_mesh_kind(renderer.mesh_guid, renderer.mesh_file_id)
+        if kind is not None and renderer.renderer_class == CLASS_MESH_RENDERER:
+            primitives.append(PrimitivePlacement(key, kind, list(renderer.materials), active[key] and renderer.enabled))
+        else:
+            other += 1
     return SceneContents(
         found,
         lights=h.counts[CLASS_LIGHT],
         cameras=h.counts[CLASS_CAMERA],
         ui_elements=h.counts[CLASS_RECT_TRANSFORM],
         other_renderers=other,
+        primitives=primitives,
         unresolved_overrides=h.unresolved_overrides,
         missing_sources=h.missing_sources,
     )

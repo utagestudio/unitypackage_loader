@@ -121,6 +121,62 @@
       ]
     },
     {
+      "top": "Ground",
+      "object": "Ground",
+      "bbox": [
+        -2,
+        -31,
+        -0.5,
+        2,
+        -29,
+        -0.5
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "hidden": false,
+      "mat_files": [
+        "ProbeMat.mat"
+      ]
+    },
+    {
+      "top": "HiddenPlane",
+      "object": "HiddenPlane",
+      "bbox": [
+        -10.5,
+        -30.5,
+        0,
+        -9.5,
+        -29.5,
+        0
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "hidden": true,
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "Box",
+      "object": "Box",
+      "bbox": [
+        9.5,
+        -30.5,
+        0,
+        10.5,
+        -29.5,
+        1
+      ],
+      "hidden": false,
+      "mat_files": []
+    },
+    {
       "top": "Hidden",
       "object": "Spike",
       "hidden": true
@@ -517,7 +573,8 @@
     "scene Assets/Synthetic/Scenes/Probe.unity: 1 visibility override(s) or removal(s) on objects inside a model could not be matched"
   ],
   "warnings_exclude": [
-    "Kiosk.fbx: "
+    "Kiosk.fbx: ",
+    "use meshes outside the package"
   ],
   "material_checks": [
     {

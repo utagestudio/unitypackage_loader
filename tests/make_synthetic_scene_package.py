@@ -17,6 +17,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   スケール (1, 2, 1) に。中の Child の位置を上書きし、Child のマテリアルを ProbeRed に差し替える
 - Moved: FBX を展開したあと Unity 上で Spike（位置と Y 30 度）と Group（位置）を動かした prefab（Moved）を、位置 (0, 0, 20) に
   （Issue #186。展開した Transform の値そのものが FBX のノードと違う。期待値は B の頂点から Unity の行列で求めたもの）
+- Unity の組み込みメッシュを使う Renderer（Issue #190）: Ground（Quad。位置 (0, -0.5, 30)・X 90 度・スケール (4, 2, 1)、ProbeMat）、
+  非アクティブな HiddenPlane（Plane。位置 (10, 0, 30)・スケール 0.1、ProbeRed）、Box（Cube。位置 (-10, 0.5, 30)、Unity の既定のマテリアル）
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
 - SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
@@ -69,6 +71,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
 from unitypackage_loader.core.unity_ids import hierarchy_file_id, mesh_file_id, named_file_id  # noqa: E402
+from unitypackage_loader.core.primitives import BUILTIN_MESH_GUID  # noqa: E402
 
 ROOT_GAME_OBJECT = 919132149155446097
 ROOT_TRANSFORM = -8679921383154817045
@@ -653,6 +656,19 @@ def main() -> None:
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
         instance(2600, partial, 0, [mod(101, partial, "m_LocalPosition.z", -12)]),
         instance(2700, moved, 0, [mod(101, moved, "m_LocalPosition.z", 20)]),
+        # Unity の組み込みメッシュを使う Renderer（#190）。X 90 度で寝かせた Quad、非アクティブな Plane、既定のマテリアルの Cube
+        game_object(2800, "Ground"),
+        transform(2801, 2800, pos=(0, -0.5, 30), rot=(0.7071068, 0, 0, 0.7071068), scale=(4, 2, 1)),
+        mesh_renderer(2802, 2803, 2800, BUILTIN_MESH_GUID, mats["ProbeMat"], 10210),
+        game_object(2810, "HiddenPlane", active=0),
+        transform(2811, 2810, pos=(10, 0, 30), scale=(0.1, 1, 0.1)),
+        mesh_renderer(2812, 2813, 2810, BUILTIN_MESH_GUID, mats["ProbeRed"], 10209),
+        game_object(2820, "Box"),
+        transform(2821, 2820, pos=(-10, 0.5, 30)),
+        mesh_renderer(2822, 2823, 2820, BUILTIN_MESH_GUID, "0000000000000000f000000000000000", 10202).replace(
+            "{fileID: 2100000, guid: 0000000000000000f000000000000000, type: 2}",
+            "{fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}",
+        ),
         instance(3000, nested, 0, [
             mod(11, nested, "m_LocalPosition.x", 1),
             mod(11, nested, "m_LocalPosition.y", 2),
