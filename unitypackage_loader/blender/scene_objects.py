@@ -18,7 +18,8 @@ from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
 from ..core.prefab import RendererMaterials, find_renderer
-from ..core.primitives import build_primitive
+from ..core.decals import SCALE_INVARIANT, Decal, decal_plane
+from ..core.primitives import PrimitiveMesh, build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
 
@@ -165,7 +166,14 @@ def primitive_mesh(kind: str, cache: dict) -> bpy.types.Mesh:
     mesh = cache.get(kind)
     if mesh is not None:
         return mesh
-    data = build_primitive(kind)
+    mesh = mesh_from_primitive(build_primitive(kind))
+    mesh["unity_builtin_mesh"] = kind
+    cache[kind] = mesh
+    return mesh
+
+
+def mesh_from_primitive(data: PrimitiveMesh) -> bpy.types.Mesh:
+    """``core`` で作った面と UV から Blender のメッシュを作る（マテリアルのスロットを 1 つ持たせる）。"""
     mesh = bpy.data.meshes.new(data.name)
     mesh.from_pydata(data.vertices, [], data.faces)
     uv_layer = mesh.uv_layers.new(name="UVMap")
@@ -174,8 +182,15 @@ def primitive_mesh(kind: str, cache: dict) -> bpy.types.Mesh:
     mesh.polygons.foreach_set("use_smooth", data.smooth)
     mesh.materials.append(None)
     mesh.update()
-    mesh["unity_builtin_mesh"] = kind
-    cache[kind] = mesh
+    return mesh
+
+
+def decal_mesh(decal: Decal, lossy_scale: tuple[float, float, float], cache: dict) -> bpy.types.Mesh:
+    """デカールの板のメッシュ（同じ形のデカールは共有する。#165）。"""
+    key = (decal.size, decal.offset, decal.uv_scale, decal.uv_bias, decal.scale_mode, tuple(round(s, 6) for s in lossy_scale))
+    mesh = cache.get(key)
+    if mesh is None:
+        mesh = cache[key] = mesh_from_primitive(decal_plane(decal, lossy_scale))
     return mesh
 
 

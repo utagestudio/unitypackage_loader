@@ -7,7 +7,7 @@
   "scenes": {
     "count": 2
   },
-  "warnings_max": 8,
+  "warnings_max": 9,
   "placed_objects": [
     {
       "top": "A",
@@ -408,6 +408,27 @@
       "top": "StallRoot",
       "object": "StallFlag",
       "absent": true
+    },
+    {
+      "top": "Poster (Decal)",
+      "object": "Poster (Decal)",
+      "bbox": [
+        -1,
+        -35.198,
+        0.5,
+        1,
+        -35.198,
+        1.5
+      ],
+      "normal": [
+        0,
+        1,
+        0
+      ],
+      "hidden": false,
+      "mat_files": [
+        "DecalMat.mat"
+      ]
     }
   ],
   "shared_meshes": [
@@ -570,7 +591,8 @@
   "warnings_contain": [
     "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
     "scene Assets/Synthetic/Scenes/Probe.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
-    "scene Assets/Synthetic/Scenes/Probe.unity: 1 visibility override(s) or removal(s) on objects inside a model could not be matched"
+    "scene Assets/Synthetic/Scenes/Probe.unity: 1 visibility override(s) or removal(s) on objects inside a model could not be matched",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 1 decal projector(s) were skipped"
   ],
   "warnings_exclude": [
     "Kiosk.fbx: ",
@@ -589,6 +611,17 @@
       "name": "KioskFrameFbx",
       "alpha_mode": "cutout",
       "smoothness_scale": null
+    },
+    {
+      "name": "DecalMat",
+      "alpha_linked": true,
+      "alpha_mode": "blend",
+      "render_method": "BLENDED",
+      "base_image": "ColorA.png",
+      "normalized": {
+        "metallic": 0.0,
+        "roughness": 0.8
+      }
     }
   ],
   "scene_exposure": 0.0,
@@ -596,5 +629,6 @@
     "SCENES": [
       "Assets/Synthetic/Scenes/Legacy.unity"
     ]
-  }
+  },
+  "decal_count": 1
 }

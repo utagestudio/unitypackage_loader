@@ -35,6 +35,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     scene_lights: BoolProperty(name="Scene Lights", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_cameras: BoolProperty(name="Scene Cameras", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_exposure: BoolProperty(name="Scene Exposure", default=True, options={"HIDDEN", "SKIP_SAVE"})
+    scene_decals: BoolProperty(name="Scene Decals", default=True, options={"HIDDEN", "SKIP_SAVE"})
     hide_lods: BoolProperty(
         name="Hide Lower LODs",
         default=True,
@@ -227,6 +228,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 scene_lights=self.scene_lights,
                 scene_cameras=self.scene_cameras,
                 scene_exposure=self.scene_exposure,
+                scene_decals=self.scene_decals,
                 hide_lods=self.hide_lods,
                 skip_unused_parts=self.skip_unused_parts,
                 material_mode=self.material_mode,

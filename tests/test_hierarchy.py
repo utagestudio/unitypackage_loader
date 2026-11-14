@@ -914,6 +914,35 @@ class ComponentTest(unittest.TestCase):
         self.assertEqual(components(hierarchy), [])
         self.assertEqual(hierarchy.components, {})
 
+class DecalTest(unittest.TestCase):
+    """DecalProjector の形をした MonoBehaviour だけを中身ごと持ち、prefab の上書きを当てる（#165）。"""
+
+    DECAL = (
+        "--- !u!114 &{id}\nMonoBehaviour:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        "  m_Script: {{fileID: 11500000, guid: 0777d029ed3dffa4692f417d4aba19ca, type: 3}}\n"
+        "  m_Material: {{fileID: 2100000, guid: {mat}, type: 2}}\n  m_UVScale: {{x: 1, y: 1}}\n  m_UVBias: {{x: 0, y: 0}}\n"
+        "  m_ScaleMode: 1\n  m_Offset: {{x: 0, y: 0, z: 0}}\n  m_Size: {{x: 1, y: 1, z: 0.02}}\n"
+    )
+    SIGN = HEADER + game_object(1, "Sign") + transform(2, 1) + DECAL.format(id=3, go=1, mat=MAT_A)
+    SCENE = HEADER + "".join([
+        game_object(10, "Graffiti"),
+        transform(11, 10, pos=(0, 2, 0)),
+        DECAL.format(id=12, go=10, mat=MAT_B),
+        # DecalProjector でない MonoBehaviour は持たない
+        "--- !u!114 &13\nMonoBehaviour:\n  m_GameObject: {fileID: 10}\n  m_Enabled: 1\n  m_Speed: 3\n",
+        instance(20, "d" * 32, 0, [mod(3, "d" * 32, "m_Material", reference=f"{{fileID: 2100000, guid: {'3' * 32}, type: 2}}")]),
+    ])
+
+    def test_decals_are_kept_with_overrides(self):
+        exp = Expander(lambda g: parse_asset(self.SIGN) if g == "d" * 32 else None, {})
+        hierarchy = exp.expand_raw(parse_asset(self.SCENE))
+        found = components(hierarchy, [114])
+        self.assertEqual([(c.name, c.body["m_Material"].guid) for c in found], [("Graffiti", MAT_B), ("Sign", "3" * 32)])
+        self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (0.0, 2.0, 0.0))
+        self.assertEqual(summarize(hierarchy, {}).decals, 2)
+        self.assertEqual(components(hierarchy), [])  # ライト・カメラだけを引くときは出てこない
+
+
 class RobustnessTest(unittest.TestCase):
     def test_self_referencing_prefab_stops(self):
         h = expander().expand_asset(LOOP)
