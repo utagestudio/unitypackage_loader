@@ -990,11 +990,19 @@ class PlacedComponent:
     active: bool  # GameObject がアクティブで、コンポーネントが有効
 
 
-def components(h: Hierarchy, class_ids: Iterable[int] = _COMPONENT_CLASSES) -> list[PlacedComponent]:
-    """階層に現れた順のコンポーネントのうち、``class_ids`` のもの（既定はライト・カメラ。デカールは ``CLASS_MONO_BEHAVIOUR``）。"""
+def components(
+    h: Hierarchy,
+    class_ids: Iterable[int] = _COMPONENT_CLASSES,
+    worlds: Mapping[int, Mat4] | None = None,
+    active: Mapping[int, bool] | None = None,
+) -> list[PlacedComponent]:
+    """階層に現れた順のコンポーネントのうち、``class_ids`` のもの（既定はライト・カメラ。デカールは ``CLASS_MONO_BEHAVIOUR``）。
+
+    ``worlds`` / ``active`` に ``world_matrices`` / ``effective_active`` の結果を渡すと、求め直さない（1 つのシーンで何度も呼ぶとき）。
+    """
     wanted = set(class_ids)
-    worlds = world_matrices(h)
-    active = effective_active(h)
+    worlds = world_matrices(h) if worlds is None else worlds
+    active = effective_active(h) if active is None else active
     result = []
     for node_key, node in h.nodes.items():
         for key, (class_id, body) in node.components.items():
@@ -1047,9 +1055,12 @@ def _remove_subtree(h: Hierarchy, key: int, children: dict[int, list[int]] | Non
 # ---------------------------------------------------------------------------
 
 
-def world_matrices(h: Hierarchy) -> dict[int, Mat4]:
-    """全 Node のワールド行列。親が見つからない・循環している Node は、そこを最上位として扱う。"""
-    result: dict[int, Mat4] = {}
+def _from_roots(h: Hierarchy, top, step) -> dict:
+    """全 Node について、最上位から順に ``step(親の値, Node)`` を重ねた値（最上位の親の値は ``top``）。
+
+    親が見つからない・循環している Node は、そこを最上位として扱う。祖先の値は 1 度だけ求める。
+    """
+    result: dict = {}
     for start in h.nodes:
         if start in result:
             continue
@@ -1060,29 +1071,21 @@ def world_matrices(h: Hierarchy) -> dict[int, Mat4]:
             path.append(key)
             seen.add(key)
             key = h.nodes[key].parent
-        base = result.get(key, IDENTITY) if key is not None else IDENTITY
+        value = result.get(key, top) if key is not None else top
         for k in reversed(path):
-            base = multiply(base, h.nodes[k].local)
-            result[k] = base
+            value = step(value, h.nodes[k])
+            result[k] = value
     return result
+
+
+def world_matrices(h: Hierarchy) -> dict[int, Mat4]:
+    """全 Node のワールド行列。"""
+    return _from_roots(h, IDENTITY, lambda parent, node: multiply(parent, node.local))
 
 
 def effective_active(h: Hierarchy) -> dict[int, bool]:
     """祖先を含めてアクティブか（Unity の activeInHierarchy）。"""
-    result: dict[int, bool] = {}
-    for start in h.nodes:
-        path = []
-        seen = set()
-        key: int | None = start
-        while key is not None and key in h.nodes and key not in result and key not in seen:
-            path.append(key)
-            seen.add(key)
-            key = h.nodes[key].parent
-        state = result.get(key, True) if key is not None else True
-        for k in reversed(path):
-            state = state and h.nodes[k].active
-            result[k] = state
-    return result
+    return _from_roots(h, True, lambda parent, node: parent and node.active)
 
 
 @dataclass

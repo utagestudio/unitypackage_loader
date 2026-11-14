@@ -18,7 +18,7 @@ import bpy
 
 from ..core.decals import Decal, decal_from_body
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
-from ..core.hierarchy import CLASS_CAMERA, CLASS_MONO_BEHAVIOUR, PartState
+from ..core.hierarchy import CLASS_CAMERA, CLASS_MONO_BEHAVIOUR, PartState, effective_active, world_matrices
 from ..core.hierarchy import components as scene_components
 from ..core.lights import PIPELINE_HDRP
 from ..core.mapping import expected_materials, material_textures
@@ -236,6 +236,7 @@ class _ImportSession:
         self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
         self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
+        self._scene_frames: dict[str, tuple[dict, dict]] = {}  # シーンの GUID → (ワールド行列, アクティブか)。scene_frames
 
     def run(self) -> None:
         self.step(0.0, "Scanning package")
@@ -459,13 +460,24 @@ class _ImportSession:
                 found.update(decal.material for _, decal in self.scene_decals(scene_summary))
         return found & self.prepared.unity_mats.keys()
 
+    def scene_frames(self, scene_guid: str) -> tuple[dict, dict]:
+        """シーンの全 Node のワールド行列と、祖先を含めてアクティブか。シーンごとに 1 度だけ求める。
+
+        デカール（読み込む前の予測と配置）とライト・カメラで ``components`` を何度も呼ぶので、そのたびに求め直さないようにする。
+        """
+        if scene_guid not in self._scene_frames:
+            hierarchy = self.prepared.scene_hierarchies[scene_guid]
+            self._scene_frames[scene_guid] = (world_matrices(hierarchy), effective_active(hierarchy))
+        return self._scene_frames[scene_guid]
+
     def scene_decals(self, scene_summary: SceneSummary) -> list[tuple[object, Decal]]:
         """シーンの DecalProjector（コンポーネントと、読めた中身）。マテリアルがパッケージに無いものも含める。"""
         hierarchy = self.prepared.scene_hierarchies.get(scene_summary.guid)
         if hierarchy is None:
             return []
         found = []
-        for component in scene_components(hierarchy, [CLASS_MONO_BEHAVIOUR]):
+        worlds, active = self.scene_frames(scene_summary.guid)
+        for component in scene_components(hierarchy, [CLASS_MONO_BEHAVIOUR], worlds, active):
             decal = decal_from_body(component.body)
             if decal is not None:
                 found.append((component, decal))

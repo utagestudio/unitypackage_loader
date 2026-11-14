@@ -9,7 +9,7 @@ import bpy
 from mathutils import Matrix
 
 from ..core.fbx_units import read_unit_scale
-from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE, built_from_renderers, effective_active
+from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE, built_from_renderers
 from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light
 from ..core.model_ids import PartMatch, PartMatcher
@@ -56,7 +56,7 @@ class SceneImport:
         self.summary = scene_summary
         self.pathname = scene_summary.pathname
         self.hierarchy = session.prepared.scene_hierarchies[scene_summary.guid]
-        self.active = effective_active(self.hierarchy)
+        self.worlds, self.active = session.scene_frames(scene_summary.guid)
         self.target: bpy.types.Collection | None = None  # シーンのコレクション（run で作る）
         self.empties: dict[int, bpy.types.Object] = {}  # Node の key → その GameObject の Empty（か組み込みメッシュ）
         self.templates: dict[tuple, SceneTemplate] = {}  # 配置の key → 最初に読み込んだオブジェクト（以後は複製する）
@@ -265,7 +265,7 @@ class SceneImport:
         prepared = session.prepared
         light_scale = session.light_scale(self.summary, self.target) if self.opts.scene_lights else 1.0
         wanted = ([CLASS_LIGHT] if self.opts.scene_lights else []) + ([CLASS_CAMERA] if self.opts.scene_cameras else [])
-        for component in scene_components(self.hierarchy, wanted) if wanted else []:
+        for component in scene_components(self.hierarchy, wanted, self.worlds, self.active) if wanted else []:
             parent, local = self.parent_and_local(component.node)
             if component.class_id == CLASS_LIGHT:
                 values = convert_light(component.body, prepared.pipeline)
