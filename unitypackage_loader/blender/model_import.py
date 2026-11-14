@@ -136,29 +136,24 @@ def sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
 
 
 def _import_fbx(path: Path, opts: ImportOptions) -> None:
-    # wm.fbx_import は Blender 4.5 で追加された（最小版は 4.5）。bpy.ops の hasattr は常に True なので判定には使えない
-    use_new = opts.fbx_importer in ("AUTO", "NEW")
-    if use_new:
-        kwargs = dict(
-            filepath=str(path),
-            global_scale=opts.global_scale,
-            use_anim=opts.use_anim,
-            ignore_leaf_bones=opts.ignore_leaf_bones,
-            use_custom_normals=True,
-        )
-        kwargs.update(opts.extra_fbx_kwargs)
-        result = bpy.ops.wm.fbx_import(**kwargs)
+    """FBX を読み込む。既定は新しいインポーター（wm.fbx_import。Blender 4.5 で追加）で、Legacy を選んだときだけ Python 製のもの。
+
+    bpy.ops の hasattr は常に True なので、インポーターの有無の判定には使えない（最小版の 4.5 にはどちらもある）。
+    """
+    kwargs = dict(
+        filepath=str(path),
+        global_scale=opts.global_scale,
+        use_anim=opts.use_anim,
+        ignore_leaf_bones=opts.ignore_leaf_bones,
+        use_custom_normals=True,
+    )
+    if opts.fbx_importer in ("AUTO", "NEW"):
+        operator = bpy.ops.wm.fbx_import
     else:
-        kwargs = dict(
-            filepath=str(path),
-            global_scale=opts.global_scale,
-            use_anim=opts.use_anim,
-            ignore_leaf_bones=opts.ignore_leaf_bones,
-            use_custom_normals=True,
-            use_image_search=False,
-        )
-        kwargs.update(opts.extra_fbx_kwargs)
-        result = bpy.ops.import_scene.fbx(**kwargs)
+        operator = bpy.ops.import_scene.fbx
+        kwargs["use_image_search"] = False  # Legacy だけにある設定（画像は .mat から読むので探させない）
+    kwargs.update(opts.extra_fbx_kwargs)
+    result = operator(**kwargs)
     if "FINISHED" not in result:
         raise RuntimeError(f"FBX import failed for {path.name}: {result}")
 
