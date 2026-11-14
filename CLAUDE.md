@@ -67,6 +67,7 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
   アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
   （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
+  統合テストは `python3 tests/run_integration.py` が最後に期待値ファイルごとの合否をまとめて出す。
 - Blender API は 4.5 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
   FBX は新インポーター `wm.fbx_import` を使い、Legacy を選んだときだけ `import_scene.fbx`。
   オペレーターの有無は `bpy.ops` の `hasattr` でも `bpy.types` でも判定できない（C のオペレーターは `bpy.types` に無い）。
@@ -95,25 +96,12 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
 # 単体テスト（bpy 不要）
 python3 -m unittest discover -s tests -t .
 
-# 合成パッケージの生成と統合テスト（実在アセット不要）
-blender -b --factory-startup --python tests/make_synthetic_package.py
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_noblend.json  # 同梱 .blend 既定 OFF
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs.json        # 読み込む単位 Prefabs（並べる）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic_prefabs_stack.json  # 読み込む単位 Prefabs（原点に重ねる）
-blender -b --factory-startup --python tests/make_synthetic_scene_package.py   # シーン用の合成パッケージ（_local/unitypackages/ に出る）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene.json         # 読み込む単位 Scenes
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_prefabs.json  # 読み込む単位 Prefabs（LODGroup の非表示）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_keep_unused.json          # Scenes で使われていない部品を読み込んで隠す（Skip Unused Parts を OFF）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_scene.unitypackage tests/expectations_synthetic_scene_prefabs_keep_unused.json  # Prefabs で同じく OFF
-blender -b --factory-startup --python tests/make_synthetic_urp_package.py     # URP 用の合成パッケージ（ライトが URP の単位になるので別にする。マテリアルを Standard にした _standard も出る）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_urp.unitypackage tests/expectations_synthetic_urp.json             # URP Lit の読み方と URP のライト
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_urp_standard.unitypackage tests/expectations_synthetic_urp_standard.json  # ライトの追加データからの URP の判定
-blender -b --factory-startup --python tests/make_synthetic_hdrp_package.py    # HDRP 用の合成パッケージ（ライトが HDRP の単位になるので別にする）
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_hdrp.unitypackage tests/expectations_synthetic_hdrp.json           # HDRP の読み方と HDRP のライト
-python3 tests/make_synthetic_broken_packages.py                                                           # 読み込みに失敗するモデルを含む合成パッケージ
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_model.unitypackage tests/expectations_synthetic_broken_model.json  # 1 つ失敗しても残りを読む
-blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_broken_all.unitypackage tests/expectations_synthetic_broken_all.json      # 全部失敗したら何も残さない
+# 合成パッケージの生成と統合テスト（実在アセット不要）。生成するスクリプトと、どのパッケージをどの期待値で回すかの一覧は
+# tests/integration_runs.json（CI も同じ一覧を使う）。無い合成パッケージは生成してから回し、最後に結果をまとめて出す
+python3 tests/run_integration.py                  # 全期待値（合成パッケージは _local/unitypackages/ に出る）
+python3 tests/run_integration.py --generate       # 合成パッケージを作り直してから回す（生成スクリプトを変えたとき）
+python3 tests/run_integration.py --only scene     # 期待値のファイル名に "scene" を含むものだけ
+blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json  # 1 本だけ
 
 # 手元の実パッケージでの統合テスト（_local/expectations.json の "package" キーで対象を指定）
 blender -b --factory-startup --python tests/integration_import.py

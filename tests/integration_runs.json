@@ -1,0 +1,29 @@
+{
+  "generators": [
+    { "script": "tests/make_synthetic_package.py", "blender": true, "outputs": ["synthetic_multi.unitypackage"] },
+    { "script": "tests/make_synthetic_scene_package.py", "blender": true, "outputs": ["synthetic_scene.unitypackage"] },
+    { "script": "tests/make_synthetic_urp_package.py", "blender": true, "outputs": ["synthetic_urp.unitypackage", "synthetic_urp_standard.unitypackage"] },
+    { "script": "tests/make_synthetic_hdrp_package.py", "blender": true, "outputs": ["synthetic_hdrp.unitypackage"] },
+    {
+      "script": "tests/make_synthetic_broken_packages.py",
+      "blender": false,
+      "args": ["{packages}/synthetic_multi.unitypackage", "{packages}"],
+      "outputs": ["synthetic_broken_model.unitypackage", "synthetic_broken_all.unitypackage"]
+    }
+  ],
+  "runs": [
+    { "package": "synthetic_multi.unitypackage", "expectations": "expectations_synthetic.json" },
+    { "package": "synthetic_multi.unitypackage", "expectations": "expectations_synthetic_noblend.json", "note": "同梱 .blend 既定 OFF" },
+    { "package": "synthetic_multi.unitypackage", "expectations": "expectations_synthetic_prefabs.json", "note": "読み込む単位 Prefabs（並べる）" },
+    { "package": "synthetic_multi.unitypackage", "expectations": "expectations_synthetic_prefabs_stack.json", "note": "読み込む単位 Prefabs（原点に重ねる）" },
+    { "package": "synthetic_scene.unitypackage", "expectations": "expectations_synthetic_scene.json", "note": "読み込む単位 Scenes" },
+    { "package": "synthetic_scene.unitypackage", "expectations": "expectations_synthetic_scene_prefabs.json", "note": "読み込む単位 Prefabs（LODGroup の非表示）" },
+    { "package": "synthetic_scene.unitypackage", "expectations": "expectations_synthetic_scene_keep_unused.json", "note": "Scenes で使われていない部品を読み込んで隠す" },
+    { "package": "synthetic_scene.unitypackage", "expectations": "expectations_synthetic_scene_prefabs_keep_unused.json", "note": "Prefabs で使われていない部品を読み込んで隠す" },
+    { "package": "synthetic_urp.unitypackage", "expectations": "expectations_synthetic_urp.json", "note": "URP Lit の読み方と URP のライト" },
+    { "package": "synthetic_urp_standard.unitypackage", "expectations": "expectations_synthetic_urp_standard.json", "note": "ライトの追加データからの URP の判定" },
+    { "package": "synthetic_hdrp.unitypackage", "expectations": "expectations_synthetic_hdrp.json", "note": "HDRP の読み方と HDRP のライト" },
+    { "package": "synthetic_broken_model.unitypackage", "expectations": "expectations_synthetic_broken_model.json", "note": "1 つ失敗しても残りを読む" },
+    { "package": "synthetic_broken_all.unitypackage", "expectations": "expectations_synthetic_broken_all.json", "note": "全部失敗したら何も残さない" }
+  ]
+}

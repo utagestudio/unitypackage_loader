@@ -1,22 +1,25 @@
 # 統合テスト期待値ファイルの書式
 
-`tests/integration_import.py` は、`_local/expectations.json`（gitignore 対象）に書かれた期待値と
-実際のインポート結果を照合する。検証用パッケージも同じ `_local/` に置く。
-全てのキーは省略可能で、書いたものだけ検証される。
+`tests/integration_import.py` は、期待値ファイルに書かれた値と実際のインポート結果を照合する。
+手元の実パッケージ用の期待値は `_local/expectations.json`（gitignore 対象）、合成パッケージ用は `tests/expectations_synthetic*.json`。
+全てのキーは省略可能で、書いたものだけ検証される。キーごとの確認は `integration_import.py` の `check_*` 関数にある。
 
 ```json
 {
   "package": "<_local/ 内のパッケージファイル名。省略時は引数、無ければ _local/ の最初の .unitypackage>",
   "options": { "material_mode": "AUTO" },
   "enable_addons": ["bl_ext.blender_org.vrm"],
+  "before": { "materials": ["<読み込む前に作っておく空のマテリアルの名前>"] },
   "objects": { "count": 0, "mesh_count": 0, "armature_count": 0 },
   "materials": {
     "count": 0,
     "mapped": 0,
     "families": ["liltoon"],
-    "methods": ["external"]
+    "methods": ["external"],
+    "modes": ["TOON"]
   },
-  "images": { "count": 0 },
+  "images": { "count": 0, "packed": true },
+  "outlines": { "count": 0, "objects": { "<オブジェクト名>": 0.001 } },
   "warnings_max": 0,
   "warnings_contain": ["<警告に含まれる文字列>"],
   "warnings_exclude": ["<どの警告にも含まれない文字列>"],
@@ -35,7 +38,11 @@
       "emission_strength": 0.0,
       "emission_color": [1.0, 1.0, 1.0],
       "smoothness_scale": 1.0,
-      "node_types": ["ShaderNodeMixShader"]
+      "node_types": ["ShaderNodeMixShader"],
+      "node_types_absent": ["ShaderNodeNormalMap"],
+      "node_groups": ["UnityToon"],
+      "method": "external",
+      "has_unity_data": true
     }
   ],
   "shape_keys": { "<オブジェクト名>": 0 },
@@ -52,6 +59,10 @@
   ],
   "shared_meshes": [
     { "objects": [{ "top": "<Empty>", "object": "<オブジェクト>" }], "shared": true }
+  ],
+  "steps": [
+    { "operator": "unitypkg.rebuild_material", "select": ["<オブジェクト名>"], "properties": { "mode": "PRINCIPLED" }, "result": "FINISHED",
+      "checks": { "material_checks": [{ "name": "<マテリアル名>", "node_types": ["ShaderNodeBsdfPrincipled"] }] } }
   ]
 }
 ```
@@ -64,13 +75,21 @@
 | `objects.count` | レポート上の新規オブジェクト数（アーマチュア込み） |
 | `materials.mapped` | .mat に対応付けできたマテリアル数 |
 | `materials.methods` | 使われた解決手段の集合（`external` / `name` / `prefab` / `none` / `reused` / `kept` / `delegated` / `shared` / `replaced` / `prefab-split`）。`shared` は同じ回に組み立て済みの同じ .mat のマテリアルを使った行 |
+| `materials.modes` | レポートの行の、実際に組んだモードの集合（`PRINCIPLED` / `TOON` / `UNLIT` / `NAMES_ONLY`。組まなかった行は数えない） |
+| `before.materials` | 読み込む前に、この名前の空のマテリアルを作っておく（同名のマテリアルを使う `reuse_existing` の確認に使う） |
 | `images.count` | 読み込まれた画像数 |
+| `images.packed` | `true` なら、レポートに載った画像がすべて .blend に取り込まれている（`pack_images`） |
+| `outlines` | `count` はレポートのアウトラインの数、`objects` はオブジェクト名 → アウトライン（Solidify モディファイアー `UnityOutline`）の厚さ。`null` なら付いていないこと |
 | `warnings_max` | 許容する警告数の上限 |
 | `warnings_contain` / `warnings_exclude` | 挙げた文字列を含む警告があること / 無いこと |
 | `result` | オペレーターの結果（既定は `FINISHED`。何も読み込めずに失敗する場合は `CANCELLED`） |
 | `errors` | レポートのエラー数（読み込めなかったモデル・シーン、続けられなかった失敗） |
 | `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
+| `material_checks[].method` | レポートの行の解決手段（`materials.methods` と同じ値） |
+| `material_checks[].has_unity_data` | Unity の情報（`unity_normalized` など）をカスタムプロパティに残したか（`store_props`） |
+| `material_checks[].node_types_absent` | 挙げたノードが無いこと（`use_normal_maps` / `use_emission` を切ったときなど） |
+| `material_checks[].node_groups` | ノードグループのノードが使うグループ名の集合（Toon モードの `UnityToon` など） |
 | `material_checks[].emission_strength` / `emission_color` | Principled BSDF の Emission Strength と、リンクされていない Emission Color（RGB、小数 4 桁で比較） |
 | `material_checks[].smoothness_scale` | Roughness を「1 − Smoothness の元 × 倍率」で組んだときの倍率（小数 4 桁。元が無ければ `null`） |
 | `split_slots` | prefab の割り当てでマテリアルを差し替えたスロット数 |
@@ -84,11 +103,15 @@
 | `dialog_selected` | 選択ダイアログの候補で、既定でチェックが入るものの pathname（単位 `SCENES` / `PREFABS` / `MODELS` ごと。挙げた単位だけ比べる） |
 | `light_count` / `camera_count` | レポートのライト・カメラの数 |
 | `shared_meshes` | 挙げたオブジェクトがメッシュのデータを共有しているか（同じモデル・同じ割り当ての配置は複製で共有する） |
+| `steps` | 読み込みの後に、順に呼ぶオペレーター。`operator` は `unitypkg.rebuild_material` のような名前、`select` は選ぶオブジェクト名（最初のものをアクティブにする）、`properties` はオペレーターの引数、`result` は結果（既定は `FINISHED`）。`checks` には上のキーを同じ書式で書き、その手順の後に確かめる（レポートは読み込んだときのまま） |
 | `prefab_collections_overlap` | prefab ごとのコレクションの外形（XY）が重なっているか。並べる（`"arrange": "SIDE_BY_SIDE"`）なら `false`、原点に重ねる（`"STACK"`）なら `true` |
 
 実行:
 
 ```sh
-blender -b --python tests/integration_import.py
-blender -b --python tests/integration_import.py -- path/to/pkg.unitypackage path/to/expectations.json
+python3 tests/run_integration.py                 # 合成パッケージの全期待値（tests/integration_runs.json の一覧）
+blender -b --factory-startup --python tests/integration_import.py      # 手元の実パッケージ（_local/expectations.json）
+blender -b --factory-startup --python tests/integration_import.py -- path/to/pkg.unitypackage path/to/expectations.json
 ```
+
+合成パッケージの期待値を足したら、`tests/integration_runs.json` の `runs` にも加える（CI も同じ一覧を使う）。

@@ -59,13 +59,9 @@ jobs:
           sudo apt-get install -y -qq libgl1 libegl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0
 
       - name: Generate synthetic packages
+        # 作るスクリプトと出力の一覧は tests/integration_runs.json
         run: |
-          mkdir -p fixtures
-          ~/blender/blender -b --factory-startup --python tests/make_synthetic_package.py -- fixtures/synthetic_multi.unitypackage
-          ~/blender/blender -b --factory-startup --python tests/make_synthetic_scene_package.py -- fixtures/synthetic_scene.unitypackage
-          ~/blender/blender -b --factory-startup --python tests/make_synthetic_urp_package.py -- fixtures/synthetic_urp.unitypackage
-          ~/blender/blender -b --factory-startup --python tests/make_synthetic_hdrp_package.py -- fixtures/synthetic_hdrp.unitypackage
-          python3 tests/make_synthetic_broken_packages.py fixtures/synthetic_multi.unitypackage fixtures
+          python3 tests/run_integration.py --blender ~/blender/blender --packages fixtures --generate-only
           ls -la fixtures
 
       - uses: actions/upload-artifact@v4
@@ -113,31 +109,6 @@ jobs:
           path: fixtures
 
       - name: Integration tests
-        run: |
-          # 1 本が失敗しても残りを回し、最後にまとめて失敗にする
-          failed=""
-          run() {
-            echo "::group::$2"
-            if ! ~/blender/blender -b --factory-startup --python tests/integration_import.py -- "fixtures/$1" "tests/$2"; then
-              failed="$failed $2"
-              echo "::error title=integration test failed::$2 (Blender ${{ matrix.blender }})"
-            fi
-            echo "::endgroup::"
-          }
-          run synthetic_multi.unitypackage expectations_synthetic.json
-          run synthetic_multi.unitypackage expectations_synthetic_noblend.json
-          run synthetic_multi.unitypackage expectations_synthetic_prefabs.json
-          run synthetic_multi.unitypackage expectations_synthetic_prefabs_stack.json
-          run synthetic_scene.unitypackage expectations_synthetic_scene.json
-          run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs.json
-          run synthetic_scene.unitypackage expectations_synthetic_scene_keep_unused.json
-          run synthetic_scene.unitypackage expectations_synthetic_scene_prefabs_keep_unused.json
-          run synthetic_urp.unitypackage expectations_synthetic_urp.json
-          run synthetic_urp_standard.unitypackage expectations_synthetic_urp_standard.json
-          run synthetic_hdrp.unitypackage expectations_synthetic_hdrp.json
-          run synthetic_broken_model.unitypackage expectations_synthetic_broken_model.json
-          run synthetic_broken_all.unitypackage expectations_synthetic_broken_all.json
-          if [ -n "$failed" ]; then
-            echo "failed:$failed"
-            exit 1
-          fi
+        # 回す期待値の一覧は tests/integration_runs.json（手元の python3 tests/run_integration.py と同じ）。
+        # 1 本が失敗しても残りを回し、最後にまとめて失敗にする
+        run: python3 tests/run_integration.py --blender ~/blender/blender --packages fixtures --no-generate
