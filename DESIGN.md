@@ -104,6 +104,23 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
   - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
     prefab で見つかった組み込みメッシュの参照（Synty の FX の Cube など）は MeshRenderer ではなかった。
+- URP / HDRP の DecalProjector（Issue #165）: シーンに MonoBehaviour として保存されている。スクリプトの GUID ではなく、フィールドの形
+  （`m_Material` / `m_Size` / `m_UVScale` / `m_UVBias`。URP と HDRP 10 以降で同じ名前）で見分け、ライト・カメラと同じく中身ごと Node の
+  コンポーネントに持って prefab の上書きを当てる（`CLASS_MONO_BEHAVIOUR`、`SceneContents.decals` は件数）。Shibuya の 376 個はすべて URP
+  （`0777d029ed3dffa4692f417d4aba19ca`）で、ほかの手元のパッケージには無い（HDRP の実物では未確認）。
+  - DecalProjector の空間では、投影の箱は中心が `m_Offset`・大きさが `m_Size` で、+Z へ投影する。箱の xy を 0〜1 にした値 × `m_UVScale` + `m_UVBias` が UV。
+    Blender には投影が無いので、箱の中心の高さに xy の範囲の板を置き（`core/decals.py`）、投影元（-Z）を表にして、下の面と重ならないよう
+    投影元へ 2 mm（箱の奥行きの 1/4 まで）寄せる。Shibuya はすべて中心のずれが 0・奥行き 2〜4 cm が多く、壁や道路の面が箱の中心にある。
+    でこぼこした地面や角をまたぐもの（Shrinkwrap で沿わせる案は未実装）、`_DrawOrder`、法線だけを合成するデカールは近似か対象外。
+  - `m_ScaleMode` が 0（Scale Invariant）なら、GameObject のワールドでの拡大縮小で箱の大きさを割っておき、行列を掛けても `m_Size` のままにする。
+  - マテリアルは保存上は不透明（ベースのテクスチャのアルファは投影するときの不透明度）なので、中間表現の alpha_mode を blend、
+    `alpha_from_texture` を立て（`smoothness_from_albedo` は外す）、メッシュ用とは別に組む（method `decal`）。URP の標準の Decal シェーダーは
+    既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る `_MetallicGlossMap` / `_Smoothness: 1` は使わず、
+    金属感 0・ラフネス 0.8 にする（Shibuya の点字ブロックが黒い鏡面になっていた）。
+    ベースのテクスチャが無いもの・パッケージに無い .mat を指すものは置かずに件数を警告に出す。板は影を落とさない。
+  - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
+    オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
+  - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。
 - 読み込まないもの: UI、Terrain、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
@@ -537,6 +554,7 @@ unitypackage_loader/
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
+│   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py

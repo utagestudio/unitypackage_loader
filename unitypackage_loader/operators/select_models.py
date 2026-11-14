@@ -219,6 +219,7 @@ _ARRANGE_PROP = "unitypkg_select_arrange"
 _LIGHTS_PROP = "unitypkg_select_lights"
 _CAMERAS_PROP = "unitypkg_select_cameras"
 _EXPOSURE_PROP = "unitypkg_select_exposure"
+_DECALS_PROP = "unitypkg_select_decals"
 _LODS_PROP = "unitypkg_select_hide_lods"
 _UNUSED_PROP = "unitypkg_select_skip_unused"
 
@@ -299,6 +300,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             row.prop(wm, _LIGHTS_PROP, toggle=True, icon="LIGHT")
             row.prop(wm, _CAMERAS_PROP, toggle=True, icon="CAMERA_DATA")
             row.prop(wm, _EXPOSURE_PROP, toggle=True, icon="LIGHT_SUN")
+            row.prop(wm, _DECALS_PROP, toggle=True, icon="MESH_PLANE")
 
         if unit in (UNIT_PREFABS, UNIT_SCENES):
             # LODGroup を持つ prefab・シーンだけに効く。タブを切り替えても高さが変わらないよう、両方に出す
@@ -352,6 +354,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts.scene_lights = getattr(wm, _LIGHTS_PROP)
         opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
         opts.scene_exposure = getattr(wm, _EXPOSURE_PROP)
+        opts.scene_decals = getattr(wm, _DECALS_PROP)
         opts.hide_lods = getattr(wm, _LODS_PROP)
         opts.skip_unused_parts = getattr(wm, _UNUSED_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
@@ -443,6 +446,14 @@ def register() -> None:
             "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
         ),
     ))
+    setattr(wm, _DECALS_PROP, BoolProperty(
+        name="Decals",
+        default=True,
+        description=(
+            "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
+            "placed in the middle of each projector's box. Good for decals on flat walls and roads"
+        ),
+    ))
     setattr(wm, _LODS_PROP, BoolProperty(
         name="Hide Distant Levels",
         default=True,
@@ -463,7 +474,7 @@ def register() -> None:
 
 
 def unregister() -> None:
-    for prop in (_UNUSED_PROP, _LODS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
+    for prop in (_UNUSED_PROP, _LODS_PROP, _DECALS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
         if hasattr(bpy.types.WindowManager, prop):
             delattr(bpy.types.WindowManager, prop)
     for cls in reversed(_classes):
