@@ -1,14 +1,15 @@
 {
   "options": { "material_mode": "AUTO", "models": "ALL" },
   "errors": 0,
-  "objects": { "count": 15, "mesh_count": 15, "armature_count": 0 },
-  "materials": { "count": 18, "mapped": 15, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "name", "prefab", "prefab-split", "shared"] },
-  "images": { "count": 2 },
+  "objects": { "count": 16, "mesh_count": 16, "armature_count": 0 },
+  "materials": { "count": 19, "mapped": 16, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "name", "prefab", "prefab-split", "shared"] },
+  "images": { "count": 3 },
   "warnings_max": 6,
   "split_slots": 1,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticRock": ["CubeMat"], "SyntheticNoMat": ["NoMatMat"] },
   "material_checks": [
     { "name": "CubeMat", "mode": "PRINCIPLED", "shader_name": "Standard", "backface_culling": false },
+    { "name": "PebbleMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "Pebble.png" },
     { "name": "TwinAFbxMat", "alpha_mode": "opaque" },
     { "name": "TwinBFbxMat", "alpha_mode": "blend" },
     { "name": "VariantFbxMat", "alpha_mode": "cutout" },
