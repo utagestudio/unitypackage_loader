@@ -502,10 +502,10 @@ def check_dialog_selected(ctx: Context) -> None:
     from unitypackage_loader.operators import select_models
 
     prepared = importer.prepare_package(str(ctx.package))
-    items = getattr(bpy.context.window_manager, select_models._ITEMS_PROP)
+    items = select_models.dialog_items(bpy.context)
     items.clear()
-    select_models._add_prefab_and_model_items(items, prepared)
-    select_models._add_scene_items(items, prepared)
+    select_models.add_prefab_and_model_items(items, prepared)
+    select_models.add_scene_items(items, prepared)
     for kind, expected in ctx.exp["dialog_selected"].items():
         actual = sorted(it.pathname for it in items if it.kind == kind and it.selected)
         ctx.c.eq(f"dialog selected {kind}", actual, sorted(expected))
