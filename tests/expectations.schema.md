@@ -42,7 +42,9 @@
       "node_types_absent": ["ShaderNodeNormalMap"],
       "node_groups": ["UnityToon"],
       "method": "external",
-      "has_unity_data": true
+      "has_unity_data": true,
+      "props": { "<カスタムプロパティ>": "<値>" },
+      "absent": false
     }
   ],
   "shape_keys": { "<オブジェクト名>": 0 },
@@ -86,6 +88,8 @@
 | `errors` | レポートのエラー数（読み込めなかったモデル・シーン、続けられなかった失敗） |
 | `leaves_nothing` | `true` なら、オブジェクト・コレクション・メッシュ・マテリアル・画像などの数がインポートの前と同じ（失敗したときに片付けられている） |
 | `material_checks[].normal_image` | Unlit モードでは「Normal (unused)」ノードの画像も対象 |
+| `material_checks[].absent` | `true` なら、その名前のマテリアルが無いこと（同名のマテリアルを使ったときに、連番付きのものが残っていないかなど） |
+| `material_checks[].props` | カスタムプロパティの名前 → 値（無ければ `null`）。`before.materials` で作ったマテリアルには `test_preexisting: true` が付く |
 | `material_checks[].method` | レポートの行の解決手段（`materials.methods` と同じ値） |
 | `material_checks[].has_unity_data` | Unity の情報（`unity_normalized` など）をカスタムプロパティに残したか（`store_props`） |
 | `material_checks[].node_types_absent` | 挙げたノードが無いこと（`use_normal_maps` / `use_emission` を切ったときなど） |

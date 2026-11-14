@@ -265,9 +265,14 @@ def check_material_checks(ctx: Context) -> None:
     for spec in ctx.exp.get("material_checks", []):
         name = spec["name"]
         mat = bpy.data.materials.get(name)
+        if spec.get("absent"):  # 作られていない（同名のマテリアルを使ったときの連番付きの名前など）
+            c.true(f"material {name} absent", mat is None)
+            continue
         c.true(f"material {name} exists", mat is not None)
         if mat is None:
             continue
+        for key, value in spec.get("props", {}).items():  # カスタムプロパティの値（無ければ None）
+            c.eq(f"{name}[{key!r}]", mat.get(key), value)
         if "alpha_mode" in spec:
             c.eq(f"{name}.alpha_mode", mat.get("unity_alpha_mode"), spec["alpha_mode"])
         if "render_method" in spec:
