@@ -63,6 +63,7 @@ from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
 from ..core.scene_import import parts_to_hide, parts_to_remove, prefab_warnings, scene_warnings, unused_in_placement
+from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
 from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
 from ..core.units import (
     UNIT_PREFABS,
@@ -308,12 +309,41 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
 
 
 class _ShaderDeclarations:
-    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。"""
+    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。
+
+    Shader Graph なら、テクスチャを読む UV の Tiling & Offset も読む（``uv_transforms``。#193）。
+    """
 
     def __init__(self, pkg: UnityPackage, warn: Callable[[str], None]):
         self._pkg = pkg
         self._warn = warn
         self._cache: dict[str, frozenset[str] | None] = {}
+        self._transforms: dict[str, dict[str, UVTransform]] = {}
+
+    def uv_transforms(self, guid: str | None) -> dict[str, UVTransform]:
+        if not guid:
+            return {}
+        if guid not in self._transforms:
+            self._transforms[guid] = self._read_transforms(guid)
+        return self._transforms[guid]
+
+    def _read_transforms(self, guid: str) -> dict[str, UVTransform]:
+        entry = self._pkg.get(guid)
+        if entry is None or not entry.has_asset or entry.ext != ".shadergraph":
+            return {}
+
+        def subgraph(sub_guid: str) -> str | None:
+            sub = self._pkg.get(sub_guid)
+            if sub is None or not sub.has_asset or sub.ext != ".shadersubgraph":
+                return None
+            return self._pkg.read_text(sub_guid)
+
+        try:
+            return texture_uv_transforms(self._pkg.read_text(guid), subgraph)
+        except Exception as exc:  # noqa: BLE001 - 補助データなので、テクスチャの Tiling をそのまま使って続ける（#69）
+            self._warn(f"could not read the texture UVs of {entry.pathname}: {exc}")
+            _log_exception(f"could not read the texture UVs of {entry.pathname}")
+            return {}
 
     def get(self, guid: str | None) -> frozenset[str] | None:
         if not guid:
@@ -350,6 +380,8 @@ def prepare_package(
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
+            # Shader Graph がグラフの中で UV を変えるテクスチャは、その値を Tiling / Offset として読む（#193）
+            umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
             norm = normalize_material(umat, table, declared.get(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warnings.append(f"could not parse {entry.pathname}: {exc}")

@@ -34,6 +34,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tests.shader_graph_writer import base_uv_graph  # noqa: E402
+from tests.shader_graph_writer import new_format as new_graph_format  # noqa: E402
 from tests.unity_binary_writer import material as binary_material  # noqa: E402
 from tests.unity_binary_writer import prefab_with_renderers as binary_prefab  # noqa: E402
 from unitypackage_loader.core.unity_ids import mesh_file_id  # noqa: E402
@@ -116,22 +118,12 @@ TINT_SHADER = """Shader "Synthetic/Tint" {
 """
 
 
-def shader_graph_json(names: list[str]) -> str:
-    """新しい形式の Shader Graph（JSON のオブジェクトを並べたもの）の、プロパティの宣言だけを持つもの。"""
-    objects = [{"m_SGVersion": 3, "m_Type": "UnityEditor.ShaderGraph.GraphData", "m_ObjectId": "graph",
-                "m_Properties": [{"m_Id": f"p{i}"} for i in range(len(names))]}]
-    for i, name in enumerate(names):
-        objects.append({"m_SGVersion": 0, "m_Type": "UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty",
-                        "m_ObjectId": f"p{i}", "m_Name": name.strip("_"), "m_DefaultReferenceName": f"Texture2D_{i}",
-                        "m_OverrideReferenceName": name})
-    return "\n\n".join(json.dumps(o, indent=4) for o in objects)
-
-
 def shader_meta(pathname: str) -> str:
     return f"fileFormatVersion: 2\nguid: {guid_of(pathname)}\nScriptedImporter:\n  userData:\n"
 
 
-def leftover_mat_yaml(name: str, shader: str, *, main_tex: str, base_map: str | None, color, surface_type: int = 0) -> str:
+def leftover_mat_yaml(name: str, shader: str, *, main_tex: str, base_map: str | None, color, surface_type: int = 0,
+                      extra_colors: str = "") -> str:
     """HDRP/Lit や Standard から切り替えたマテリアル。前のシェーダーの値（_BaseColorMap、_Metallic、_Mode など）が残っている。"""
     base_ref = f"{{fileID: 2800000, guid: {base_map}, type: 3}}" if base_map else "{fileID: 0}"
     return f"""%YAML 1.1
@@ -165,7 +157,7 @@ Material:
     - _BaseColor: {{r: 0, g: 0, b: 0, a: 1}}
     - _Color: {{r: {color[0]}, g: {color[1]}, b: {color[2]}, a: 1}}
     - _EmissionColor: {{r: 1, g: 1, b: 1, a: 1}}
-"""
+{extra_colors}"""
 
 
 def toon_lit_mat_yaml(name: str, tex_guid: str) -> str:
@@ -592,16 +584,18 @@ def main() -> None:
     add(hdrp_model_path, path.read_bytes(), model_meta(guid_of(hdrp_model_path), hdrp_mats))
 
     # パッケージに入っている Shader Graph と自作 .shader（Issue #118）。どちらのマテリアルにも前のシェーダーの値が残っている。
-    # GraphMat のグラフは _MainTex だけを宣言する（残った黒い _Color / _BaseColor、_Metallic: 1、_Mode: 3 を読まない）。
+    # GraphMat のグラフは _MainTex と _BaseUV だけを宣言する（残った黒い _Color / _BaseColor、_Metallic: 1、_Mode: 3 を読まない）。
+    # _MainTex は、_BaseUV の xy を Tiling、zw を Offset にした UV で読む（UnityJapanOffice と同じ作り。#193）。
     # CustomMat の .shader は _Color だけを宣言する（残った _MainTex と _SurfaceType: 1 を読まない）
     graph_path = "Assets/Synthetic/Shaders/Tiling.shadergraph"
-    graph = add(graph_path, shader_graph_json(["_MainTex"]).encode(), shader_meta(graph_path))
+    graph = add(graph_path, new_graph_format(base_uv_graph()).encode(), shader_meta(graph_path))
     shader_path = "Assets/Synthetic/Shaders/Tint.shader"
     shader = add(shader_path, TINT_SHADER.encode(), shader_meta(shader_path))
     source_mats = {}
     for name, text in (
         ("GraphMat", leftover_mat_yaml("GraphMat", f"{{fileID: -6465566751694194690, guid: {graph}, type: 3}}",
-                                       main_tex=tex_a, base_map=tex_n, color=(0, 0, 0))),
+                                       main_tex=tex_a, base_map=tex_n, color=(0, 0, 0),
+                                       extra_colors="    - _BaseUV: {r: 3, g: 2, b: 0.25, a: 0.5}\n")),
         ("CustomMat", leftover_mat_yaml("CustomMat", f"{{fileID: 4800000, guid: {shader}, type: 3}}",
                                         main_tex=tex_n, base_map=None, color=(0.2, 0.6, 0.4), surface_type=1)),
     ):

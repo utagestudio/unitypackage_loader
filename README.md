@@ -213,7 +213,10 @@ Simple Lit / Unlit / Baked Lit) and HDRP (Lit / the first layer of LayeredLit / 
 common property names. A material whose shader was switched can keep the previous shader's settings, so URP and HDRP
 materials are read only by that pipeline's names. When the shader's source (a Shader Graph or `.shader`) is in the
 package, settings the shader does not declare are ignored (the shader's logic itself is not interpreted, so shaders
-that build their color from custom names may come in white).
+that build their color from custom names may come in white). When a Shader Graph sets a texture's tiling inside the
+graph (a Tiling And Offset node driven by a material value), the node connections are followed and that value is used
+as the texture's tiling / offset (only for textures read with the first UV set; graph-specific blending such as mask
+images is not reproduced).
 
 The intermediate representation itself is stored in the custom property `unity_normalized` (JSON), and values not used by
 Blender are stored in `unity_props`. "Rebuild in Another Mode" in the sidebar's Tools panel rebuilds the materials of the

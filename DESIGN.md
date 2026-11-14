@@ -536,6 +536,7 @@ unitypackage_loader/
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
+│   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
@@ -734,6 +735,25 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 - シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないシェーダーは、generic の別名（上記）に当たればそのテクスチャを使い、
   当たらなければ残りで黒くなる代わりに白（テクスチャ無し）になる（Japanese Street の `Leaves.shader` は `_Base_Color` / `_Normal` で、別名を足すまで AE_Flower などが白かった）。
   表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
+
+**Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
+
+Shader Graph はテクスチャの `m_Scale` / `m_Offset`（`_ST`）を使わず、グラフの Tiling And Offset で UV を変えることが多い。繰り返しの値はマテリアルの Vector に入る
+（UnityJapanOffice の `_BaseUV` は xy が Tiling、zw が Offset。Chair_04_Seat は 18、Cussion_01A は 10。Shader Graph のマテリアル 67 個のうち 36 個が 1 以外）。
+プロパティ名からは推測せず、`core/shader_graph.py` がノードのつながりをたどる。
+
+- テクスチャのプロパティを Texture 入力に直接つないだ Sample Texture 2D（LOD 付きも）の UV 入力をさかのぼり、次のノードだけを式として評価する:
+  UV（チャンネル）、Tiling And Offset、Property（Float / Vector）、Split、Combine、Vector 2/3/4、Redirect、Parallax（Occlusion）Mapping（視線でずらす分は無視して、
+  入力の UV をそのまま渡す近似。UnityJapanOffice の Fabric_B / C）、Sub Graph（`.shadersubgraph` を読み、`m_PropertyGuids` / `m_PropertyIds` で入力をサブグラフの
+  プロパティに結び付けて、同じ名前の出力をたどる。UnityJapanOffice の UVMapping）。ほかのノードが混ざれば分からない扱い。
+- 結果は「UV0 × scale + offset」で、各成分は定数かマテリアルのプロパティの成分。UV1 以降で読むテクスチャ、同じテクスチャを違う UV で読むもの、恒等のものは返さない。
+- prepare_package で正規化の前に、マテリアルのテクスチャの `m_Scale` / `m_Offset` をその値に置き換える（`apply_uv_transforms`）。成分のプロパティがマテリアルに無ければ置き換えない
+  （Unity はグラフの既定値を使うが、それは読まない）。Blender ではベースカラーの Mapping を法線などとも共有しているので、ベースカラーのテクスチャの値が全体に当たる。
+- 同じ出力は 1 度だけ評価し、評価中の出力に戻ったら（循環）分からない扱い。サブグラフの入れ子と式の深さは 64 まで。壊れた入力には `GraphError`（`ValueError`）だけを送出し、
+  読む側は警告を出してテクスチャの Tiling をそのまま使う。
+- `.shadersubgraph` も走査でメモリに残す（`_CACHE_EXTS`）。残さないと、サブグラフを読むたびに tar を走査し直す。
+- Synty の PolygonShader は Base Texture の UV がキーワードで分かれる（Keyword ノード）ので対象外のまま（Synty Starter / Farm、スーパーカブの Shader Graph のマテリアルは変化なし）。
+- グラフ固有の合成（UnityJapanOffice の Fabric_D のクッションのマーク: UV2 の `_AlbedoMaskMap` と `_MainTex` のアルファ、ステッチの色を何段も Lerp する）は再現しない。
 
 **lilToon プロファイルの変換規則（サンプルで確認した値）**
 

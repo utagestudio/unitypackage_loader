@@ -46,7 +46,8 @@ SCENE_EXTS = frozenset({".unity"})
 # tar では ``asset`` が ``pathname`` より先に来るのが普通なので、種類の分からない ``asset`` はいったん読んで保持し、
 # 同じ GUID の ``pathname`` で拡張子が分かった時点で残すか捨てるかを決める（保持するのは常に 1 件。#75）。
 # ``pathname`` が続けて来ないパッケージでは、保持したものを ``_CACHE_MAX_SIZE`` 以下に限って残す（超えたものは read_asset で再走査）
-_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph"})  # シェーダーは宣言の読み取り用（#118）
+# シェーダーは宣言の読み取り用（#118）、サブグラフは UV の Tiling & Offset をたどるため（#193）
+_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph", ".shadersubgraph"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
 # 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
