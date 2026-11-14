@@ -1572,200 +1572,260 @@ class _ImportSession:
 
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
-        pathname = scene_summary.pathname
-        target = bpy.data.collections.new(scene_summary.name)
-        self.collection.children.link(target)
-        target["unity_scene"] = pathname
-        target["unity_scene_guid"] = scene_summary.guid
-        self.report.scenes.append(pathname)
+        _SceneImport(self, scene_summary).run(progress_start, progress_span)
 
-        hierarchy = self.prepared.scene_hierarchies[scene_summary.guid]
-        active = effective_active(hierarchy)
-        empties: dict[int, bpy.types.Object] = {}
-        templates: dict[tuple, SceneTemplate] = {}
-        unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
-        stats = PlacementStats()
-        removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
-        matchers: dict[tuple, PartMatcher | None] = {}  # テンプレートの key → 中のオブジェクトの fileID の計算
-        count = len(scene_summary.placements)
-        for index, placement in enumerate(scene_summary.placements):
+
+class _SceneImport:
+    """シーン 1 つの読み込み（``_ImportSession.import_scene``）。
+
+    以前は import_scene の 1 つのメソッド（約 210 行）が、配置ごとに使う表（Empty・テンプレート・FBX の単位の倍率など）と
+    集計をローカル変数で持ち、組み込みメッシュ・デカール・ライト／カメラのそれぞれに「親の Empty とローカル行列を決める」
+    同じ処理をコピーしていた。シーン 1 つ分の状態をこのクラスのフィールドにし、手順をメソッドに分けた（#198）。
+    """
+
+    def __init__(self, session: _ImportSession, scene_summary: SceneSummary):
+        self.session = session
+        self.opts = session.opts
+        self.report = session.report
+        self.summary = scene_summary
+        self.pathname = scene_summary.pathname
+        self.hierarchy = session.prepared.scene_hierarchies[scene_summary.guid]
+        self.active = effective_active(self.hierarchy)
+        self.target: bpy.types.Collection | None = None  # シーンのコレクション（run で作る）
+        self.empties: dict[int, bpy.types.Object] = {}  # Node の key → その GameObject の Empty（か組み込みメッシュ）
+        self.templates: dict[tuple, SceneTemplate] = {}  # 配置の key → 最初に読み込んだオブジェクト（以後は複製する）
+        self.matchers: dict[tuple, PartMatcher | None] = {}  # 配置の key → 中のオブジェクトの fileID の計算（#172）
+        self.removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
+        self.unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor（FBX 以外は None）
+        self.stats = PlacementStats()
+
+    def run(self, progress_start: float, progress_span: float) -> None:
+        self.target = bpy.data.collections.new(self.summary.name)
+        self.session.collection.children.link(self.target)
+        self.target["unity_scene"] = self.pathname
+        self.target["unity_scene_guid"] = self.summary.guid
+        self.report.scenes.append(self.pathname)
+
+        count = len(self.summary.placements)
+        for index, placement in enumerate(self.summary.placements):
             if index % 25 == 0:
-                self.step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {scene_summary.name}")
-            summary = self.supported_models.get(placement.model_guid)
-            if summary is None:
-                skipped = self.model_by_guid.get(placement.model_guid)
-                if skipped is not None:
-                    self.report.warn(f"scene {pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-                continue
-            if summary.guid in self.failed_models:
-                continue  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
-            root = scene_empty(hierarchy, placement.root, target, empties, active, self.hidden_objects)
-            table = {
-                name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
-                for name, r in placement.renderers.items()
-            }
-            parts = placement.parts
-            # 消した中のオブジェクトは signature に入っている（テンプレートから消すため）
-            key = (placement.signature(), bool(parts))
-            if self.opts.skip_unused_parts:
-                # 使われていない部品はテンプレートから消すので、それを決める値もテンプレートを使い回す条件に入れる
-                mesh_ids = tuple(sorted(r.mesh_file_id for r in placement.renderers.values()))
-                key = (key, built_from_renderers(hierarchy, placement), mesh_ids)
-            template = templates.get(key)
-            if template is None:
-                try:
-                    objects = self.import_model(summary, table, target, with_parts=bool(parts))
-                except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
-                    _record_failure(self.report, f"scene {pathname}: could not import {summary.entry.pathname}: {exc}")
-                    continue
-                matchers[key] = self.last_matcher
-                if self.opts.skip_unused_parts:
-                    # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）。
-                    # シーン・prefab がモデルの中から消したオブジェクトも Unity に無いので、同じく消す（#172）
-                    unused = unused_in_placement(hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
-                    if parts and self.last_matcher is not None:
-                        unused |= self.last_matcher.match(parts).removed
-                    objects, removed_by_key[key] = self.remove_unused(objects, unused)
-                template = templates[key] = SceneTemplate.capture(objects)
-            else:
-                objects = duplicate_objects(template, target)
-                self.report.objects.extend(o.name for o in objects)
-            scale = summary.info.global_scale
-            attach_to_empty(objects, root, scale)
-            if placement.node_transforms:
-                if summary.guid not in unit_scales:
-                    unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid]) if summary.entry.ext == ".fbx" else None
-                overrides = dict(placement.node_transforms)
-                root_node = placement.root_node
-                if root_node == SOLE_NODE:
-                    # 表の無いモデル。オブジェクトが 1 つだけなら、Unity はそのノードをルートに畳んでいる（#111）。
-                    # そうでなければルートの Transform は単位行列が基準なので、展開した行列のままでよい
-                    overrides = {k: v for k, v in overrides.items() if k != SOLE_NODE}
-                    if len(objects) == 1 and not objects[0].children:
-                        overrides[objects[0].name] = placement.node_transforms[SOLE_NODE]
-                        root_node = objects[0].name
-                    else:
-                        root_node = ""
-                if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
-                    spec = overrides.pop(root_node, placement.node_transforms.get(root_node, {}))
-                    placed = apply_collapsed_root(template, objects, root, root_node, spec, unit_scales[summary.guid])
-                    stats.skipped_nodes += 0 if placed else 1
-                if overrides:
-                    stats.skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
-            if summary.entry.ext == ".fbx" and any(r.relative is not None for r in placement.renderers.values()):
-                # Renderer ごとに Unity の位置と比べて置き直す（上書きで動いた部品も含む。#186）
-                if summary.guid not in unit_scales:
-                    unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid])
-                stats.skipped_offsets += apply_renderer_worlds(template, objects, root, placement.renderers, unit_scales[summary.guid])
-            elif placement.offsets:
-                stats.skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
-            hidden = parts_to_hide(
-                hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods
-            )
-            # モデルの中への表示の上書きと削除（#172）。fileID はテンプレートのオブジェクトの名前で計算してあるので、
-            # 複製した配置では並び順で対応させる
-            matcher = matchers.get(key)
-            match = matcher.match(parts) if parts and matcher is not None else PartMatch()
-            stats.unmatched_parts += match.unmatched
-            own = {t.name: o.name for t, o in zip(template.objects, objects)}
-            removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
-            hide_here = {own[n] for n in match.hidden if n in own} | removed_here
-            for obj in objects:
-                if obj.name in hidden.lods:
-                    obj["unity_lod"] = hidden.lods[obj.name]
-                if obj.name in hidden.names or obj.name in hide_here:
-                    defer_hide(obj, self.hidden_objects)
-            stats.hidden_unused += hidden.unused
-            if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
-                stats.hidden_unused += len(removed_here - hidden.names)
-            if placement.active:  # 非アクティブな配置は、隠したときと同じく数えない
-                stats.removed_unused += removed_by_key.get(key, 0)
-            stats.hidden_lods += hidden.hidden_lods
-
-        # --- Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190） ---
-        primitives = scene_summary.contents.primitives if scene_summary.contents is not None else []
-        for primitive in primitives:
-            node = hierarchy.nodes[primitive.key]
-            if primitive.key in empties:
-                parent, local = empties[primitive.key], Matrix.Identity(4)
-            else:
-                parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
-                local = Matrix(unity_to_blender(node.local))
-            obj = make_primitive(node.name, primitive_mesh(primitive.kind, self.primitive_meshes), self.material_for(primitive.materials))
-            target.objects.link(obj)
-            obj.parent = parent
-            obj.matrix_basis = local
-            obj["unity_game_object"] = node.name
-            self.report.objects.append(obj.name)
-            if not primitive.visible:
-                defer_hide(obj, self.hidden_objects)
-            empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
-
-        # --- DecalProjector を板にする（#165） ---
+                self.session.step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {self.summary.name}")
+            self.place_model(placement)
+        self.place_primitives()
         if self.opts.scene_decals:
-            for component, decal in self.scene_decals(scene_summary):
-                material = self.decal_material_for(decal.material)
-                if material is None:
-                    stats.skipped_decals += 1
-                    continue
-                node = hierarchy.nodes[component.node]
-                if component.node in empties:
-                    parent, local = empties[component.node], Matrix.Identity(4)
-                else:
-                    parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
-                    local = Matrix(unity_to_blender(node.local))
-                world = component.world
-                lossy = tuple(math.sqrt(sum(world[i][j] ** 2 for i in range(3))) for j in range(3))
-                obj = bpy.data.objects.new(f"{component.name} (Decal)", decal_mesh(decal, lossy, self.decal_meshes))
-                obj.material_slots[0].link = "OBJECT"
-                obj.material_slots[0].material = material
-                obj["unity_decal"] = json_text(component.body)
-                obj.visible_shadow = False  # 投影したデカールは影を落とさない
-                target.objects.link(obj)
-                obj.parent = parent
-                obj.matrix_basis = local
-                self.report.objects.append(obj.name)
-                self.report.decals += 1
-                if not component.active:
-                    defer_hide(obj, self.hidden_objects)
+            self.place_decals()
+        self.place_lights_and_cameras()
+        for message in scene_warnings(self.pathname, self.summary.contents, self.stats):
+            self.report.warn(message)
 
-        # --- ライト・カメラ ---
-        light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
+    # --- 共通 ---
+
+    def parent_and_local(self, key: int) -> tuple[bpy.types.Object | None, Matrix]:
+        """Node の GameObject に置くオブジェクトの親と、親からの行列。
+
+        同じ GameObject にモデルの配置の Empty（か組み込みメッシュ）があればその子にし、無ければ親の GameObject の Empty の
+        子にして Node の行列で置く。
+        """
+        if key in self.empties:
+            return self.empties[key], Matrix.Identity(4)
+        node = self.hierarchy.nodes[key]
+        parent = self.empty(node.parent) if node.parent is not None else None
+        return parent, Matrix(unity_to_blender(node.local))
+
+    def empty(self, key: int) -> bpy.types.Object:
+        """Node の GameObject の Empty（祖先の Empty も必要なら作る）。"""
+        return scene_empty(self.hierarchy, key, self.target, self.empties, self.active, self.session.hidden_objects)
+
+    def link(self, obj: bpy.types.Object, parent, local: Matrix, visible: bool) -> None:
+        self.target.objects.link(obj)
+        obj.parent = parent
+        obj.matrix_basis = local
+        self.report.objects.append(obj.name)
+        if not visible:
+            defer_hide(obj, self.session.hidden_objects)
+
+    def unit_scale(self, summary: ModelSummary) -> float | None:
+        if summary.guid not in self.unit_scales:
+            fbx = summary.entry.ext == ".fbx"
+            self.unit_scales[summary.guid] = read_unit_scale(self.session.paths[summary.guid]) if fbx else None
+        return self.unit_scales[summary.guid]
+
+    # --- モデルの配置 ---
+
+    def place_model(self, placement) -> None:
+        """モデルの配置 1 つ。最初の配置は読み込み、同じモデル・同じ割り当ての以後の配置は複製する。"""
+        session = self.session
+        summary = session.supported_models.get(placement.model_guid)
+        if summary is None:
+            skipped = session.model_by_guid.get(placement.model_guid)
+            if skipped is not None:
+                self.report.warn(f"scene {self.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+            return
+        if summary.guid in session.failed_models:
+            return  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
+        root = self.empty(placement.root)
+        key = self.template_key(placement)
+        template = self.templates.get(key)
+        if template is None:
+            try:
+                objects = self.import_template(summary, placement, key)
+            except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
+                _record_failure(self.report, f"scene {self.pathname}: could not import {summary.entry.pathname}: {exc}")
+                return
+            template = self.templates[key]
+        else:
+            objects = duplicate_objects(template, self.target)
+            self.report.objects.extend(o.name for o in objects)
+        attach_to_empty(objects, root, summary.info.global_scale)
+        self.apply_transforms(summary, placement, template, objects, root)
+        self.hide_parts(placement, key, template, objects)
+
+    def template_key(self, placement) -> tuple:
+        """読み込み結果を使い回せる配置どうしで同じになる値。"""
+        # 消した中のオブジェクトは signature に入っている（テンプレートから消すため）
+        key = (placement.signature(), bool(placement.parts))
+        if self.opts.skip_unused_parts:
+            # 使われていない部品はテンプレートから消すので、それを決める値もテンプレートを使い回す条件に入れる
+            mesh_ids = tuple(sorted(r.mesh_file_id for r in placement.renderers.values()))
+            key = (key, built_from_renderers(self.hierarchy, placement), mesh_ids)
+        return key
+
+    def import_template(self, summary: ModelSummary, placement, key: tuple) -> list[bpy.types.Object]:
+        """配置のモデルを読み込み、以後の配置で複製するテンプレートにする。"""
+        session = self.session
+        parts = placement.parts
+        table = {
+            name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
+            for name, r in placement.renderers.items()
+        }
+        objects = session.import_model(summary, table, self.target, with_parts=bool(parts))
+        self.matchers[key] = session.last_matcher
+        if self.opts.skip_unused_parts:
+            # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）。
+            # シーン・prefab がモデルの中から消したオブジェクトも Unity に無いので、同じく消す（#172）
+            unused = unused_in_placement(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
+            if parts and session.last_matcher is not None:
+                unused |= session.last_matcher.match(parts).removed
+            objects, self.removed_by_key[key] = session.remove_unused(objects, unused)
+        self.templates[key] = SceneTemplate.capture(objects)
+        return objects
+
+    def apply_transforms(self, summary: ModelSummary, placement, template: SceneTemplate, objects, root) -> None:
+        """モデルの中のノードへの位置の上書きと、Unity 上で動かした部品の置き直し。"""
+        if placement.node_transforms:
+            unit_scale = self.unit_scale(summary)
+            overrides = dict(placement.node_transforms)
+            root_node = placement.root_node
+            if root_node == SOLE_NODE:
+                # 表の無いモデル。オブジェクトが 1 つだけなら、Unity はそのノードをルートに畳んでいる（#111）。
+                # そうでなければルートの Transform は単位行列が基準なので、展開した行列のままでよい
+                overrides = {k: v for k, v in overrides.items() if k != SOLE_NODE}
+                if len(objects) == 1 and not objects[0].children:
+                    overrides[objects[0].name] = placement.node_transforms[SOLE_NODE]
+                    root_node = objects[0].name
+                else:
+                    root_node = ""
+            if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
+                spec = overrides.pop(root_node, placement.node_transforms.get(root_node, {}))
+                placed = apply_collapsed_root(template, objects, root, root_node, spec, unit_scale)
+                self.stats.skipped_nodes += 0 if placed else 1
+            if overrides:
+                self.stats.skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scale)
+        if summary.entry.ext == ".fbx" and any(r.relative is not None for r in placement.renderers.values()):
+            # Renderer ごとに Unity の位置と比べて置き直す（上書きで動いた部品も含む。#186）
+            self.stats.skipped_offsets += apply_renderer_worlds(template, objects, root, placement.renderers, self.unit_scale(summary))
+        elif placement.offsets:
+            self.stats.skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, summary.info.global_scale)
+
+    def hide_parts(self, placement, key: tuple, template: SceneTemplate, objects) -> None:
+        """配置に合わせて、使われていない部品・表示されていない部品・遠景用の LOD を隠し、数える。"""
+        stats = self.stats
+        hidden = parts_to_hide(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods)
+        # モデルの中への表示の上書きと削除（#172）。fileID はテンプレートのオブジェクトの名前で計算してあるので、
+        # 複製した配置では並び順で対応させる
+        parts = placement.parts
+        matcher = self.matchers.get(key)
+        match = matcher.match(parts) if parts and matcher is not None else PartMatch()
+        stats.unmatched_parts += match.unmatched
+        own = {t.name: o.name for t, o in zip(template.objects, objects)}
+        removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
+        hide_here = {own[n] for n in match.hidden if n in own} | removed_here
+        for obj in objects:
+            if obj.name in hidden.lods:
+                obj["unity_lod"] = hidden.lods[obj.name]
+            if obj.name in hidden.names or obj.name in hide_here:
+                defer_hide(obj, self.session.hidden_objects)
+        stats.hidden_unused += hidden.unused
+        if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
+            stats.hidden_unused += len(removed_here - hidden.names)
+            stats.removed_unused += self.removed_by_key.get(key, 0)
+        stats.hidden_lods += hidden.hidden_lods
+
+    # --- モデル以外 ---
+
+    def place_primitives(self) -> None:
+        """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190）。"""
+        session = self.session
+        primitives = self.summary.contents.primitives if self.summary.contents is not None else []
+        for primitive in primitives:
+            node = self.hierarchy.nodes[primitive.key]
+            parent, local = self.parent_and_local(primitive.key)
+            obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.material_for(primitive.materials))
+            obj["unity_game_object"] = node.name
+            self.link(obj, parent, local, primitive.visible)
+            self.empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
+
+    def place_decals(self) -> None:
+        """DecalProjector を板にする（#165）。"""
+        session = self.session
+        for component, decal in session.scene_decals(self.summary):
+            material = session.decal_material_for(decal.material)
+            if material is None:
+                self.stats.skipped_decals += 1
+                continue
+            parent, local = self.parent_and_local(component.node)
+            world = component.world
+            lossy = tuple(math.sqrt(sum(world[i][j] ** 2 for i in range(3))) for j in range(3))
+            obj = bpy.data.objects.new(f"{component.name} (Decal)", decal_mesh(decal, lossy, session.decal_meshes))
+            obj.material_slots[0].link = "OBJECT"
+            obj.material_slots[0].material = material
+            obj["unity_decal"] = json_text(component.body)
+            obj.visible_shadow = False  # 投影したデカールは影を落とさない
+            self.link(obj, parent, local, component.active)
+            self.report.decals += 1
+
+    def place_lights_and_cameras(self) -> None:
+        session = self.session
+        prepared = session.prepared
+        light_scale = session.light_scale(self.summary, self.target) if self.opts.scene_lights else 1.0
         wanted = ([CLASS_LIGHT] if self.opts.scene_lights else []) + ([CLASS_CAMERA] if self.opts.scene_cameras else [])
-        for component in scene_components(hierarchy, wanted) if wanted else []:
-            node = hierarchy.nodes[component.node]
-            if component.node in empties:
-                # 同じ GameObject にモデルの配置の Empty があれば、その子にする
-                parent, local = empties[component.node], Matrix.Identity(4)
-            else:
-                parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
-                local = Matrix(unity_to_blender(node.local))
+        for component in scene_components(self.hierarchy, wanted) if wanted else []:
+            parent, local = self.parent_and_local(component.node)
             if component.class_id == CLASS_LIGHT:
-                values = convert_light(component.body, self.prepared.pipeline)
+                values = convert_light(component.body, prepared.pipeline)
                 values.energy *= light_scale  # HDRP の露出の分（#130）
                 obj = make_light(component.name, values)
                 obj["unity_light"] = json_text(component.body)
-                obj["unity_render_pipeline"] = self.prepared.pipeline
-                obj["unity_render_pipeline_source"] = self.prepared.pipeline_source
+                obj["unity_render_pipeline"] = prepared.pipeline
+                obj["unity_render_pipeline_source"] = prepared.pipeline_source
                 if light_scale != 1.0:
                     obj["unity_light_scale"] = light_scale
-                stats.baked_lights += values.baked_only
-                stats.light_notes.update(values.notes)
+                self.stats.baked_lights += values.baked_only
+                self.stats.light_notes.update(values.notes)
                 self.report.lights += 1
             else:
                 obj = make_camera(component.name, convert_camera(component.body))
                 obj["unity_camera"] = json_text(component.body)
                 self.report.cameras += 1
-                if self.scene.camera is None and component.active:
-                    self.scene.camera = obj
-            target.objects.link(obj)
-            obj.parent = parent
+                if session.scene.camera is None and component.active:
+                    session.scene.camera = obj
+            # ライト・カメラにはスケールを掛けない。レポートの objects には載せない（数は lights / cameras）
             location, rotation, _ = (local @ Matrix(LIGHT_CAMERA_BASIS)).decompose()
-            obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
+            self.target.objects.link(obj)
+            obj.parent = parent
+            obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)
             if not component.active:
-                defer_hide(obj, self.hidden_objects)
-        for message in scene_warnings(pathname, scene_summary.contents, stats):
-            self.report.warn(message)
+                defer_hide(obj, session.hidden_objects)
 
 
 _DECAL_ROUGHNESS = 0.8  # デカールの板のつや（下の面の値は分からないので、つや消し寄りにする。#165）
