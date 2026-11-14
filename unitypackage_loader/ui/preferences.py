@@ -45,8 +45,8 @@ class UNITYPKG_AddonPreferences(bpy.types.AddonPreferences):
         default="SIDE_BY_SIDE",
         description="How to place prefabs when importing more than one. The choice made in the selection dialog is saved here",
     )
-    # 選択ダイアログで最後に選んだ単位（PREFABS / MODELS）。次に開いたときの既定にする
-    last_import_unit: StringProperty(default="", options={"HIDDEN"})  # ダイアログで前回選んだ単位（SCENES / PREFABS / MODELS）
+    # 選択ダイアログで最後に選んだ単位（SCENES / PREFABS / MODELS）。次に開いたときの既定にする
+    last_import_unit: StringProperty(default="", options={"HIDDEN"})
     default_material_mode: EnumProperty(name="Material Mode", items=MATERIAL_MODE_ITEMS, default="AUTO")
     default_extract_mode: EnumProperty(name="Extract To", items=EXTRACT_MODE_ITEMS, default="BESIDE_BLEND")
     default_extract_path: StringProperty(name="Custom Path", subtype="DIR_PATH", default="")

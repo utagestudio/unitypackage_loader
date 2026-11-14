@@ -57,6 +57,7 @@ CLASS_TRANSFORM = 4
 CLASS_CAMERA = 20
 CLASS_MESH_RENDERER = 23
 CLASS_MESH_FILTER = 33
+CLASS_MESH = 43  # メッシュのアセット（古い形式の .meta の表に、モデルの中のメッシュとして現れる）
 CLASS_MESH_COLLIDER = 64
 CLASS_LIGHT = 108
 CLASS_MONO_BEHAVIOUR = 114  # スクリプトのコンポーネント。DecalProjector の形をしたものだけを持つ（#165）
@@ -69,7 +70,9 @@ CLASS_PREFAB_INSTANCE = 1001
 
 _TRANSFORM_CLASSES = (CLASS_TRANSFORM, CLASS_RECT_TRANSFORM)
 _RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
-_COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)  # 中身をそのまま持ち、上書きを当ててから読むコンポーネント
+# 中身をそのまま持ち、上書きを当ててから読むコンポーネント。ほかに、DecalProjector の形をした MonoBehaviour も持つ
+# （``parse_asset``。#165）。``components()`` の既定はライト・カメラだけ
+_COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)
 
 # モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）。
 # .meta の fileIdsGeneration が 2 のモデルでの値（``unity_ids.hierarchy_file_id`` のパスが空のもの）
@@ -82,6 +85,7 @@ NAMED_MODEL_ROOT_TRANSFORM = -4216859302048453862
 # Unity 2018.2 以前の形式（.meta の fileIDToRecycleName で 100000 / 400000 が //RootNode）でのルート
 LEGACY_MODEL_ROOT_GAME_OBJECT = 100000
 LEGACY_MODEL_ROOT_TRANSFORM = 400000
+_LEGACY_ID_STRIDE = 100000  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
 _LEGACY_MODEL_IDS = {LEGACY_MODEL_ROOT_GAME_OBJECT: MODEL_ROOT_GAME_OBJECT, LEGACY_MODEL_ROOT_TRANSFORM: MODEL_ROOT_TRANSFORM}
 
 MAX_NESTING = 16  # PrefabInstance をたどる深さの上限
@@ -175,6 +179,11 @@ def _uid(file_id: int) -> int:
     return file_id & _MASK
 
 
+def _legacy_class(file_id: int) -> int:
+    """古い形式の .meta の表（fileIDToRecycleName）の fileID が表すオブジェクトのクラス ID。"""
+    return file_id // _LEGACY_ID_STRIDE
+
+
 # ---------------------------------------------------------------------------
 # 1 アセットの読み取り
 # ---------------------------------------------------------------------------
@@ -221,7 +230,7 @@ class RawAsset:
     renderers: dict[int, tuple[int, RendererInfo]] = field(default_factory=dict)  # Renderer の fileID → (GameObject, 情報)
     instances: list[_RawInstance] = field(default_factory=list)
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
-    # ライト・カメラの fileID → (GameObject, クラス ID, ドキュメントの中身)
+    # コンポーネント（ライト・カメラ・デカール）の fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
     collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
@@ -369,7 +378,7 @@ class Node:
     model_guid: str | None = None  # モデルの PrefabInstance のルートならそのモデルの GUID
     scope: int = 0  # Transform を直接持つアセットでの最上位の祖先（自分自身のこともある）
     scope_matrix: Mat4 = IDENTITY  # scope の子から自分までの、上書き前の行列の積（scope 自身の行列は含まない）
-    components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # ライト・カメラの key → (クラス ID, 中身)
+    components: dict[int, tuple[int, dict]] = field(default_factory=dict)  # コンポーネント（ライト・カメラ・デカール）の key → (クラス ID, 中身)
     # モデルの PrefabInstance で、古い形式の .meta（fileIDToRecycleName）から名前を引けた中への上書き
     # （名前を引けなかったマテリアルの上書きは、対象の fileID ごとに ``pending_renderer`` の名前で入る。#31）
     model_materials: dict[str, list[str | None]] = field(default_factory=dict)  # オブジェクト名 → スロット順の .mat
@@ -407,7 +416,7 @@ class Hierarchy:
     # Unity の fileID（このアセットの空間での値）→ Node の key。差し込んだものの fileID（XOR）が既にあれば、先のものを残す
     game_objects: dict[int, int] = field(default_factory=dict)
     renderers: dict[int, int] = field(default_factory=dict)
-    components: dict[int, int] = field(default_factory=dict)  # ライト・カメラ
+    components: dict[int, int] = field(default_factory=dict)  # コンポーネント（ライト・カメラ・デカール）
     transforms: dict[int, int] = field(default_factory=dict)  # 消した Node を指したままのことがある
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
@@ -687,7 +696,7 @@ class Expander:
                 material = _MATERIAL_PATH.fullmatch(path)
                 if material and int(material.group(1)) < MAX_SLOTS:
                     index, material_guid = int(material.group(1)), ref_guid(reference)
-                    through.append(_Through(uid, "renderer", lambda root, key, i=index, m=material_guid: _set_slot(root.model_materials, key, i, m)))
+                    through.append(_Through(uid, "renderer", lambda root, key, i=index, m=material_guid: _set_slot(root.model_materials.setdefault(key, []), i, m)))
                 elif visibility is not None:
                     kind, changes = visibility
                     through.append(_Through(uid, kind, lambda root, key, c=changes: _record_part(root, key, **c)))
@@ -699,7 +708,7 @@ class Expander:
             material = _MATERIAL_PATH.fullmatch(path)
             if material and uid not in _MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS and root_key in h.nodes:
                 # 名前を引けない Renderer。対象の fileID ごとに残し、読み込んだオブジェクトと突き合わせる（読み込み側。#31）
-                _set_slot(h.nodes[root_key].model_materials, pending_renderer(uid), int(material.group(1)), ref_guid(reference))
+                _set_slot(h.nodes[root_key].model_materials.setdefault(pending_renderer(uid), []), int(material.group(1)), ref_guid(reference))
                 continue
             h.unresolved_overrides += 1
             if material or path == "m_Materials.Array.size":
@@ -768,7 +777,7 @@ def _part_key(table: dict[int, str], file_id: int, uid: int, kind: str, named_on
     """
     if table:
         classes = (CLASS_GAME_OBJECT,) if kind == "object" else _RENDERER_CLASSES
-        return _model_object_name(table, file_id) if file_id // 100000 in classes else None
+        return _model_object_name(table, file_id) if _legacy_class(file_id) in classes else None
     if named_only or uid in _MODEL_ROOT_UIDS:
         return None
     return pending_object(uid) if kind == "object" else pending_renderer(uid)
@@ -783,15 +792,17 @@ def _visibility_change(path: str, value: object) -> tuple[str, dict[str, bool]] 
     return None
 
 
-def _set_slot(rows: dict[str, list[str | None]], name: str, index: int, material_guid: str | None) -> None:
-    slots = rows.setdefault(name, [])
+def _set_slot(slots: list[str | None], index: int, material_guid: str | None) -> None:
+    """スロット順の .mat の並びの ``index`` 番目に入れる（足りなければ None で伸ばす）。``MAX_SLOTS`` 以上は無視する。"""
+    if index >= MAX_SLOTS:
+        return
     if index >= len(slots):
         slots.extend([None] * (index + 1 - len(slots)))
     slots[index] = material_guid
 
 
 def _remove_component(h: Hierarchy, scope: _Inserted, uid: int) -> bool:
-    """差し込んだ Renderer かライト・カメラを消す。見つからなければ False。"""
+    """差し込んだ Renderer かコンポーネント（ライト・カメラ・デカール）を消す。見つからなければ False。"""
     node = h.nodes.get(scope.renderers.get(uid))  # type: ignore[arg-type]
     if node is not None and node.renderer is not None:
         if h.renderers.get(node.renderer_key) == node.key:
@@ -829,7 +840,6 @@ def _apply_lod_groups(h: Hierarchy, groups: list[list[list[int]]], resolve: Call
             renderer.lod_level = max(renderer.lod_level, level)
 
 
-_CLASS_PREFIX_TRANSFORM = CLASS_TRANSFORM  # 古い形式の fileID は「クラス ID × 100000 + 通し番号」
 _ROOT_NODE_NAME = "//RootNode"
 
 
@@ -841,7 +851,7 @@ def _model_object_name(table: dict[int, str], file_id: int) -> str | None:
     if name != _ROOT_NODE_NAME:
         return name
     # 1 メッシュの FBX では Renderer がルートに載り、Blender ではメッシュ名のオブジェクトになる
-    meshes = [n for k, n in sorted(table.items()) if k // 100000 == 43 and n != _ROOT_NODE_NAME]
+    meshes = [n for k, n in sorted(table.items()) if _legacy_class(k) == CLASS_MESH and n != _ROOT_NODE_NAME]
     return meshes[0] if len(meshes) == 1 else None
 
 
@@ -867,21 +877,18 @@ def _apply_named_model_override(root: Node, table: dict[int, str], file_id: int,
     """モデルの中への上書きを、表で引いた名前付きで配置のルートに記録する。名前を引けなければ False。"""
     if not table:
         return False
-    class_id = file_id // 100000
+    class_id = _legacy_class(file_id)
     name = _model_object_name(table, file_id)
     if name is None:
         return False
-    if class_id == _CLASS_PREFIX_TRANSFORM and _record_node_transform(root, name, path, value):
+    if class_id == CLASS_TRANSFORM and _record_node_transform(root, name, path, value):
         return True
     material = _MATERIAL_PATH.fullmatch(path)
-    if material and class_id in (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER):
+    if material and class_id in _RENDERER_CLASSES:
         index = int(material.group(1))
         if index >= MAX_SLOTS:
             return False
-        slots = root.model_materials.setdefault(name, [])
-        if index >= len(slots):
-            slots.extend([None] * (index + 1 - len(slots)))
-        slots[index] = ref_guid(reference)
+        _set_slot(root.model_materials.setdefault(name, []), index, ref_guid(reference))
         return True
     return False
 
@@ -944,11 +951,7 @@ def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, val
     if match:
         if renderer is None:
             return False
-        index = int(match.group(1))
-        if index < MAX_SLOTS:
-            if index >= len(renderer.materials):
-                renderer.materials.extend([None] * (index + 1 - len(renderer.materials)))
-            renderer.materials[index] = ref_guid(reference)
+        _set_slot(renderer.materials, int(match.group(1)), ref_guid(reference))
         return True
     return False
 
@@ -976,7 +979,7 @@ def _set_property(body: dict, path: str, value: object, reference: object) -> No
 
 @dataclass
 class PlacedComponent:
-    """シーンに置かれたライト・カメラ（上書き済みの中身と、GameObject のワールド行列）。"""
+    """シーンに置かれたコンポーネント（ライト・カメラ・デカール。上書き済みの中身と、GameObject のワールド行列）。"""
 
     key: int
     node: int
@@ -988,7 +991,7 @@ class PlacedComponent:
 
 
 def components(h: Hierarchy, class_ids: Iterable[int] = _COMPONENT_CLASSES) -> list[PlacedComponent]:
-    """階層に現れた順のライト・カメラ。"""
+    """階層に現れた順のコンポーネントのうち、``class_ids`` のもの（既定はライト・カメラ。デカールは ``CLASS_MONO_BEHAVIOUR``）。"""
     wanted = set(class_ids)
     worlds = world_matrices(h)
     active = effective_active(h)
@@ -1033,7 +1036,7 @@ def _remove_subtree(h: Hierarchy, key: int, children: dict[int, list[int]] | Non
             del h.game_objects[node.game_object]
         if node.renderer is not None and h.renderers.get(node.renderer_key) == current:
             del h.renderers[node.renderer_key]
-        for component in node.components:  # 消した GameObject のライト・カメラへの上書きが残っていることがある（#68）
+        for component in node.components:  # 消した GameObject のコンポーネントへの上書きが残っていることがある（#68）
             if h.components.get(component) == current:
                 del h.components[component]
         stack.extend(children.get(current, []))
@@ -1135,20 +1138,17 @@ def _close(a: Mat4, b: Mat4) -> bool:
     return all(abs(x - y) <= _CLOSE * max(1.0, abs(x), abs(y)) for ra, rb in zip(a, b) for x, y in zip(ra, rb))
 
 
-_CLASS_PREFIX_MESH = 43
-
-
 def _node_names(table: dict[int, str]) -> set[str] | None:
     """.meta の表にある、ルート以外の GameObject の名前（FBX のノード名）。
 
     空の集合は 1 メッシュの FBX（GameObject はルートだけで、メッシュも 1 つ）。ノードが分からない表は None
     （GameObject の行が無い表や、古い番号を引き継いだ ``internalIDToNameTable`` で一部の行しか無いもの）。
     """
-    game_objects = {n for k, n in table.items() if k // 100000 == CLASS_GAME_OBJECT}
+    game_objects = {n for k, n in table.items() if _legacy_class(k) == CLASS_GAME_OBJECT}
     names = game_objects - {_ROOT_NODE_NAME}
     if names:
         return names
-    meshes = sum(1 for k in table if k // 100000 == _CLASS_PREFIX_MESH)
+    meshes = sum(1 for k in table if _legacy_class(k) == CLASS_MESH)
     return set() if game_objects and meshes <= 1 else None
 
 
@@ -1160,7 +1160,7 @@ def collapsed_root_name(table: dict[int, str]) -> str | None:
     """
     if _node_names(table) != set():
         return None
-    root_id = next((k for k in table if k // 100000 == CLASS_GAME_OBJECT), 0)
+    root_id = next((k for k in table if _legacy_class(k) == CLASS_GAME_OBJECT), 0)
     return _model_object_name(table, root_id)
 
 
