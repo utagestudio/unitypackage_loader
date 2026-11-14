@@ -86,7 +86,7 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | | Store Unity Properties | Store GUIDs, shadow colors, etc. as custom properties |
 | Textures | Extract To | `Beside .blend` (`//textures/<package name>/`) / `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | Pack images into the .blend file |
-| | Import Unreferenced Images | Also load images not referenced by any material (masks, icons, etc.) as image data |
+| | Import Unreferenced Images | Also load every other image in the package (masks, icons, textures of materials the imported items don't use) as image data. When off, only the textures of the materials actually assigned are extracted and loaded |
 
 A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) shows counts,
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
@@ -154,7 +154,7 @@ Textures > Extract To to `Custom Path` and choose a short folder such as `C:\upi
   you trust, and keep "Auto Run Python Scripts" off unless you need it.
 - **The add-on itself never executes code from the package.** C# scripts, shaders, Python and other assets are ignored.
   Only the following are extracted to disk or read: model files (`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`, and `.blend`
-  only with the option above), the textures referenced by materials (every image with "Import Unreferenced Images"),
+  only with the option above), the textures of the materials assigned to what you import (every image with "Import Unreferenced Images"),
   the `.mtl` next to an `.obj` and the `.bin` next to a `.gltf`. `.mat`, `.meta` and `.prefab` files are parsed in memory
   with the add-on's own readers (Unity YAML text, or Unity's binary serialized format) and never written out.
 - **Parsing the model and image files is done by Blender itself**, not by this add-on: FBX / OBJ / glTF / Collada by

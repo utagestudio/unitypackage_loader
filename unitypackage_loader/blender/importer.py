@@ -36,7 +36,14 @@ from ..core.fbx_units import read_unit_scale
 from ..core.model_ids import ModelObject, PartMatch, PartMatcher, fbx_node_names
 from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
-from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
+from ..core.mapping import (
+    expected_materials,
+    fully_replaced_materials,
+    material_textures,
+    resolve_materials,
+    slot_assignments,
+    submesh_slot_order,
+)
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
@@ -368,10 +375,7 @@ def prepare_package(
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
-    referenced: set[str] = set()
-    for norm in normalized.values():
-        referenced.update(t.guid for t in norm.texture_refs())
-        referenced.update(norm.extra_texture_guids())
+    referenced = material_textures(normalized, normalized)
     missing = {g for g in referenced if pkg.get(g) is None}
 
     # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
@@ -874,17 +878,19 @@ class _ImportSession:
         self.unity_mats, self.normalized = self.prepared.unity_mats, self.prepared.normalized
 
         # --- 必要なテクスチャを決めて展開 ---
-        # 全モデルを VRM add-on に任せる場合、.mat 由来のマテリアルは組まないのでテクスチャも読まない
-        delegate_all = all(_delegate_to_vrm_addon(m.entry, self.opts) for m in models)
-        needed_tex = set() if delegate_all else set(self.prepared.referenced_textures)
+        # 読み込むモデル・prefab・シーンで割り当てる .mat のテクスチャだけにする（#164）。予測から漏れたものは、
+        # 組み立てで足りなかったところで覚えておき、最後にまとめて展開して組み直す（fill_missed_textures）
+        needed_tex = material_textures(self.expected_materials(groups, scenes), self.normalized)
         if self.opts.import_unreferenced:
             needed_tex.update(e.guid for e in self.pkg.textures())
-        for g in sorted(self.prepared.missing_textures):
+        missing = {g for g in needed_tex if self.pkg.get(g) is None}
+        for g in sorted(missing):
             self.report.warn(f"texture {g} is referenced but not included in the package")
-        needed_tex -= self.prepared.missing_textures
+        needed_tex -= missing
 
         extract_root = resolve_extract_root(self.opts, package_path)
         self.report.extract_root = str(extract_root)
+        self.extract_root = extract_root
         self.step(0.2, "Extracting files")
         sidecars = [g for m in models for g in _sidecar_guids(self.pkg, m.entry)]
         written: set[str] = set()  # 実際に書き出した（展開し直した）ファイル
@@ -899,21 +905,9 @@ class _ImportSession:
 
         # --- 画像の読み込み ---
         self.step(0.5, "Loading textures")
-        self.images: dict[str, bpy.types.Image | None] = {}
+        self.images = _TextureImages(self.pkg)
         self.tex_infos: dict[str, TextureImporterInfo] = {}
-        for guid in sorted(needed_tex):
-            entry = self.pkg.get(guid)
-            info = _texture_info(entry, self.report.warn)
-            self.tex_infos[guid] = info
-            path = self.paths.get(guid)
-            image = load_image(path, info, pack=self.opts.pack_images, refresh=guid in written) if path else None
-            self.images[guid] = image
-            if image is None:
-                self.report.warn(f"could not load texture {entry.pathname} (unsupported format?)")
-            else:
-                self.report.images.append(image.name)
-
-        mat_builder.tag_images(self.images, self.tex_infos)
+        self.load_textures(needed_tex, written)
 
         # --- パッケージ用コレクション ---
         self.scene = self.context.scene
@@ -1022,6 +1016,7 @@ class _ImportSession:
             bpy.data.collections.remove(self.staging)
             if prev_active is not None:
                 view_layer.active_layer_collection = prev_active
+        self.fill_missed_textures()
         for obj in self.hidden_objects:
             if not _is_removed(obj):
                 obj.hide_set(True)
@@ -1030,6 +1025,79 @@ class _ImportSession:
 
         self.collection["unity_package"] = package_path.name
         self.step(1.0, "Done")
+
+    def expected_materials(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> set[str]:
+        """読み込む前に分かる、この回で組む .mat の GUID（#164）。
+
+        モデル自身の割り当て（externalObjects と、走査で読んだ FBX のマテリアル名）と、prefab・シーンの表の割り当てと、
+        シーンの組み込みメッシュのマテリアル。マテリアルを組まないモデル（VRM add-on に任せるもの、同梱 .blend の KEEP）は外す。
+        """
+        found: set[str] = set()
+        own: dict[str, bool] = {}  # モデルの GUID → マテリアルを組むか（組むなら自身の割り当ては加え済み）
+
+        def builds(summary: ModelSummary) -> bool:
+            if summary.guid not in own:
+                entry = summary.entry
+                keep = _delegate_to_vrm_addon(entry, self.opts) or (entry.ext == ".blend" and self.opts.blend_materials == "KEEP")
+                own[summary.guid] = not keep
+                if not keep:
+                    found.update(expected_materials(entry.fbx_materials, summary.info, self.unity_mats, entry.pathname))
+            return own[summary.guid]
+
+        for group in groups:
+            for summary, table in group.models:
+                if builds(summary):
+                    found.update(g for row in (table or {}).values() for g in row.materials if g)
+        for scene_summary in scenes:
+            for placement in scene_summary.placements:
+                summary = self.supported_models.get(placement.model_guid)
+                if summary is not None and builds(summary):
+                    found.update(g for r in placement.renderers.values() for g in r.materials if g)
+            if scene_summary.contents is not None:
+                found.update(p.materials[0] for p in scene_summary.contents.primitives if p.materials and p.materials[0])
+        return found & self.unity_mats.keys()
+
+    def load_textures(self, guids: set[str], written: set[str]) -> None:
+        """展開済みのテクスチャを画像として読み込み、``images`` に入れる（読めなければ None）。"""
+        loaded: dict[str, bpy.types.Image | None] = {}
+        for guid in sorted(guids):
+            entry = self.pkg.get(guid)
+            info = _texture_info(entry, self.report.warn)
+            self.tex_infos[guid] = info
+            path = self.paths.get(guid)
+            image = load_image(path, info, pack=self.opts.pack_images, refresh=guid in written) if path else None
+            loaded[guid] = image
+            if image is None:
+                self.report.warn(f"could not load texture {entry.pathname} (unsupported format?)")
+            else:
+                self.report.images.append(image.name)
+        self.images.update(loaded)
+        mat_builder.tag_images(loaded, self.tex_infos)
+
+    def fill_missed_textures(self) -> None:
+        """組み立てで足りなかったテクスチャ（読み込む前の予測から漏れたもの）を展開して読み込み、そのマテリアルを組み直す（#164）。"""
+        pending, self.images.pending = self.images.pending, []
+        missed = sorted(self.images.missed - self.images.keys())
+        if not pending:
+            return
+        self.step(0.95, "Loading textures")
+        written: set[str] = set()
+        try:
+            self.paths.update(
+                self.pkg.extract(
+                    missed, self.extract_root, overwrite=self.opts.overwrite_extracted,
+                    max_total_size=self.opts.max_extract_size, written=written,
+                )
+            )
+        except PackageError as exc:
+            self.report.warn(f"could not extract textures: {exc}")
+        self.load_textures(set(missed), written)
+        seen: set[int] = set()
+        for bmat, guid, mrep in pending:
+            if _is_removed(bmat) or id(mrep) in seen:
+                continue
+            seen.add(id(mrep))
+            _build_and_report(bmat, guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
 
     def step(self, fraction: float, message: str) -> None:
         if self.progress is not None:
@@ -1530,15 +1598,43 @@ def _run_import(
     _ImportSession(context, filepath, opts, progress, prepared, report).run()
 
 
+class _TextureImages(dict):
+    """テクスチャの GUID → 読み込んだ画像（読めなければ None）。
+
+    まだ読み込んでいないパッケージのテクスチャを引かれたら ``missed`` に覚える。読み込む前の予測から漏れたもので、
+    最後にまとめて展開してから、引いたマテリアル（``pending``）を組み直す（#164）。
+    """
+
+    def __init__(self, pkg: UnityPackage):
+        super().__init__()
+        self._pkg = pkg
+        self.missed: set[str] = set()
+        self.recent: set[str] = set()  # 直前の組み立てで引かれた、読み込んでいないテクスチャ
+        self.pending: list[tuple[bpy.types.Material, str, MaterialReport]] = []
+
+    def get(self, guid, default=None):
+        if guid not in self and self._pkg.get(guid) is not None:
+            self.missed.add(guid)
+            self.recent.add(guid)
+        return super().get(guid, default)
+
+
 def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:
     norm = normalized[guid]
     mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+    lazy = isinstance(images, _TextureImages)
+    if lazy:
+        images.recent.clear()
     try:
         mode, warnings = mat_builder.build_material(bmat, norm, images, tex_infos, build_opts)
     except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
         mrep.warnings.append(f"node build failed: {exc!r}")
         report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
         _log_exception(f"node build failed for material {bmat.name!r}")
+        return
+    if lazy and images.recent:
+        # 読み込んでいないテクスチャがあった。警告は出さずに、展開してから組み直す（fill_missed_textures）
+        images.pending.append((bmat, guid, mrep))
         return
     mrep.mode = mode
     mrep.warnings.extend(warnings)

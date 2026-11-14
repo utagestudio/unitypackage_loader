@@ -312,7 +312,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 |---|---|---|
 | Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現。フルパスが 240 文字を超えるファイルは `<パッケージ名>/_long/<元のフォルダのハッシュ>/` に置く（#159） |
 | Pack into .blend | Bool = OFF | |
-| Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
+| Import unreferenced images | Bool = OFF | マスク画像など、読み込むものに割り当てない画像もパッケージから全部読み込む（ユーザーが手動で使う用。OFF なら割り当てる .mat のテクスチャだけ。#164）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
 | Overwrite extracted files | Bool = OFF | OFF なら、展開先の記録（`.unitypackage_importer.json`）で元の tar メンバーの GUID・サイズ・更新時刻が一致する展開済みファイルだけを使い回す（サイズだけでは同じ名前・同じサイズの別ファイルと区別できない。#72）。書き直した画像は、読み込み済みなら読み直す |
 
 ### 3.2 マテリアルモード別の生成ノード
@@ -819,7 +819,8 @@ def run(ctx, filepath, opts) -> Report:
     models = choose_models(pkg, opts)                  # §3.3
     mats   = {e.guid: parse_material(pkg.read_asset(e.guid)) for e in pkg.materials()}
     norm   = {g: select_profile(m).normalize(m) for g, m in mats.items()}
-    needed_tex = {t.guid for n in norm.values() for t in n.texture_refs()}
+    used   = expected_materials(models, prefab_tables, scenes)   # 読み込む前に分かる、組む .mat（#164）
+    needed_tex = {t.guid for g in used for t in norm[g].texture_refs()}
     paths  = pkg.extract(models_guids | needed_tex | (all_tex if opts.unreferenced), extract_root)
     for model in models:
         before = snapshot(bpy.data)
@@ -836,7 +837,13 @@ def run(ctx, filepath, opts) -> Report:
 
 - 1 パッケージ = 1 Collection（名前はパッケージ名）、その下にモデルごとの Collection。
 - インポーターがシーンのルートコレクションに直接入れたオブジェクト・コレクション（VRM add-on のコライダー用コレクション等）はパッケージ用コレクションに移す。
-- `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。全モデルが委譲対象なら `.mat` 用テクスチャの展開も省く。
+- `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。このモデルの `.mat` は組まないので、そのテクスチャも展開しない。
+- 展開・読み込みするテクスチャは、この回で組む `.mat` のものだけにする（#164。Shibuya ではパッケージ全体の .mat が参照するテクスチャが 1,676 枚・約 3.35 GB あり、
+  モデル 1 つを選んでも全部を展開していた）。組む `.mat` は読み込む前に決める: モデル自身の割り当て（externalObjects と、走査のときに FBX から読んだ
+  マテリアル名を `resolve_materials` の 1・2 に通したもの。`AssetEntry.fbx_materials`）、prefab・シーンの表の `m_Materials`、シーンの組み込みメッシュのマテリアル。
+  VRM add-on に任せるモデルと同梱 .blend の KEEP はマテリアルを組まないので数えない。
+  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`_TextureImages`）、
+  そのマテリアルの警告は出さずにおく。全部を読み込んだ後にまとめて展開・読み込みして、そのマテリアルだけを組み直す（tar をもう 1 回走査する）。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外の扱い（#69）:

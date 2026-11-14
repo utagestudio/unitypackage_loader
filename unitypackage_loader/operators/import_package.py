@@ -123,7 +123,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     import_unreferenced: BoolProperty(
         name="Import Unreferenced Images",
         default=False,
-        description="Also load textures that no material references (masks etc.)",
+        description="Also load the package's other images (masks, textures of materials the imported items don't use)",
     )
     overwrite_extracted: BoolProperty(name="Overwrite Extracted Files", default=False)
 
