@@ -90,7 +90,21 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     （扉の LOD1 が 2 m など）で、修正後はすべて 0 になり、合っていたもので崩れたものは無い。
   - 複数のノードが 1 つのメッシュを共有する FBX もあるので、Renderer の名前は、GameObject 名が FBX のノード名にあればそれを優先し、無ければメッシュ名にする。
   - Japanese Apartment のシーンで、Unity が書き出した Renderer の外形の中心と比べた。FBX との対応が切れた Renderer 18 個のうち、共通の親の下にあった 13 個はすべて 1 mm 未満で一致した。Japanese Street と Unity Japan Office の配置は変わらない。Gothic Lights のデモシーンでは、潰れて抜けていた 161 個の Renderer が残るようになった。
-- 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+- Unity の組み込みメッシュ（Issue #190）: Renderer のメッシュ参照が `Library/unity default resources`（GUID `0000000000000000e000000000000000`）の
+  Cube（fileID 10202）・Cylinder（10206）・Sphere（10207）・Capsule（10208）・Plane（10209）・Quad（10210）を指す MeshRenderer は、
+  `SceneContents.primitives`（`PrimitivePlacement`）に残し、読み込み側が `core/primitives.py` で同じ形を作って置く。地面に敷いた Quad や Plane
+  （Japanese Train Station の DemoScene の地面とホーム 4 枚など）が抜けていた。
+  - 形は Unity 6000.6 の `GameObject.CreatePrimitive` のメッシュと突き合わせた。Quad は XY 平面の 1 m 角で表が -Z、Plane は XZ 平面の 10 m 角を
+    10 × 10 に分割して表が +Y（UV は (5, 0, 5) が (0, 0)）、Cube は 1 m 角で面ごとの UV も同じ並び。Sphere（半径 0.5）・Cylinder・Capsule
+    （半径 0.5・高さ 2）は寸法と向きを合わせて手続き的に作り、分割数と UV の細部は Unity と違う。座標の変換 C は鏡映を含むので、
+    面ごとに Unity での外向きの法線と比べて頂点の並びを決める。
+  - メッシュは読み込みの回ごとに種類ごとに 1 つ作って共有し、マテリアルはオブジェクトのスロット（`link = "OBJECT"`）に付ける。
+    `m_Materials[0]` の .mat から組む（組み込みメッシュはサブメッシュが 1 つ）。パッケージに無い .mat（Unity の既定のマテリアル）なら空のスロット。
+  - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
+    以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
+  - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
+    prefab で見つかった組み込みメッシュの参照（Synty の FX の Cube など）は MeshRenderer ではなかった。
+- 読み込まないもの: UI、Terrain、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
 

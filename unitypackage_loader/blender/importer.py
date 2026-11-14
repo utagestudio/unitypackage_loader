@@ -76,6 +76,8 @@ from .scene_objects import (
     apply_node_transforms,
     apply_offsets,
     apply_renderer_worlds,
+    make_primitive,
+    primitive_mesh,
     arrange_collections,
     attach_to_empty,
     duplicate_objects,
@@ -940,6 +942,7 @@ class _ImportSession:
         # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
         self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
+        self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
 
         self.model_by_guid = {m.guid: m for m in self.prepared.models}
 
@@ -1317,6 +1320,24 @@ class _ImportSession:
         )
         return result.light_scale
 
+    def material_for(self, guids: list[str | None]) -> bpy.types.Material | None:
+        """Renderer の ``m_Materials[0]`` の .mat から組んだマテリアル（この回で組み済みなら共有する）。
+
+        組み込みメッシュはサブメッシュが 1 つなので、先頭だけを使う。パッケージに無い .mat（Unity の既定のマテリアルなど）なら None。
+        """
+        guid = guids[0] if guids else None
+        if not guid or guid not in self.unity_mats:
+            return None
+        mat = self.built_by_guid.get(guid)
+        if mat is None:
+            umat = self.unity_mats[guid]
+            mat = bpy.data.materials.new(umat.name or guid[:8])
+            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="builtin-mesh")
+            self.report.materials.append(mrep)
+            _build_and_report(mat, guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            self.built_by_guid[guid] = mat
+        return mat
+
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
@@ -1433,6 +1454,25 @@ class _ImportSession:
             if placement.active:  # 非アクティブな配置は、隠したときと同じく数えない
                 removed_unused += removed_by_key.get(key, 0)
             hidden_lods += hidden.hidden_lods
+
+        # --- Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190） ---
+        primitives = scene_summary.contents.primitives if scene_summary.contents is not None else []
+        for primitive in primitives:
+            node = hierarchy.nodes[primitive.key]
+            if primitive.key in empties:
+                parent, local = empties[primitive.key], Matrix.Identity(4)
+            else:
+                parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
+                local = Matrix(unity_to_blender(node.local))
+            obj = make_primitive(node.name, primitive_mesh(primitive.kind, self.primitive_meshes), self.material_for(primitive.materials))
+            target.objects.link(obj)
+            obj.parent = parent
+            obj.matrix_basis = local
+            obj["unity_game_object"] = node.name
+            self.report.objects.append(obj.name)
+            if not primitive.visible:
+                defer_hide(obj, self.hidden_objects)
+            empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
 
         # --- ライト・カメラ ---
         light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
