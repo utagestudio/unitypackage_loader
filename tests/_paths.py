@@ -26,6 +26,15 @@ def local_sample() -> Path | None:
     return find_package(named) if named else None
 
 
+def local_packages() -> list[Path]:
+    """検証用の .unitypackage。``_local/unitypackages/`` を先に、続けて ``_local/`` 直下（昔の置き場）を探す。"""
+    found: list[Path] = []
+    for directory in (PACKAGES_DIR, LOCAL_DIR):
+        if directory.is_dir():
+            found += sorted(directory.glob("*.unitypackage"))
+    return found
+
+
 def find_package(name: str) -> Path | None:
     """ファイル名から検証用パッケージを探す。``_local/unitypackages/`` →
     ``_local/`` 直下（昔の置き場）の順に見て、見つからなければ ``None``。"""
