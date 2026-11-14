@@ -237,118 +237,15 @@ class Expander:
             h.missing_sources += 1
             return None
         h.depth_truncated = h.depth_truncated or sub.depth_truncated
-        iid = instance.file_id
-        added = {key: h.new_key() for key in sub.nodes}  # 元の key → 差し込んだ key
-        for key, node in sub.nodes.items():
-            new_key = added[key]
-            copied = node.copy(
-                key=new_key,
-                parent=added.get(node.parent) if node.parent is not None else None,
-                game_object=remap(iid, node.game_object),
-                renderer_key=remap(iid, node.renderer_key) if node.renderer else 0,
-                scope=added.get(node.scope, 0),
-                id_mask=(node.id_mask ^ iid) & ID_MASK,
-            )
-            copied.components = {remap(iid, k): value for k, value in copied.components.items()}
-            h.nodes[new_key] = copied
-            if node.parent is None:
-                roots.append((new_key, instance.parent))
-        scope = _Inserted(iid)
-        for table in _TABLES:
-            local = {uid: added[key] for uid, key in getattr(sub, table).items() if key in added}
-            setattr(scope, table, local)
-            outer = getattr(h, table)
-            for uid, key in local.items():
-                outer.setdefault(remap(iid, uid), key)
-        h.counts.update(sub.counts)
-        h.unresolved_overrides += sub.unresolved_overrides
-        h.unresolved_material_overrides += sub.unresolved_material_overrides
-        h.missing_sources += sub.missing_sources
-
-        def target(file_id: int, guid: str | None) -> int | None:
-            """上書き・削除の対象の、元のアセットでの fileID。別のアセットを指していれば None。"""
-            if guid is not None and guid != source:
-                return None
-            if is_model:
-                file_id = LEGACY_MODEL_IDS.get(file_id, file_id)
-            return file_uid(file_id)
-
-        root_key = scope.transforms.get(file_uid(MODEL_ROOT_TRANSFORM)) if is_model else None
-        table = self._recycle.get(source, {}) if is_model else {}
-        # prefab を挟んで、その中のモデルのオブジェクトを指しているかもしれない上書き・削除（#31 / #172）
-        through: list[_Through] = []
-
-        def model_part(file_id: int, uid: int, kind: str, **changes: bool) -> bool:
-            """モデルの中のオブジェクトへの表示の上書き・削除を、ルートに記録する。記録できなければ False。"""
-            key = _part_key(table, file_id, uid, kind)
-            if key is None or root_key not in h.nodes:
-                return False
-            _record_part(h.nodes[root_key], key, **changes)
-            return True
-
-        children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
-        for file_id, guid in instance.removed_game_objects:
-            uid = target(file_id, guid)
-            if uid is None:
-                continue
-            node_key = scope.game_objects.get(uid)
-            if node_key is not None and node_key in h.nodes:
-                if children is None:
-                    children = h.children()
-                _remove_subtree(h, node_key, children)
-            elif not is_model:
-                through.append(_Through(uid, "object", lambda root, key: _record_part(root, key, removed_object=True)))
-            elif not model_part(file_id, uid, "object", removed_object=True):
-                h.unresolved_overrides += 1
-        for file_id, guid in instance.removed_components:
-            uid = target(file_id, guid)
-            if uid is None or _remove_component(h, scope, uid):
-                continue
-            # Renderer 以外（コライダーなど）を消したものもここに来る。表の無いモデルでは区別できないので記録だけし、
-            # 読み込み側が Renderer の fileID と突き合わせる
-            if not is_model:
-                through.append(_Through(uid, "renderer", lambda root, key: _record_part(root, key, removed_renderer=True)))
-            elif not model_part(file_id, uid, "renderer", removed_renderer=True):
-                h.unresolved_overrides += 1
-        # 1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
-        # スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため。#99）
-        collapsed = self._collapsed.get(source) if is_model else None
-        if is_model and collapsed is None and source not in self._recycle:
-            # 表が無いと 1 メッシュの FBX か分からないので、成分付きで記録して読み込み側で判定する（#111）
-            collapsed = SOLE_NODE
-        if collapsed is not None and root_key in h.nodes:
-            h.nodes[root_key].collapsed_key = collapsed
-        for file_id, guid, path, value, reference in instance.modifications:
-            uid = target(file_id, guid)
-            if uid is None:
-                continue
-            if _apply_modification(h, scope, uid, path, value, reference) or not _is_tracked(path):
-                continue
-            visibility = _visibility_change(path, value)
-            if not is_model:
-                material = MATERIAL_PATH.fullmatch(path)
-                if material and int(material.group(1)) < MAX_SLOTS:
-                    index, material_guid = int(material.group(1)), ref_guid(reference)
-                    through.append(_Through(uid, "renderer", lambda root, key, i=index, m=material_guid: _set_slot(root.model_materials.setdefault(key, []), i, m)))
-                elif visibility is not None:
-                    kind, changes = visibility
-                    through.append(_Through(uid, kind, lambda root, key, c=changes: _record_part(root, key, **c)))
-                continue
-            if root_key in h.nodes and _apply_named_model_override(h.nodes[root_key], table, file_id, path, value, reference):
-                continue
-            if visibility is not None and model_part(file_id, uid, visibility[0], **visibility[1]):
-                continue
-            material = MATERIAL_PATH.fullmatch(path)
-            if material and uid not in MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS and root_key in h.nodes:
-                # 名前を引けない Renderer。対象の fileID ごとに残し、読み込んだオブジェクトと突き合わせる（読み込み側。#31）
-                _set_slot(h.nodes[root_key].model_materials.setdefault(pending_renderer(uid), []), int(material.group(1)), ref_guid(reference))
-                continue
-            h.unresolved_overrides += 1
-            if material or path == "m_Materials.Array.size":
-                h.unresolved_material_overrides += 1
-        if through:
-            self._override_through(h, sub, added, through)
-        return scope
+        insertion = _Insertion(self, h, instance, sub, is_model)
+        insertion.copy_nodes(roots)
+        insertion.remove_game_objects()
+        insertion.remove_components()
+        insertion.mark_collapsed_root()
+        insertion.apply_modifications()
+        if insertion.through:
+            self._override_through(h, sub, insertion.added, insertion.through)
+        return insertion.scope
 
     def _override_through(self, h: Hierarchy, sub: Hierarchy, added: dict[int, int], overrides: list[_Through]) -> None:
         """prefab を挟んだ外側からの、モデルの中のオブジェクトへの上書き・削除を、モデルのルートに記録する（#31 / #172）。
@@ -366,25 +263,196 @@ class Expander:
         """
         roots = [(node.id_mask, h.nodes[added[key]]) for key, node in sub.nodes.items() if node.model_guid is not None]
         roots = [(mask, root) for mask, root in roots if root.key in h.nodes]
+
+        def named_row(override: _Through, root: Node, inner: int) -> str | None:
+            return _part_key(self._recycle.get(root.model_guid or "", {}), inner, inner, override.kind, named_only=True)
+
+        def existing_row(override: _Through, root: Node, inner: int) -> str | None:
+            key = _pending_name(override.kind, inner)
+            return key if key in root.model_materials or key in root.model_parts else None
+
+        def single_model_row(override: _Through, root: Node, inner: int) -> str | None:
+            return _pending_name(override.kind, inner) if len(roots) == 1 and inner not in MODEL_ROOT_UIDS else None
+
         for override in overrides:
-            pending = pending_object if override.kind == "object" else pending_renderer
-            for step in range(3):
-                found = False
-                for mask, root in roots:
-                    inner = (override.uid ^ mask) & ID_MASK
-                    if step == 0:
-                        name = _part_key(self._recycle.get(root.model_guid or "", {}), inner, inner, override.kind, named_only=True)
-                    elif step == 1:
-                        key = pending(inner)
-                        name = key if key in root.model_materials or key in root.model_parts else None
-                    else:
-                        name = pending(inner) if len(roots) == 1 and inner not in MODEL_ROOT_UIDS else None
-                    if name is not None:
-                        override.apply(root, name)
-                        found = True
-                        break
-                if found:
+            for find in (named_row, existing_row, single_model_row):
+                hit = next(
+                    ((root, name) for mask, root in roots if (name := find(override, root, (override.uid ^ mask) & ID_MASK)) is not None),
+                    None,
+                )
+                if hit is not None:
+                    override.apply(*hit)
                     break
+
+
+def _pending_name(kind: str, uid: int) -> str:
+    """名前を引けなかったモデルの中のオブジェクトの行の名前（``kind`` は "object" か "renderer"）。"""
+    return pending_object(uid) if kind == "object" else pending_renderer(uid)
+
+
+class _Insertion:
+    """PrefabInstance 1 つの差し込み（``Expander._insert``）。上書き・削除を当てる間の状態を持つ。
+
+    以前は _insert の 1 つのメソッド（約 125 行）に、入れ子の関数と lambda で書いていた（#198）。
+    """
+
+    def __init__(self, expander: Expander, h: Hierarchy, instance: _RawInstance, sub: Hierarchy, is_model: bool):
+        self.h = h
+        self.instance = instance
+        self.sub = sub
+        self.source = instance.source_guid
+        self.is_model = is_model
+        self.iid = instance.file_id
+        self.added: dict[int, int] = {}  # 元の key → 差し込んだ key（copy_nodes で作る）
+        self.scope = _Inserted(self.iid)
+        # モデルの PrefabInstance なら、そのルートの Node と、古い形式の .meta の表（中への上書きを名前に結び付ける）
+        self.root_key: int | None = None
+        self.table = expander._recycle.get(self.source, {}) if is_model else {}
+        self.collapsed = expander._collapsed.get(self.source) if is_model else None
+        self.has_table = self.source in expander._recycle
+        # prefab を挟んで、その中のモデルのオブジェクトを指しているかもしれない上書き・削除（#31 / #172）
+        self.through: list[_Through] = []
+
+    def copy_nodes(self, roots: list[tuple[int, int]]) -> None:
+        """元の階層の Node を差し込み、fileID の表を作る。最上位の Node は ``roots`` に足す。"""
+        h, sub, iid = self.h, self.sub, self.iid
+        self.added = added = {key: h.new_key() for key in sub.nodes}
+        for key, node in sub.nodes.items():
+            new_key = added[key]
+            copied = node.copy(
+                key=new_key,
+                parent=added.get(node.parent) if node.parent is not None else None,
+                game_object=remap(iid, node.game_object),
+                renderer_key=remap(iid, node.renderer_key) if node.renderer else 0,
+                scope=added.get(node.scope, 0),
+                id_mask=(node.id_mask ^ iid) & ID_MASK,
+            )
+            copied.components = {remap(iid, k): value for k, value in copied.components.items()}
+            h.nodes[new_key] = copied
+            if node.parent is None:
+                roots.append((new_key, self.instance.parent))
+        for table in _TABLES:
+            local = {uid: added[key] for uid, key in getattr(sub, table).items() if key in added}
+            setattr(self.scope, table, local)
+            outer = getattr(h, table)
+            for uid, key in local.items():
+                outer.setdefault(remap(iid, uid), key)
+        h.counts.update(sub.counts)
+        h.unresolved_overrides += sub.unresolved_overrides
+        h.unresolved_material_overrides += sub.unresolved_material_overrides
+        h.missing_sources += sub.missing_sources
+        if self.is_model:
+            self.root_key = self.scope.transforms.get(file_uid(MODEL_ROOT_TRANSFORM))
+
+    def target(self, file_id: int, guid: str | None) -> int | None:
+        """上書き・削除の対象の、元のアセットでの fileID。別のアセットを指していれば None。"""
+        if guid is not None and guid != self.source:
+            return None
+        if self.is_model:
+            file_id = LEGACY_MODEL_IDS.get(file_id, file_id)
+        return file_uid(file_id)
+
+    def model_root(self) -> Node | None:
+        """モデルの PrefabInstance のルートの Node（消されていれば None）。"""
+        return self.h.nodes.get(self.root_key) if self.root_key is not None else None
+
+    def model_part(self, file_id: int, uid: int, kind: str, **changes: bool) -> bool:
+        """モデルの中のオブジェクトへの表示の上書き・削除を、ルートに記録する。記録できなければ False。"""
+        key = _part_key(self.table, file_id, uid, kind)
+        root = self.model_root()
+        if key is None or root is None:
+            return False
+        _record_part(root, key, **changes)
+        return True
+
+    def remove_game_objects(self) -> None:
+        """``m_RemovedGameObjects``: 差し込んだ GameObject を子孫ごと消す。モデルの中のものは記録する。"""
+        h = self.h
+        children: dict[int, list[int]] | None = None  # 消すたびに全 Node を走査し直さないよう、初めて消すときに 1 回だけ作る
+        for file_id, guid in self.instance.removed_game_objects:
+            uid = self.target(file_id, guid)
+            if uid is None:
+                continue
+            node_key = self.scope.game_objects.get(uid)
+            if node_key is not None and node_key in h.nodes:
+                if children is None:
+                    children = h.children()
+                _remove_subtree(h, node_key, children)
+            elif not self.is_model:
+                self.through.append(_Through(uid, "object", lambda root, key: _record_part(root, key, removed_object=True)))
+            elif not self.model_part(file_id, uid, "object", removed_object=True):
+                h.unresolved_overrides += 1
+
+    def remove_components(self) -> None:
+        """``m_RemovedComponents``: 差し込んだ Renderer・コンポーネントを消す。モデルの中のものは記録する。"""
+        for file_id, guid in self.instance.removed_components:
+            uid = self.target(file_id, guid)
+            if uid is None or _remove_component(self.h, self.scope, uid):
+                continue
+            # Renderer 以外（コライダーなど）を消したものもここに来る。表の無いモデルでは区別できないので記録だけし、
+            # 読み込み側が Renderer の fileID と突き合わせる
+            if not self.is_model:
+                self.through.append(_Through(uid, "renderer", lambda root, key: _record_part(root, key, removed_renderer=True)))
+            elif not self.model_part(file_id, uid, "renderer", removed_renderer=True):
+                self.h.unresolved_overrides += 1
+
+    def mark_collapsed_root(self) -> None:
+        """1 メッシュの FBX のモデルの PrefabInstance なら、ルートに畳まれたノードの名前を付ける（#99 / #111）。
+
+        1 メッシュの FBX では、モデルのルートの Transform の値が FBX のノードの変換なので、ルートへの位置・回転・
+        スケールの上書きは「どの成分を上書きしたか」も記録する（読み込み側でノードの値に当てるため）。
+        """
+        collapsed = self.collapsed
+        if self.is_model and collapsed is None and not self.has_table:
+            # 表が無いと 1 メッシュの FBX か分からないので、成分付きで記録して読み込み側で判定する（#111）
+            collapsed = SOLE_NODE
+        root = self.model_root()
+        if collapsed is not None and root is not None:
+            root.collapsed_key = collapsed
+
+    def apply_modifications(self) -> None:
+        """``m_Modifications``: 差し込んだオブジェクトへの上書きを当てる。当てられなかったものは記録するか数える。"""
+        for file_id, guid, path, value, reference in self.instance.modifications:
+            uid = self.target(file_id, guid)
+            if uid is None:
+                continue
+            if _apply_modification(self.h, self.scope, uid, path, value, reference) or not _is_tracked(path):
+                continue
+            if self.is_model:
+                self.model_modification(file_id, uid, path, value, reference)
+            else:
+                self.through_modification(uid, path, value, reference)
+
+    def through_modification(self, uid: int, path: str, value: object, reference: object) -> None:
+        """prefab の中のモデルのオブジェクトを指しているかもしれない上書きを、後で当てるために残す（``_override_through``）。"""
+        material = MATERIAL_PATH.fullmatch(path)
+        visibility = _visibility_change(path, value)
+        if material and int(material.group(1)) < MAX_SLOTS:
+            index, material_guid = int(material.group(1)), ref_guid(reference)
+            self.through.append(_Through(
+                uid, "renderer", lambda root, key, i=index, m=material_guid: _set_slot(root.model_materials.setdefault(key, []), i, m)
+            ))
+        elif visibility is not None:
+            kind, changes = visibility
+            self.through.append(_Through(uid, kind, lambda root, key, c=changes: _record_part(root, key, **c)))
+
+    def model_modification(self, file_id: int, uid: int, path: str, value: object, reference: object) -> None:
+        """モデルの中のオブジェクトへの上書きを、モデルのルートに記録する（名前を引ければ名前で、引けなければ fileID で）。"""
+        h = self.h
+        root = self.model_root()
+        if root is not None and _apply_named_model_override(root, self.table, file_id, path, value, reference):
+            return
+        visibility = _visibility_change(path, value)
+        if visibility is not None and self.model_part(file_id, uid, visibility[0], **visibility[1]):
+            return
+        material = MATERIAL_PATH.fullmatch(path)
+        if material and uid not in MODEL_ROOT_UIDS and int(material.group(1)) < MAX_SLOTS and root is not None:
+            # 名前を引けない Renderer。対象の fileID ごとに残し、読み込んだオブジェクトと突き合わせる（読み込み側。#31）
+            _set_slot(root.model_materials.setdefault(pending_renderer(uid), []), int(material.group(1)), ref_guid(reference))
+            return
+        h.unresolved_overrides += 1
+        if material or path == "m_Materials.Array.size":
+            h.unresolved_material_overrides += 1
 
 
 class _Through(NamedTuple):
