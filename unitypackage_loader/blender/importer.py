@@ -1264,7 +1264,6 @@ class _ImportSession:
         ``last_matcher`` に置く（#31 / #172）。
         """
         model = summary.entry
-        model_info = summary.info
         self.imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if self.opts.reuse_existing else {}
@@ -1284,36 +1283,55 @@ class _ImportSession:
         self.report.models.append(model.pathname)
         self.report.objects.extend(o.name for o in new["objects"])
 
-        new_materials: list[bpy.types.Material] = new["materials"]
-        fbx_names = [m.name for m in new_materials]
-        mesh_objects = [o for o in new["objects"] if o.type == "MESH"]
-        prefab_table = prefab_table or {}
+        prefab_table = self.match_model_parts(model, prefab_table or {}, new["objects"], before, with_parts)
+        self.assign_materials(summary, prefab_table, new, delegated, existing_materials)
+        if self.opts.outlines:
+            added = outline_builder.apply_outlines(new["objects"], self.opts.outline_width_scale)
+            if added:
+                self.report.outlines += added
+        return new["objects"]
+
+    def match_model_parts(
+        self, model: AssetEntry, prefab_table: dict[str, RendererMaterials], objects, before, with_parts: bool
+    ) -> dict[str, RendererMaterials]:
+        """名前を引けないモデルの中への上書きを、読み込んだオブジェクトに当てる（#31 / #172）。
+
+        対象の fileID を、読み込んだオブジェクトの名前と親子関係から計算した fileID と突き合わせる。計算は ``last_matcher`` に置き、
+        マテリアルの上書きの行（``pending_renderer``）はオブジェクトの名前の行に付け替えた表を返す。メッシュが 1 つだけなら
+        それに当てる（#109）。
+        """
         pending = has_pending_renderers(prefab_table)
-        if pending or with_parts:
-            # 表で名前を引けないモデルの中への上書きは、対象の fileID を、読み込んだオブジェクトの名前と
-            # 親子関係から計算した fileID と突き合わせて当てる（#31 / #172）
-            if model.guid not in self.node_names:
-                self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
-            taken = {strip_numeric_suffix(name) for name in before["objects"]}
-            self.last_matcher = PartMatcher(_model_objects(new["objects"]), native=self.node_names[model.guid], taken=taken)
-        if pending:
-            # メッシュが 1 つだけならそれに当てる（#109）
-            claims = self.last_matcher.renderer_ids
-            prefab_table, unread = resolve_model_renderers(prefab_table, claims, [o.name for o in mesh_objects])
-            if unread:
-                self.report.warn(
-                    f"{model.name}: {unread} material override(s) on objects inside the model could not be matched "
-                    "to an imported object (the object is not in the model, or its name is not unique); "
-                    "the model's own assignments are used for them"
-                )
-        object_slots = {
-            o.name: [slot.material.name if slot.material else "" for slot in o.material_slots]
-            for o in mesh_objects
-        }
+        if not (pending or with_parts):
+            return prefab_table
+        if model.guid not in self.node_names:
+            self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
+        taken = {strip_numeric_suffix(name) for name in before["objects"]}
+        self.last_matcher = PartMatcher(_model_objects(objects), native=self.node_names[model.guid], taken=taken)
+        if not pending:
+            return prefab_table
+        mesh_names = [o.name for o in objects if o.type == "MESH"]
+        prefab_table, unread = resolve_model_renderers(prefab_table, self.last_matcher.renderer_ids, mesh_names)
+        if unread:
+            self.report.warn(
+                f"{model.name}: {unread} material override(s) on objects inside the model could not be matched "
+                "to an imported object (the object is not in the model, or its name is not unique); "
+                "the model's own assignments are used for them"
+            )
+        return prefab_table
+
+    def assign_materials(
+        self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], new: dict[str, list], delegated: bool,
+        existing_materials: dict[str, bpy.types.Material],
+    ) -> None:
+        """インポーターが作ったマテリアルを .mat に対応付けて組み直し、prefab がスロットごとに指す .mat を割り当てる。"""
+        model = summary.entry
+        objects = new["objects"]
+        mesh_objects = [o for o in objects if o.type == "MESH"]
+        object_slots = {o.name: [slot.material.name if slot.material else "" for slot in o.material_slots] for o in mesh_objects}
         # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
         submesh_order = {o.name: _submesh_order(o) for o in mesh_objects}
         resolution = resolve_materials(
-            fbx_names, model_info, self.unity_mats, model.pathname, prefab_table, object_slots, submesh_order
+            [m.name for m in new["materials"]], summary.info, self.unity_mats, model.pathname, prefab_table, object_slots, submesh_order
         )
         assignments = slot_assignments(object_slots, prefab_table, self.unity_mats, submesh_order)
         # マテリアルを 1 つも持たないモデルは、prefab の割り当てしか手掛かりが無い（#102）
@@ -1325,102 +1343,110 @@ class _ImportSession:
                 )
         # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
         replaced = fully_replaced_materials(object_slots, assignments, resolution)
-
         # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
-        keep_materials = delegated or (model.ext == ".blend" and self.opts.blend_materials == "KEEP")
+        keep = delegated or (model.ext == ".blend" and self.opts.blend_materials == "KEEP")
         remaining: list[bpy.types.Material] = []  # 削除せずに残した、インポーターが作ったマテリアル
-        for bmat in new_materials:
+        for bmat in new["materials"]:
             res = resolution[bmat.name]
             mrep = MaterialReport(blender_name=bmat.name, fbx_name=bmat.name, guid=res.guid, method=res.method)
             self.report.materials.append(mrep)
-            if keep_materials:
+            if keep:
+                self.keep_material(bmat, res.guid, mrep, delegated)
                 remaining.append(bmat)
-                mrep.method = "delegated" if delegated else "kept"
-                if res.guid:
-                    norm = self.normalized[res.guid]
-                    mrep.describe(norm)
-                    if self.opts.store_props:
-                        mat_builder.store_props(bmat, norm)
-                continue
-            if bmat.name in replaced:
+            elif bmat.name in replaced:
                 if res.guid:
                     mrep.describe(self.normalized[res.guid])
                 remaining.append(bmat)  # 差し替えの後、使われなくなったところで "replaced" にして消す
-                continue
-            if res.warning:
-                mrep.warnings.append(res.warning)
-                self.report.warn(f"material {bmat.name!r}: {res.warning}")
-
-            # ファイルに既にある同名のマテリアルを使う設定なら、それを先に見る。無ければ、この回で組み立て済みのものを共有する
-            if self.opts.reuse_existing:
-                base = strip_numeric_suffix(bmat.name)
-                existing = existing_materials.get(base)
-                if existing is not None and existing is not bmat:
-                    _replace_material(new["objects"], bmat, existing)
-                    bpy.data.materials.remove(bmat)
-                    mrep.method = "reused"
-                    mrep.blender_name = existing.name
-                    continue
-
-            remaining.append(bmat)
-            if res.guid is None:
-                mrep.warnings.append("no matching .mat in package; material left as imported")
-                self.report.warn(f"material {bmat.name!r}: no matching .mat in package")
-                continue
-
-            shared = self.built_by_guid.get(res.guid)
-            if shared is not None and shared is not bmat and _named_after_mat(bmat, shared, self.unity_mats[res.guid]):
-                # 共有するマテリアルの名前は、なるべく .mat の名前にする。先に組んだものが FBX 側の別の名前（prefab で
-                # 解決したものなど）なら、.mat と同じ名前のこちらを組み、先のものの使用箇所をこちらへ付け替える
-                self.build_and_report(bmat, res.guid, mrep)
-                old_name = shared.name
-                shared.user_remap(bmat)
-                for row in self.report.materials:
-                    if row is not mrep and row.blender_name == old_name:
-                        row.method, row.blender_name = "shared", bmat.name
-                if shared in remaining:
-                    remaining.remove(shared)
-                bpy.data.materials.remove(shared)
-                self.built_by_guid[res.guid] = bmat
-                continue
-            if shared is not None and shared is not bmat:
-                remaining.pop()
-                _replace_material(new["objects"], bmat, shared)
-                bpy.data.materials.remove(bmat)
-                mrep.describe(self.normalized[res.guid])
-                mrep.method = "shared"
-                mrep.blender_name = shared.name
-                continue
-
-            self.build_and_report(bmat, res.guid, mrep)
-            self.built_by_guid.setdefault(res.guid, bmat)
-
-        if not keep_materials:
-            # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
-            for image in new["images"]:
-                if image.users == 0:
-                    bpy.data.images.remove(image)
-
+            else:
+                self.rebuild_material(bmat, res, mrep, objects, existing_materials, remaining)
+        if keep:
+            return
+        # インポーターが作った画像（glTF の埋め込み画像など）は .mat から組み直した時点で不要になる
+        for image in new["images"]:
+            if image.users == 0:
+                bpy.data.images.remove(image)
         # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
-        if assignments and not keep_materials:
-            split = self.split_slots_by_prefab(new["objects"], assignments, resolution)
+        if assignments:
+            split = self.split_slots_by_prefab(objects, assignments, resolution)
             if split:
                 self.report.split_slots += split
-                # 差し替えで使われなくなった FBX マテリアルは片付ける
-                for bmat in remaining:
-                    if bmat.users == 0:
-                        for mrep in self.report.materials:
-                            if mrep.blender_name == bmat.name and mrep.method != "replaced":
-                                mrep.method = "replaced"
-                        # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
-                        for guid in [g for g, m in self.built_by_guid.items() if m == bmat]:
-                            del self.built_by_guid[guid]
-                        bpy.data.materials.remove(bmat)
-        if self.opts.outlines:
-            added = outline_builder.apply_outlines(new["objects"], self.opts.outline_width_scale)
-            if added:
-                self.report.outlines += added
-        return new["objects"]
+                self.drop_replaced_materials(remaining)
+
+    def keep_material(self, bmat, guid: str | None, mrep: MaterialReport, delegated: bool) -> None:
+        """インポーター（VRM add-on・同梱 .blend）が作ったマテリアルをそのまま使い、Unity の情報だけを残す。"""
+        mrep.method = "delegated" if delegated else "kept"
+        if guid:
+            norm = self.normalized[guid]
+            mrep.describe(norm)
+            if self.opts.store_props:
+                mat_builder.store_props(bmat, norm)
+
+    def rebuild_material(self, bmat, res, mrep: MaterialReport, objects, existing_materials, remaining: list) -> None:
+        """インポーターが作ったマテリアル 1 つを .mat から組み直すか、同じ .mat のマテリアルに付け替える。
+
+        ファイルに既にある同名のマテリアルを使う設定ならそれを使い、無ければこの回で組み立て済みのものを共有する（#77）。
+        どちらも無ければ組む。組み直して残したものは ``remaining`` に足す。
+        """
+        if res.warning:
+            mrep.warnings.append(res.warning)
+            self.report.warn(f"material {bmat.name!r}: {res.warning}")
+        if self.opts.reuse_existing:
+            existing = existing_materials.get(strip_numeric_suffix(bmat.name))
+            if existing is not None and existing is not bmat:
+                _replace_material(objects, bmat, existing)
+                bpy.data.materials.remove(bmat)
+                mrep.method = "reused"
+                mrep.blender_name = existing.name
+                return
+        if res.guid is None:
+            remaining.append(bmat)
+            mrep.warnings.append("no matching .mat in package; material left as imported")
+            self.report.warn(f"material {bmat.name!r}: no matching .mat in package")
+            return
+        shared = self.built_by_guid.get(res.guid)
+        if shared is None or shared is bmat:
+            remaining.append(bmat)
+            self.build_and_report(bmat, res.guid, mrep)
+            self.built_by_guid.setdefault(res.guid, bmat)
+        elif _named_after_mat(bmat, shared, self.unity_mats[res.guid]):
+            remaining.append(bmat)
+            self.take_over_shared(bmat, shared, res.guid, mrep, remaining)
+        else:
+            _replace_material(objects, bmat, shared)
+            bpy.data.materials.remove(bmat)
+            mrep.describe(self.normalized[res.guid])
+            mrep.method = "shared"
+            mrep.blender_name = shared.name
+
+    def take_over_shared(self, bmat, shared, guid: str, mrep: MaterialReport, remaining: list) -> None:
+        """共有するマテリアルの名前を、なるべく .mat の名前にする。
+
+        先に組んだものが FBX 側の別の名前（prefab で解決したものなど）なら、.mat と同じ名前のこちらを組み、先のものの
+        使用箇所をこちらへ付け替えて消す。
+        """
+        self.build_and_report(bmat, guid, mrep)
+        old_name = shared.name
+        shared.user_remap(bmat)
+        for row in self.report.materials:
+            if row is not mrep and row.blender_name == old_name:
+                row.method, row.blender_name = "shared", bmat.name
+        if shared in remaining:
+            remaining.remove(shared)
+        bpy.data.materials.remove(shared)
+        self.built_by_guid[guid] = bmat
+
+    def drop_replaced_materials(self, remaining: list) -> None:
+        """prefab のスロットの差し替えで使われなくなった、インポーターが作ったマテリアルを消し、レポートの行を "replaced" にする。"""
+        for bmat in remaining:
+            if bmat.users != 0:
+                continue
+            for mrep in self.report.materials:
+                if mrep.blender_name == bmat.name and mrep.method != "replaced":
+                    mrep.method = "replaced"
+            # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
+            for guid in [g for g, m in self.built_by_guid.items() if m == bmat]:
+                del self.built_by_guid[guid]
+            bpy.data.materials.remove(bmat)
 
     def import_model(
         self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], target, with_parts: bool = False
