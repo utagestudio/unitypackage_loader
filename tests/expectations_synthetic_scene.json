@@ -102,6 +102,25 @@
       ]
     },
     {
+      "top": "Moved",
+      "object": "Spike",
+      "tip": [
+        2.3,
+        -19.0,
+        1.3
+      ],
+      "hidden": false
+    },
+    {
+      "top": "Moved",
+      "object": "Child",
+      "tip": [
+        -0.8821,
+        -19.0432,
+        1.2883
+      ]
+    },
+    {
       "top": "Hidden",
       "object": "Spike",
       "hidden": true

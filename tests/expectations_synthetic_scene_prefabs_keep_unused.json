@@ -10,13 +10,13 @@
       "prefab": "Assets/Synthetic/Prefabs/Partial.prefab",
       "objects": 5,
       "parts": {
-        "Spike.001": {
+        "Spike.002": {
           "hidden": false
         },
-        "Child.001": {
+        "Child.002": {
           "hidden": true
         },
-        "Skinned.001": {
+        "Skinned.002": {
           "hidden": true
         }
       }
@@ -91,6 +91,10 @@
           "hidden": true
         }
       }
+    },
+    "Moved": {
+      "prefab": "Assets/Synthetic/Prefabs/Moved.prefab",
+      "objects": 5
     }
   },
   "warnings_contain": [

@@ -15,6 +15,8 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
 - Holder（位置 (-2, 0, 1)・Y 90 度・スケール 1.5）の下の B: FBX を位置 (0, 1, 0)・Z 45 度で直置き
 - C: FBX を展開した prefab（Unpacked。Transform の値は Unity が展開したときのもの）を、位置 (0, 0, -3)・Y 180 度・
   スケール (1, 2, 1) に。中の Child の位置を上書きし、Child のマテリアルを ProbeRed に差し替える
+- Moved: FBX を展開したあと Unity 上で Spike（位置と Y 30 度）と Group（位置）を動かした prefab（Moved）を、位置 (0, 0, 20) に
+  （Issue #186。展開した Transform の値そのものが FBX のノードと違う。期待値は B の頂点から Unity の行列で求めたもの）
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
 - SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
@@ -469,20 +471,25 @@ def main() -> None:
     ])).encode(), prefab_meta(slab_bare_prefab_path))
 
     # FBX を展開した prefab。Transform の値は Unity が展開したときのもの（ルート直下は X -90 度・スケール 100）
-    def unpacked_prefab(name, mat_guid, spike_only=False):
+    def unpacked_prefab(name, mat_guid, spike_only=False, moved=False):
         # spike_only: FBX を展開したあと Child と Skinned の Renderer を消した prefab（#58: Unity では Spike しか表示されない）
+        # moved: 展開したあと Unity 上で Spike を動かして Y に 30 度回し、Group を動かした prefab（#186。上書きではなく、
+        # 展開した Transform の値そのものが FBX のノードと違う）
+        spike_pos, spike_rot = ((-0.5, 0.4, 0.2), (-0.70710674, 0, 0, 0.70710678)) if moved else (
+            (-0.5, 0, 0), (-0.68301266, -0.18301271, -0.18301271, 0.6830127))
+        group_pos = (0.3, 0, -1) if moved else (0, 0, -1)
         child_renderer = "" if spike_only else mesh_renderer(302, 303, 300, model, mat_guid, MESH_IDS["Child"])
         skinned = "" if spike_only else skinned_renderer(702, 700, model, mat_guid, MESH_IDS["Skinned"])
         return (HEADER + "".join([
             game_object(100, name),
             transform(101, 100),
             game_object(200, "Group"),
-            transform(201, 200, father=101, pos=(0, 0, -1), rot=(-0.5735765, 0, 0, 0.819152), scale=(100, 99.99999, 99.99999)),
+            transform(201, 200, father=101, pos=group_pos, rot=(-0.5735765, 0, 0, 0.819152), scale=(100, 99.99999, 99.99999)),
             game_object(300, "Child"),
             transform(301, 300, father=201, pos=(0, 0, 0.0050000004), rot=(0, -0.13052621, 0, 0.9914449), scale=(0.5, 0.50000006, 0.50000006)),
             child_renderer,
             game_object(400, "Spike"),
-            transform(401, 400, father=101, pos=(-0.5, 0, 0), rot=(-0.68301266, -0.18301271, -0.18301271, 0.6830127), scale=(100, 100, 100)),
+            transform(401, 400, father=101, pos=spike_pos, rot=spike_rot, scale=(100, 100, 100)),
             mesh_renderer(402, 403, 400, model, mat_guid, MESH_IDS["Spike"]),
             game_object(500, "Armature"),
             transform(501, 500, father=101, pos=(0, 0, 1), rot=(-0.7071068, 0, 0, 0.7071068), scale=(100, 100, 100)),
@@ -501,6 +508,8 @@ def main() -> None:
     all_red = add(all_red_path, unpacked_prefab("AllRed", mats["ProbeRed"]), prefab_meta(all_red_path))
     partial_path = "Assets/Synthetic/Prefabs/Partial.prefab"
     partial = add(partial_path, unpacked_prefab("Partial", mats["ProbeMat"], spike_only=True), prefab_meta(partial_path))
+    moved_path = "Assets/Synthetic/Prefabs/Moved.prefab"
+    moved = add(moved_path, unpacked_prefab("Moved", mats["ProbeMat"], moved=True), prefab_meta(moved_path))
 
     # FBX を中に置いた prefab
     nested_path = "Assets/Synthetic/Prefabs/Nested.prefab"
@@ -643,6 +652,7 @@ def main() -> None:
     add(scene_path, (HEADER + "".join([
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
         instance(2600, partial, 0, [mod(101, partial, "m_LocalPosition.z", -12)]),
+        instance(2700, moved, 0, [mod(101, moved, "m_LocalPosition.z", 20)]),
         instance(3000, nested, 0, [
             mod(11, nested, "m_LocalPosition.x", 1),
             mod(11, nested, "m_LocalPosition.y", 2),
