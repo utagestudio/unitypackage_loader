@@ -389,7 +389,7 @@ class FbxSoleNodeTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "fbx.unitypackage"
         with tarfile.open(self.path, "w:gz") as tar:
             # asset が pathname より先（Unity が書き出す順）
-            _add(tar, f"{GUID_FBX}/asset", test_model_ids.FbxNodeNameTests.binary(["Cushion"]))
+            _add(tar, f"{GUID_FBX}/asset", test_model_ids.FbxMaterialNameTests.binary(["Cushion"], ["Fabric", "Wood"]))
             _add(tar, f"{GUID_FBX}/pathname", b"Assets/Fbx/Cushion.fbx")
             # pathname が先
             _add(tar, f"{GUID_MAT}/pathname", b"Assets/Fbx/Lamp.FBX")
@@ -414,6 +414,13 @@ class FbxSoleNodeTests(unittest.TestCase):
         self.assertEqual(pkg.entries[GUID_OTHER].fbx_sole_node, "")
         self.assertEqual(pkg.entries[GUID_VRM].fbx_sole_node, "")
         self.assertIsNone(pkg.entries[GUID_FBX]._cache, "the FBX itself is not kept in memory")
+
+    def test_material_names_are_recorded(self):
+        pkg = UnityPackage(self.path)
+        pkg.scan()
+        self.assertEqual(pkg.entries[GUID_FBX].fbx_materials, ["Fabric", "Wood"])
+        self.assertEqual(pkg.entries[GUID_MAT].fbx_materials, [])  # マテリアルの無い FBX
+        self.assertIsNone(pkg.entries[GUID_VRM].fbx_materials)  # FBX でないモデルは分からない
 
     def test_single_top_node_is_recorded(self):
         pkg = UnityPackage(self.path)

@@ -85,7 +85,7 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 | | Store Unity Properties | GUID や影色などをカスタムプロパティに保存 |
 | Textures | Extract To | `Beside .blend`（`//textures/<パッケージ名>/`）/ `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | 画像を .blend に同梱 |
-| | Import Unreferenced Images | マテリアル未参照の画像（マスク・アイコン等）も画像データとして読み込む |
+| | Import Unreferenced Images | パッケージのほかの画像（マスク・アイコン、読み込むものが使わないマテリアルのテクスチャ）も画像データとして読み込む。OFF なら、実際に割り当てるマテリアルのテクスチャだけを展開・読み込みする |
 
 結果は Info バーに要約が、3D View のサイドバー（N キー）の "UPI" タブに件数・マテリアルごとの解決状況・警告が、
 システムコンソールに詳細（各マテリアルの対応先 .mat、使用テクスチャ、警告）が出ます。
@@ -142,7 +142,7 @@ Windows のパスの長さの上限に当たらないよう、フルパスが長
   "Import Bundled .blend Files" を ON にし、必要がなければ「Auto Run Python Scripts」は OFF のままにしてください。
 - **アドオン自身はパッケージ内のコードを一切実行しません。** C#、シェーダー、Python などのアセットは無視します。
   ディスクに展開・読み込みするのは次のものだけです: モデル（`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`。`.blend` は上のオプションが
-  ON のときのみ）、マテリアルが参照するテクスチャ（"Import Unreferenced Images" なら全画像）、`.obj` と同じフォルダの `.mtl`、
+  ON のときのみ）、読み込むものに割り当てるマテリアルのテクスチャ（"Import Unreferenced Images" なら全画像）、`.obj` と同じフォルダの `.mtl`、
   `.gltf` と同じフォルダの `.bin`。`.mat` `.meta` `.prefab` はアドオン専用のリーダー（Unity YAML のテキスト、または Unity のバイナリ形式）でメモリ上で解析するだけで、
   書き出しません。
 - **モデルと画像の解析は Blender 本体が行います。** FBX / OBJ / glTF / Collada は Blender のインポーター、PNG / TIFF / TGA / EXR /

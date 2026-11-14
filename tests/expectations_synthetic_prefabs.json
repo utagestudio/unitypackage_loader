@@ -2,7 +2,7 @@
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true, "unit": "PREFABS", "arrange": "SIDE_BY_SIDE" },
   "objects": { "count": 9, "mesh_count": 9, "armature_count": 0 },
   "materials": { "count": 11, "mapped": 9, "families": ["standard"], "methods": ["external", "prefab", "prefab-split", "replaced"] },
-  "images": { "count": 2 },
+  "images": { "count": 1 },
   "warnings_max": 0,
   "split_slots": 3,
   "prefabs": { "count": 7 },

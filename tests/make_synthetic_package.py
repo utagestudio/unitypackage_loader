@@ -462,6 +462,21 @@ def main() -> None:
         f"fileFormatVersion: 2\nguid: {guid_of(gltf_path)}\nScriptedImporter:\n  internalIDToNameTable: []\n  externalObjects: {{}}\n")
     add("Assets/Synthetic/Models/Rock.bin", path.with_suffix(".bin").read_bytes(), None)
 
+    # 名前一致でしか .mat が決まらない FBX 以外のモデルだけが使うテクスチャ。読み込む前の予測（FBX のマテリアル名）から漏れ、
+    # 組み立ての後で展開して組み直す経路を通る（#164）
+    tex_pebble = add("Assets/Synthetic/Textures/Pebble.png", png_bytes(8, (90, 90, 100)), texture_meta(guid_of("Assets/Synthetic/Textures/Pebble.png"), False))
+    pebble_mat_path = "Assets/Synthetic/Materials/PebbleMat.mat"
+    add(pebble_mat_path, mat_yaml("PebbleMat", tex_pebble, None, (1, 1, 1), 0).encode(),
+        f"fileFormatVersion: 2\nguid: {guid_of(pebble_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    pebble_dir = tmp / "pebble"
+    pebble_dir.mkdir()
+    path = pebble_dir / "Pebble.gltf"
+    export_model("icosphere", "PebbleMat", path, name="SyntheticPebble")
+    pebble_path = "Assets/Synthetic/Models/Pebble.gltf"
+    add(pebble_path, path.read_bytes(),
+        f"fileFormatVersion: 2\nguid: {guid_of(pebble_path)}\nScriptedImporter:\n  internalIDToNameTable: []\n  externalObjects: {{}}\n")
+    add("Assets/Synthetic/Models/Pebble.bin", path.with_suffix(".bin").read_bytes(), None)
+
     # 同梱 .blend（マテリアルは既に設定済み。externalObjects は CubeMat を指す）
     path = tmp / "torus.blend"
     export_model("torus", "TorusBlendMat", path)
