@@ -294,7 +294,10 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(len(contents.placements), 4)
         self.assertEqual(contents.model_guids, [MODEL])
         self.assertEqual((contents.lights, contents.cameras, contents.ui_elements), (1, 1, 1))
-        self.assertEqual(contents.other_renderers, 1)  # Unity 組み込みの Cube
+        # Unity 組み込みの Cube の MeshRenderer は、組み込みメッシュとして作る（#190）
+        self.assertEqual(contents.other_renderers, 0)
+        self.assertEqual([(p.kind, p.materials, p.visible) for p in contents.primitives], [("Cube", [MAT_A], True)])
+        self.assertEqual(self.hierarchy.nodes[contents.primitives[0].key].name, "Cube")
         self.assertEqual(contents.missing_sources, 1)
 
 

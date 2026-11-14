@@ -378,6 +378,16 @@ def main() -> int:
         if "tip" in spec:
             tip = _tip_world(obj)
             c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
+        if "bbox" in spec:  # ワールドの範囲 [x0, y0, z0, x1, y1, z1]（頂点が 1 つに決まらない組み込みメッシュなど。#190）
+            bpy.context.view_layer.update()
+            corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+            box = [min(v[i] for v in corners) for i in range(3)] + [max(v[i] for v in corners) for i in range(3)]
+            c.true(f"{label}.bbox", all(abs(a - b) <= 1e-3 for a, b in zip(box, spec["bbox"])),
+                   f"expected {spec['bbox']}, got {[round(v, 4) for v in box]}")
+        if "normal" in spec:  # 最初の面のワールドでの法線（表の向き）
+            normal = (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized()
+            c.true(f"{label}.normal", (normal - Vector(spec["normal"])).length <= 1e-3,
+                   f"expected {spec['normal']}, got {[round(v, 4) for v in normal]}")
         if "hidden" in spec:
             c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
         if "lod" in spec:
