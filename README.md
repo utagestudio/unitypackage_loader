@@ -86,7 +86,7 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | | Store Unity Properties | Store GUIDs, shadow colors, etc. as custom properties |
 | Textures | Extract To | `Beside .blend` (`//textures/<package name>/`) / `Add-on Cache` / `Custom Path` |
 | | Pack Into .blend | Pack images into the .blend file |
-| | Import Unreferenced Images | Also load images not referenced by any material (masks, icons, etc.) as image data |
+| | Import Unreferenced Images | Also load every other image in the package (masks, icons, textures of materials the imported items don't use) as image data. When off, only the textures of the materials actually assigned are extracted and loaded |
 
 A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) shows counts,
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
@@ -115,8 +115,13 @@ ticked):
   automatic exposure is approximated with its upper limit). The Blender scene's exposure (Color Management) is left
   unchanged, so scenes from different pipelines can be mixed in one Blender scene.
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
-  warnings. UI, terrain and meshes that are not in the package (such as Unity's built-in primitives) are not imported
-  and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
+  warnings. Unity's built-in meshes (Cube, Sphere, Capsule, Cylinder, Plane and Quad, such as a Quad laid as the
+  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. URP / HDRP Decal
+  Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
+  the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
+  close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are
+  approximations. UI, terrain and other
+  meshes that are not in the package are not imported and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
   objects inside it (materials, positions of parts such as open doors) are applied when the model's `.meta` is in the
   format of Unity 2018.2 and earlier, which has a name table; otherwise they are counted in the warnings.
 - **Prefabs**: imports each prefab with its own material assignments, in its own Collection inside the package Collection.
@@ -153,7 +158,7 @@ Textures > Extract To to `Custom Path` and choose a short folder such as `C:\upi
   you trust, and keep "Auto Run Python Scripts" off unless you need it.
 - **The add-on itself never executes code from the package.** C# scripts, shaders, Python and other assets are ignored.
   Only the following are extracted to disk or read: model files (`.fbx` `.obj` `.gltf` `.glb` `.vrm` `.dae`, and `.blend`
-  only with the option above), the textures referenced by materials (every image with "Import Unreferenced Images"),
+  only with the option above), the textures of the materials assigned to what you import (every image with "Import Unreferenced Images"),
   the `.mtl` next to an `.obj` and the `.bin` next to a `.gltf`. `.mat`, `.meta` and `.prefab` files are parsed in memory
   with the add-on's own readers (Unity YAML text, or Unity's binary serialized format) and never written out.
 - **Parsing the model and image files is done by Blender itself**, not by this add-on: FBX / OBJ / glTF / Collada by
@@ -212,7 +217,10 @@ Simple Lit / Unlit / Baked Lit) and HDRP (Lit / the first layer of LayeredLit / 
 common property names. A material whose shader was switched can keep the previous shader's settings, so URP and HDRP
 materials are read only by that pipeline's names. When the shader's source (a Shader Graph or `.shader`) is in the
 package, settings the shader does not declare are ignored (the shader's logic itself is not interpreted, so shaders
-that build their color from custom names may come in white).
+that build their color from custom names may come in white). When a Shader Graph sets a texture's tiling inside the
+graph (a Tiling And Offset node driven by a material value), the node connections are followed and that value is used
+as the texture's tiling / offset (only for textures read with the first UV set; graph-specific blending such as mask
+images is not reproduced).
 
 The intermediate representation itself is stored in the custom property `unity_normalized` (JSON), and values not used by
 Blender are stored in `unity_props`. "Rebuild in Another Mode" in the sidebar's Tools panel rebuilds the materials of the

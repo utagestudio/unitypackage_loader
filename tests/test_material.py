@@ -2,7 +2,7 @@ import unittest
 
 from tests import _paths
 from unitypackage_loader.core.material import NormalizedMaterial, TexRef, matcap_blend_mode, parse_material
-from unitypackage_loader.core.mapping import resolve_materials
+from unitypackage_loader.core.mapping import expected_materials, material_textures, resolve_materials
 from unitypackage_loader.core.meta import ModelImporterInfo
 from unitypackage_loader.core.profiles import ShaderTable, normalize_material, select_profile
 from unitypackage_loader.core.profiles.base import cull_backface
@@ -360,6 +360,22 @@ class MappingTests(unittest.TestCase):
     def test_without_model_info(self):
         res = resolve_materials(["Skin"], None, self.mats)
         self.assertEqual(res["Skin"].method, "name")
+
+    def test_expected_materials(self):
+        """読み込む前に分かる、モデル自身の割り当てで使う .mat（#164）。"""
+        found = expected_materials(["Skin", "Cloth", "Nothing"], self.model_info, self.mats, "Assets/Chara/FBX/Chara.fbx")
+        self.assertEqual(found, {"1" * 32, "4" * 32})
+        # FBX のマテリアル名が分からなければ externalObjects の分だけ（パッケージに無い .mat は除く）
+        self.assertEqual(expected_materials(None, self.model_info, self.mats), {"1" * 32})
+        self.assertEqual(expected_materials(None, None, self.mats), set())
+        self.assertEqual(expected_materials([], self.model_info, self.mats), set())
+
+    def test_material_textures(self):
+        base = NormalizedMaterial("Base", base_color_tex=TexRef(TEX_A), normal_tex=TexRef(TEX_N))
+        matcap = NormalizedMaterial("MatCap", extras={"matcap": {"tex": TEX_E}})
+        normalized = {"1" * 32: base, "2" * 32: matcap, "3" * 32: NormalizedMaterial("Plain")}
+        self.assertEqual(material_textures(["1" * 32, "2" * 32, "3" * 32, "9" * 32], normalized), {TEX_A, TEX_N, TEX_E})
+        self.assertEqual(material_textures(["3" * 32], normalized), set())
 
 
 class LocalSampleTests(unittest.TestCase):

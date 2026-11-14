@@ -17,6 +17,10 @@ Assets/Synthetic/Scenes/Probe.unity に 4 通りに置く。値は、同じ形�
   スケール (1, 2, 1) に。中の Child の位置を上書きし、Child のマテリアルを ProbeRed に差し替える
 - Moved: FBX を展開したあと Unity 上で Spike（位置と Y 30 度）と Group（位置）を動かした prefab（Moved）を、位置 (0, 0, 20) に
   （Issue #186。展開した Transform の値そのものが FBX のノードと違う。期待値は B の頂点から Unity の行列で求めたもの）
+- Unity の組み込みメッシュを使う Renderer（Issue #190）: Ground（Quad。位置 (0, -0.5, 30)・X 90 度・スケール (4, 2, 1)、ProbeMat）、
+  非アクティブな HiddenPlane（Plane。位置 (10, 0, 30)・スケール 0.1、ProbeRed）、Box（Cube。位置 (-10, 0.5, 30)、Unity の既定のマテリアル）
+- URP の DecalProjector（Issue #165）: Poster（位置 (0, 1, 35)、箱 (2, 1, 0.4)・中心 (0, 0, 0.2)、DecalMat）と、パッケージに無い
+  .mat を指す Smudge（読み込まずに警告する）
 - 非アクティブな Hidden の下に FBX を直置き（読み込んで非表示にする）。ライト 1 つ
 - SlabRoot: 1 メッシュの FBX（Slab.fbx。ノードは原点から離れている）のメッシュを直接指す prefab を、位置 (3, 1, 14)・
   Y 45 度に（Issue #98。Unity はノードの変換をモデルのルートの Transform に載せるので、メッシュ参照には掛からない）
@@ -69,10 +73,23 @@ if str(REPO_ROOT) not in sys.path:
 
 from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
 from unitypackage_loader.core.unity_ids import hierarchy_file_id, mesh_file_id, named_file_id  # noqa: E402
+from unitypackage_loader.core.primitives import BUILTIN_MESH_GUID  # noqa: E402
 
 ROOT_GAME_OBJECT = 919132149155446097
 ROOT_TRANSFORM = -8679921383154817045
 HEADER = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
+
+
+def decal_doc(file_id: int, go: int, material: str, size, offset) -> str:
+    """URP の DecalProjector（MonoBehaviour。Shibuya と同じフィールド）。"""
+    return (
+        f"--- !u!114 &{file_id}\nMonoBehaviour:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        "  m_Script: {fileID: 11500000, guid: 0777d029ed3dffa4692f417d4aba19ca, type: 3}\n"
+        f"  m_Material: {{fileID: 2100000, guid: {material}, type: 2}}\n  m_DrawDistance: 1000\n"
+        "  m_UVScale: {x: 1, y: 1}\n  m_UVBias: {x: 0, y: 0}\n  m_ScaleMode: 1\n"
+        f"  m_Offset: {{x: {offset[0]}, y: {offset[1]}, z: {offset[2]}}}\n"
+        f"  m_Size: {{x: {size[0]}, y: {size[1]}, z: {size[2]}}}\n  m_FadeFactor: 1\n"
+    )
 
 
 def export_probe_fbx(path: Path) -> None:
@@ -391,6 +408,9 @@ def main() -> None:
             ), 1)
         mats[name] = add(mat_path, text.encode(),
                          f"fileFormatVersion: 2\nguid: {guid_of(mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
+    decal_mat_path = "Assets/Synthetic/Materials/DecalMat.mat"
+    decal_mat = add(decal_mat_path, mat_yaml("DecalMat", tex, None, (1, 1, 1), 0).encode(),
+                    f"fileFormatVersion: 2\nguid: {guid_of(decal_mat_path)}\nNativeFormatImporter:\n  mainObjectFileID: 2100000\n")
 
     fbx = tmp / "probe.fbx"
     export_probe_fbx(fbx)
@@ -653,6 +673,26 @@ def main() -> None:
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
         instance(2600, partial, 0, [mod(101, partial, "m_LocalPosition.z", -12)]),
         instance(2700, moved, 0, [mod(101, moved, "m_LocalPosition.z", 20)]),
+        # Unity の組み込みメッシュを使う Renderer（#190）。X 90 度で寝かせた Quad、非アクティブな Plane、既定のマテリアルの Cube
+        game_object(2800, "Ground"),
+        transform(2801, 2800, pos=(0, -0.5, 30), rot=(0.7071068, 0, 0, 0.7071068), scale=(4, 2, 1)),
+        mesh_renderer(2802, 2803, 2800, BUILTIN_MESH_GUID, mats["ProbeMat"], 10210),
+        game_object(2810, "HiddenPlane", active=0),
+        transform(2811, 2810, pos=(10, 0, 30), scale=(0.1, 1, 0.1)),
+        mesh_renderer(2812, 2813, 2810, BUILTIN_MESH_GUID, mats["ProbeRed"], 10209),
+        game_object(2820, "Box"),
+        transform(2821, 2820, pos=(-10, 0.5, 30)),
+        mesh_renderer(2822, 2823, 2820, BUILTIN_MESH_GUID, "0000000000000000f000000000000000", 10202).replace(
+            "{fileID: 2100000, guid: 0000000000000000f000000000000000, type: 2}",
+            "{fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}",
+        ),
+        # URP の DecalProjector（#165）。+Z へ投影する箱の中心（z = 0.2）に、投影元を向いた板を置く
+        game_object(2900, "Poster"),
+        transform(2901, 2900, pos=(0, 1, 35)),
+        decal_doc(2902, 2900, decal_mat, size=(2, 1, 0.4), offset=(0, 0, 0.2)),
+        game_object(2910, "Smudge"),
+        transform(2911, 2910, pos=(5, 1, 35)),
+        decal_doc(2912, 2910, "9" * 32, size=(1, 1, 0.1), offset=(0, 0, 0)),
         instance(3000, nested, 0, [
             mod(11, nested, "m_LocalPosition.x", 1),
             mod(11, nested, "m_LocalPosition.y", 2),

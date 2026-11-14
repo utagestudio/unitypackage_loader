@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from .model_ids import parse_fbx_node_names, parse_fbx_top_nodes
+from .model_ids import parse_fbx_material_names, parse_fbx_node_names, parse_fbx_top_nodes
 
 __all__ = [
     "AssetEntry",
@@ -46,7 +46,8 @@ SCENE_EXTS = frozenset({".unity"})
 # tar では ``asset`` が ``pathname`` より先に来るのが普通なので、種類の分からない ``asset`` はいったん読んで保持し、
 # 同じ GUID の ``pathname`` で拡張子が分かった時点で残すか捨てるかを決める（保持するのは常に 1 件。#75）。
 # ``pathname`` が続けて来ないパッケージでは、保持したものを ``_CACHE_MAX_SIZE`` 以下に限って残す（超えたものは read_asset で再走査）
-_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph"})  # シェーダーは宣言の読み取り用（#118）
+# シェーダーは宣言の読み取り用（#118）、サブグラフは UV の Tiling & Offset をたどるため（#193）
+_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph", ".shadersubgraph"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
 # 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
@@ -72,6 +73,8 @@ class AssetEntry:
     fbx_sole_node: str = ""
     # FBX の最上位のノードが 1 つだけなら、その名前（子があってもよい。Unity はこのノードをルートに畳む。#185）
     fbx_top_node: str = ""
+    # FBX のマテリアルの名前（出てくる順）。scan で中身を読めた .fbx だけ（それ以外は None。#164）
+    fbx_materials: list[str] | None = None
     _cache: bytes | None = field(default=None, repr=False)
 
     @property
@@ -291,7 +294,10 @@ def _open_for_write(target: Path):
 
 
 def _note_fbx(entry: AssetEntry, data: bytes) -> None:
-    """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。"""
+    """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。
+
+    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。
+    """
     if entry.ext != ".fbx":
         return
     try:
@@ -299,6 +305,10 @@ def _note_fbx(entry: AssetEntry, data: bytes) -> None:
         tops = parse_fbx_top_nodes(data)
     except (ValueError, IndexError, struct.error):
         return
+    try:
+        entry.fbx_materials = parse_fbx_material_names(data) if names else None
+    except (ValueError, IndexError, struct.error):
+        entry.fbx_materials = None
     if names and sum(names.values()) == 1:
         entry.fbx_sole_node = next(iter(names))
     if tops is not None and len(tops) == 1:

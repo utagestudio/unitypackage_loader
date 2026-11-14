@@ -19,6 +19,7 @@ from tests import test_profiles_hdrp as tph
 from tests import test_profiles_toon as tpt
 from tests import test_profiles_urp as tpu
 from tests import test_profiles_vrchat_mobile as tpv
+from tests import shader_graph_writer as sgw
 from tests import test_shader_source as tss
 from tests.test_unity_binary import legacy_material
 from unitypackage_loader.core.hierarchy import (
@@ -35,6 +36,7 @@ from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
 from unitypackage_loader.core.model_ids import parse_fbx_node_names
 from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
+from unitypackage_loader.core.shader_graph import apply_uv_transforms, texture_uv_transforms
 from unitypackage_loader.core.shader_source import declared_properties
 from unitypackage_loader.core.unity_binary import load_documents
 
@@ -161,10 +163,26 @@ def run_material(data) -> None:
     normalize_material(parse_material(data, "f" * 32, "Assets/Fuzz.mat"))
 
 
+def _subgraph_user():
+    """どの GUID も同じサブグラフとして読む、サブグラフを使うグラフ。"""
+    graph = sgw.Graph()
+    sub = graph.subgraph_node("f" * 32, [("00000000-0000-0000-0000-000000000000", 11)], [(3, "Out")])
+    graph.link(graph.prop("_BaseUV", "Vector4"), 0, sub, 11)
+    graph.sample("_MainTex", sub, 3)
+    return graph
+
+
 def run_shader_source(ext: str):
     def run(text) -> None:
         declared = declared_properties(text, ext)
         normalize_material(parse_material(tss.GRAPH_MAT), declared=declared)
+    return run
+
+
+def run_graph_uvs(subgraph: str | None):
+    def run(text) -> None:
+        transforms = texture_uv_transforms(text, lambda guid: subgraph)
+        apply_uv_transforms(parse_material(tss.GRAPH_MAT), transforms)
     return run
 
 
@@ -227,6 +245,13 @@ class ParserFuzzTest(unittest.TestCase):
         self.fuzz("shader", run_shader_source(".shader"), tss.SHADERLAB, mutate_text)
         for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color")):
             self.fuzz("shader graph", run_shader_source(".shadergraph"), graph, mutate_text)
+
+    def test_shader_graph_uvs(self):
+        # テクスチャの UV の Tiling & Offset をたどる（#193）。サブグラフ側が壊れていても ValueError 系だけ
+        for graph in (sgw.base_uv_graph(), _subgraph_user()):
+            for write in (sgw.new_format, sgw.old_format):
+                self.fuzz("shader graph uvs", run_graph_uvs(write(sgw.base_uv_graph())), write(graph), mutate_text)
+                self.fuzz("shader subgraph uvs", lambda text, w=write: run_graph_uvs(text)(w(_subgraph_user())), write(sgw.base_uv_graph()), mutate_text)
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
-from .material import UnityMaterial
+from .material import NormalizedMaterial, UnityMaterial
 from .meta import ModelImporterInfo, strip_numeric_suffix
 from .prefab import RendererMaterials, find_renderer
 
@@ -76,6 +76,35 @@ def resolve_materials(
             continue
         result[fbx_name] = MaterialResolution(fbx_name, None, "none")
     return result
+
+
+def expected_materials(
+    fbx_material_names: list[str] | None,
+    model_info: ModelImporterInfo | None,
+    materials: dict[str, UnityMaterial],
+    model_pathname: str = "",
+) -> set[str]:
+    """読み込む前に分かる、モデル自身の割り当て（``resolve_materials`` の 1・2）で使う .mat の GUID（Issue #164）。
+
+    ``fbx_material_names`` はパッケージの走査で FBX から読んだマテリアル名。分からない（FBX 以外や読めなかったもの）なら
+    None で、そのときは externalObjects の分だけを返す。prefab・シーンの割り当ては、呼び出し側が表から加える。
+    """
+    if fbx_material_names is None:
+        guids = set(model_info.external_materials.values()) if model_info else set()
+        return {g for g in guids if g in materials}
+    resolution = resolve_materials(fbx_material_names, model_info, materials, model_pathname)
+    return {r.guid for r in resolution.values() if r.guid}
+
+
+def material_textures(guids: Iterable[str], normalized: dict[str, NormalizedMaterial]) -> set[str]:
+    """.mat（GUID）が使うテクスチャの GUID（参考テクスチャの MatCap なども含む）。"""
+    found: set[str] = set()
+    for guid in guids:
+        norm = normalized.get(guid)
+        if norm is not None:
+            found.update(t.guid for t in norm.texture_refs())
+            found.update(norm.extra_texture_guids())
+    return found
 
 
 def submesh_slot_order(material_indices: Iterable[int], slot_count: int) -> list[int]:

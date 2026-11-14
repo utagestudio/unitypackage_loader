@@ -17,7 +17,7 @@ from unitypackage_loader.core.hierarchy import (
     pending_object,
     pending_renderer,
 )
-from unitypackage_loader.core.model_ids import ModelObject, PartMatcher, object_claims, parse_fbx_node_names, parse_fbx_top_nodes
+from unitypackage_loader.core.model_ids import ModelObject, PartMatcher, object_claims, parse_fbx_material_names, parse_fbx_node_names, parse_fbx_top_nodes
 from unitypackage_loader.core.unity_ids import hierarchy_file_id, named_file_id
 
 MASK = 0x7FFF_FFFF_FFFF_FFFF
@@ -253,6 +253,37 @@ class FbxNodeNameTests(unittest.TestCase):
     def test_broken_input(self):
         for data in (b"", b"Kaydara FBX Binary", b"Kaydara FBX Binary  \x00\x01Model", b"\x00\x01Model", b"S\xff\xff\xff\xffx\x00\x01Model"):
             self.assertIsNone(parse_fbx_node_names(data))
+
+
+class FbxMaterialNameTests(unittest.TestCase):
+    """FBX のマテリアルの名前（読み込む前に、使う .mat とテクスチャを決める。#164）。"""
+
+    @staticmethod
+    def binary(nodes, materials):
+        data = FbxNodeNameTests.binary(nodes)
+        for index, name in enumerate(materials):
+            value = name.encode() + b"\x00\x01Material"
+            data += b"\x08Material" + b"L" + struct.pack("<q", 100 + index) + b"S" + struct.pack("<I", len(value)) + value
+            data += b"S" + struct.pack("<I", 0)
+        return data
+
+    def test_binary(self):
+        data = self.binary(["Body"], ["Skin", "日本語マテリアル", "", "Skin"])
+        self.assertEqual(parse_fbx_material_names(data), ["Skin", "日本語マテリアル", "", "Skin"])
+        self.assertEqual(parse_fbx_material_names(self.binary(["Body"], [])), [])
+
+    def test_ascii(self):
+        text = (
+            '; FBX 7.4.0 project file\nObjects:  {\n'
+            '\tModel: 1234, "Model::Body", "Mesh" {\n\t}\n'
+            '\tMaterial: 1, "Material::Skin", "" {\n\t}\n'
+            '    Material: "Material::Old Style", "" {\n    }\n'
+        )
+        self.assertEqual(parse_fbx_material_names(text.encode()), ["Skin", "Old Style"])
+
+    def test_not_fbx(self):
+        self.assertIsNone(parse_fbx_material_names(b""))
+        self.assertIsNone(parse_fbx_material_names(b'Material: 1, "Material::Skin", ""'))  # Model の無いテキスト
 
 
 class FbxTopNodeTests(unittest.TestCase):

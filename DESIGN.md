@@ -90,7 +90,38 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     （扉の LOD1 が 2 m など）で、修正後はすべて 0 になり、合っていたもので崩れたものは無い。
   - 複数のノードが 1 つのメッシュを共有する FBX もあるので、Renderer の名前は、GameObject 名が FBX のノード名にあればそれを優先し、無ければメッシュ名にする。
   - Japanese Apartment のシーンで、Unity が書き出した Renderer の外形の中心と比べた。FBX との対応が切れた Renderer 18 個のうち、共通の親の下にあった 13 個はすべて 1 mm 未満で一致した。Japanese Street と Unity Japan Office の配置は変わらない。Gothic Lights のデモシーンでは、潰れて抜けていた 161 個の Renderer が残るようになった。
-- 読み込まないもの: UI、Terrain、パッケージ外のメッシュを使う Renderer（Unity 組み込みの Cube など）。件数を警告に出す。
+- Unity の組み込みメッシュ（Issue #190）: Renderer のメッシュ参照が `Library/unity default resources`（GUID `0000000000000000e000000000000000`）の
+  Cube（fileID 10202）・Cylinder（10206）・Sphere（10207）・Capsule（10208）・Plane（10209）・Quad（10210）を指す MeshRenderer は、
+  `SceneContents.primitives`（`PrimitivePlacement`）に残し、読み込み側が `core/primitives.py` で同じ形を作って置く。地面に敷いた Quad や Plane
+  （Japanese Train Station の DemoScene の地面とホーム 4 枚など）が抜けていた。
+  - 形は Unity 6000.6 の `GameObject.CreatePrimitive` のメッシュと突き合わせた。Quad は XY 平面の 1 m 角で表が -Z、Plane は XZ 平面の 10 m 角を
+    10 × 10 に分割して表が +Y（UV は (5, 0, 5) が (0, 0)）、Cube は 1 m 角で面ごとの UV も同じ並び。Sphere（半径 0.5）・Cylinder・Capsule
+    （半径 0.5・高さ 2）は寸法と向きを合わせて手続き的に作り、分割数と UV の細部は Unity と違う。座標の変換 C は鏡映を含むので、
+    面ごとに Unity での外向きの法線と比べて頂点の並びを決める。
+  - メッシュは読み込みの回ごとに種類ごとに 1 つ作って共有し、マテリアルはオブジェクトのスロット（`link = "OBJECT"`）に付ける。
+    `m_Materials[0]` の .mat から組む（組み込みメッシュはサブメッシュが 1 つ）。パッケージに無い .mat（Unity の既定のマテリアル）なら空のスロット。
+  - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
+    以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
+  - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
+    prefab で見つかった組み込みメッシュの参照（Synty の FX の Cube など）は MeshRenderer ではなかった。
+- URP / HDRP の DecalProjector（Issue #165）: シーンに MonoBehaviour として保存されている。スクリプトの GUID ではなく、フィールドの形
+  （`m_Material` / `m_Size` / `m_UVScale` / `m_UVBias`。URP と HDRP 10 以降で同じ名前）で見分け、ライト・カメラと同じく中身ごと Node の
+  コンポーネントに持って prefab の上書きを当てる（`CLASS_MONO_BEHAVIOUR`、`SceneContents.decals` は件数）。Shibuya の 376 個はすべて URP
+  （`0777d029ed3dffa4692f417d4aba19ca`）で、ほかの手元のパッケージには無い（HDRP の実物では未確認）。
+  - DecalProjector の空間では、投影の箱は中心が `m_Offset`・大きさが `m_Size` で、+Z へ投影する。箱の xy を 0〜1 にした値 × `m_UVScale` + `m_UVBias` が UV。
+    Blender には投影が無いので、箱の中心の高さに xy の範囲の板を置き（`core/decals.py`）、投影元（-Z）を表にして、下の面と重ならないよう
+    投影元へ 2 mm（箱の奥行きの 1/4 まで）寄せる。Shibuya はすべて中心のずれが 0・奥行き 2〜4 cm が多く、壁や道路の面が箱の中心にある。
+    でこぼこした地面や角をまたぐもの（Shrinkwrap で沿わせる案は未実装）、`_DrawOrder`、法線だけを合成するデカールは近似か対象外。
+  - `m_ScaleMode` が 0（Scale Invariant）なら、GameObject のワールドでの拡大縮小で箱の大きさを割っておき、行列を掛けても `m_Size` のままにする。
+  - マテリアルは保存上は不透明（ベースのテクスチャのアルファは投影するときの不透明度）なので、中間表現の alpha_mode を blend、
+    `alpha_from_texture` を立て（`smoothness_from_albedo` は外す）、メッシュ用とは別に組む（method `decal`）。URP の標準の Decal シェーダーは
+    既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る `_MetallicGlossMap` / `_Smoothness: 1` は使わず、
+    金属感 0・ラフネス 0.8 にする（Shibuya の点字ブロックが黒い鏡面になっていた）。
+    ベースのテクスチャが無いもの・パッケージに無い .mat を指すものは置かずに件数を警告に出す。板は影を落とさない。
+  - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
+    オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
+  - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。
+- 読み込まないもの: UI、Terrain、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
 
@@ -298,7 +329,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 |---|---|---|
 | Extract to | Enum: `Beside .blend` / `Addon cache` / `Custom path` = `Beside .blend`（未保存 .blend なら `Addon cache`） | `//textures/<パッケージ名>/Assets/...` のように Unity パスをそのまま再現。フルパスが 240 文字を超えるファイルは `<パッケージ名>/_long/<元のフォルダのハッシュ>/` に置く（#159） |
 | Pack into .blend | Bool = OFF | |
-| Import unreferenced images | Bool = OFF | マスク画像など .mat 未参照の画像も画像データとして読み込む（ユーザーが手動で使う用）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
+| Import unreferenced images | Bool = OFF | マスク画像など、読み込むものに割り当てない画像もパッケージから全部読み込む（ユーザーが手動で使う用。OFF なら割り当てる .mat のテクスチャだけ。#164）。Unity 側でメニューアイコンも通常テクスチャ（textureType 0）として登録されているため、それらも含まれる |
 | Overwrite extracted files | Bool = OFF | OFF なら、展開先の記録（`.unitypackage_importer.json`）で元の tar メンバーの GUID・サイズ・更新時刻が一致する展開済みファイルだけを使い回す（サイズだけでは同じ名前・同じサイズの別ファイルと区別できない。#72）。書き直した画像は、読み込み済みなら読み直す |
 
 ### 3.2 マテリアルモード別の生成ノード
@@ -522,6 +553,8 @@ unitypackage_loader/
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
+│   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
+│   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
@@ -721,6 +754,25 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
   当たらなければ残りで黒くなる代わりに白（テクスチャ無し）になる（Japanese Street の `Leaves.shader` は `_Base_Color` / `_Normal` で、別名を足すまで AE_Flower などが白かった）。
   表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
 
+**Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
+
+Shader Graph はテクスチャの `m_Scale` / `m_Offset`（`_ST`）を使わず、グラフの Tiling And Offset で UV を変えることが多い。繰り返しの値はマテリアルの Vector に入る
+（UnityJapanOffice の `_BaseUV` は xy が Tiling、zw が Offset。Chair_04_Seat は 18、Cussion_01A は 10。Shader Graph のマテリアル 67 個のうち 36 個が 1 以外）。
+プロパティ名からは推測せず、`core/shader_graph.py` がノードのつながりをたどる。
+
+- テクスチャのプロパティを Texture 入力に直接つないだ Sample Texture 2D（LOD 付きも）の UV 入力をさかのぼり、次のノードだけを式として評価する:
+  UV（チャンネル）、Tiling And Offset、Property（Float / Vector）、Split、Combine、Vector 2/3/4、Redirect、Parallax（Occlusion）Mapping（視線でずらす分は無視して、
+  入力の UV をそのまま渡す近似。UnityJapanOffice の Fabric_B / C）、Sub Graph（`.shadersubgraph` を読み、`m_PropertyGuids` / `m_PropertyIds` で入力をサブグラフの
+  プロパティに結び付けて、同じ名前の出力をたどる。UnityJapanOffice の UVMapping）。ほかのノードが混ざれば分からない扱い。
+- 結果は「UV0 × scale + offset」で、各成分は定数かマテリアルのプロパティの成分。UV1 以降で読むテクスチャ、同じテクスチャを違う UV で読むもの、恒等のものは返さない。
+- prepare_package で正規化の前に、マテリアルのテクスチャの `m_Scale` / `m_Offset` をその値に置き換える（`apply_uv_transforms`）。成分のプロパティがマテリアルに無ければ置き換えない
+  （Unity はグラフの既定値を使うが、それは読まない）。Blender ではベースカラーの Mapping を法線などとも共有しているので、ベースカラーのテクスチャの値が全体に当たる。
+- 同じ出力は 1 度だけ評価し、評価中の出力に戻ったら（循環）分からない扱い。サブグラフの入れ子と式の深さは 64 まで。壊れた入力には `GraphError`（`ValueError`）だけを送出し、
+  読む側は警告を出してテクスチャの Tiling をそのまま使う。
+- `.shadersubgraph` も走査でメモリに残す（`_CACHE_EXTS`）。残さないと、サブグラフを読むたびに tar を走査し直す。
+- Synty の PolygonShader は Base Texture の UV がキーワードで分かれる（Keyword ノード）ので対象外のまま（Synty Starter / Farm、スーパーカブの Shader Graph のマテリアルは変化なし）。
+- グラフ固有の合成（UnityJapanOffice の Fabric_D のクッションのマーク: UV2 の `_AlbedoMaskMap` と `_MainTex` のアルファ、ステッチの色を何段も Lerp する）は再現しない。
+
 **lilToon プロファイルの変換規則（サンプルで確認した値）**
 
 | Unity | NormalizedMaterial |
@@ -805,7 +857,8 @@ def run(ctx, filepath, opts) -> Report:
     models = choose_models(pkg, opts)                  # §3.3
     mats   = {e.guid: parse_material(pkg.read_asset(e.guid)) for e in pkg.materials()}
     norm   = {g: select_profile(m).normalize(m) for g, m in mats.items()}
-    needed_tex = {t.guid for n in norm.values() for t in n.texture_refs()}
+    used   = expected_materials(models, prefab_tables, scenes)   # 読み込む前に分かる、組む .mat（#164）
+    needed_tex = {t.guid for g in used for t in norm[g].texture_refs()}
     paths  = pkg.extract(models_guids | needed_tex | (all_tex if opts.unreferenced), extract_root)
     for model in models:
         before = snapshot(bpy.data)
@@ -822,7 +875,13 @@ def run(ctx, filepath, opts) -> Report:
 
 - 1 パッケージ = 1 Collection（名前はパッケージ名）、その下にモデルごとの Collection。
 - インポーターがシーンのルートコレクションに直接入れたオブジェクト・コレクション（VRM add-on のコライダー用コレクション等）はパッケージ用コレクションに移す。
-- `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。全モデルが委譲対象なら `.mat` 用テクスチャの展開も省く。
+- `.vrm` を VRM add-on に委譲した場合はマテリアルを組み直さず（method は `delegated`）、`.mat` 名が一致するものにカスタムプロパティだけ保存する。このモデルの `.mat` は組まないので、そのテクスチャも展開しない。
+- 展開・読み込みするテクスチャは、この回で組む `.mat` のものだけにする（#164。Shibuya ではパッケージ全体の .mat が参照するテクスチャが 1,676 枚・約 3.35 GB あり、
+  モデル 1 つを選んでも全部を展開していた）。組む `.mat` は読み込む前に決める: モデル自身の割り当て（externalObjects と、走査のときに FBX から読んだ
+  マテリアル名を `resolve_materials` の 1・2 に通したもの。`AssetEntry.fbx_materials`）、prefab・シーンの表の `m_Materials`、シーンの組み込みメッシュのマテリアル。
+  VRM add-on に任せるモデルと同梱 .blend の KEEP はマテリアルを組まないので数えない。
+  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`_TextureImages`）、
+  そのマテリアルの警告は出さずにおく。全部を読み込んだ後にまとめて展開・読み込みして、そのマテリアルだけを組み直す（tar をもう 1 回走査する）。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外の扱い（#69）:

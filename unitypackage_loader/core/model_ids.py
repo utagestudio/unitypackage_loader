@@ -39,6 +39,8 @@ _MASK = 0x7FFF_FFFF_FFFF_FFFF  # ``hierarchy`` の表の key と同じく上位�
 _BINARY_MAGIC = b"Kaydara FBX Binary"
 _BINARY_MODEL = b"\x00\x01Model"  # バイナリ FBX のノード名は「<名前>\0\1Model」
 _ASCII_MODEL = re.compile(rb'^[ \t]*Model:\s*(?:-?\d+\s*,\s*)?"Model::([^"\r\n]*)"', re.MULTILINE)
+_BINARY_MATERIAL = b"\x00\x01Material"  # マテリアルの名前は「<名前>\0\1Material」
+_ASCII_MATERIAL = re.compile(rb'^[ \t]*Material:\s*(?:-?\d+\s*,\s*)?"Material::([^"\r\n]*)"', re.MULTILINE)
 _MAX_NAME = 1024
 _MAX_FILE = 1 << 30  # これより大きい FBX は読まない（ノード名は分からない扱いになる）
 _MAX_PATHS = 64  # 1 つのオブジェクトで試す階層パスの数の上限
@@ -75,15 +77,34 @@ def parse_fbx_node_names(data: bytes) -> Counter[str] | None:
     return names or None
 
 
-def _binary_string_ending_at(data: bytes, end: int) -> str | None:
-    """``end`` で名前が終わる文字列属性（``S`` + 長さ + 「<名前>\\0\\1Model」）の名前。"""
-    start = _binary_string_start(data, end)
+def parse_fbx_material_names(data: bytes) -> list[str] | None:
+    """FBX の中身から、マテリアルの名前を出てくる順に返す（Issue #164）。
+
+    Blender の FBX インポーターは、この名前でマテリアルを作る。読み込む前に、モデルが使う .mat を名前で決めるのに使う。
+    FBX として読めなければ None（ノードはあるがマテリアルが無いモデルは空のリスト）。
+    """
+    if data.startswith(_BINARY_MAGIC):
+        names = []
+        position = data.find(_BINARY_MATERIAL)
+        while position >= 0:
+            name = _binary_string_ending_at(data, position, len(_BINARY_MATERIAL))
+            if name is not None:
+                names.append(name)
+            position = data.find(_BINARY_MATERIAL, position + 1)
+        return names
+    if _ASCII_MODEL.search(data) is None:
+        return None
+    return [match.group(1).decode("utf-8", "replace") for match in _ASCII_MATERIAL.finditer(data)]
+
+
+def _binary_string_ending_at(data: bytes, end: int, tail: int = len(_BINARY_MODEL)) -> str | None:
+    """``end`` で名前が終わる文字列属性（``S`` + 長さ + 「<名前>\\0\\1Model」）の名前。``tail`` は名前の後ろの長さ。"""
+    start = _binary_string_start(data, end, tail)
     return data[start:end].decode("utf-8", "replace") if start is not None else None
 
 
-def _binary_string_start(data: bytes, end: int) -> int | None:
+def _binary_string_start(data: bytes, end: int, tail: int = len(_BINARY_MODEL)) -> int | None:
     """``end`` で名前が終わる文字列属性の、名前の始まりの位置。"""
-    tail = len(_BINARY_MODEL)
     for length in range(0, min(_MAX_NAME, end - 5) + 1):
         start = end - length
         if data[start - 5 : start - 4] == b"S" and struct.unpack_from("<I", data, start - 4)[0] == length + tail:

@@ -244,6 +244,9 @@ def main() -> int:
             c.eq(f"{name}.surface_render_method", mat.surface_render_method, spec["render_method"])
         if "backface_culling" in spec:
             c.eq(f"{name}.use_backface_culling", mat.use_backface_culling, spec["backface_culling"])
+        if "alpha_linked" in spec:  # 出力につながる BSDF の Alpha に何かがつながっているか（テクスチャのアルファで透けるか）
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            c.eq(f"{name}.alpha_linked", bool(bsdf and bsdf.inputs["Alpha"].is_linked), spec["alpha_linked"])
         if "mode" in spec:
             rep = next((m for m in report.materials if m.blender_name == name), None)
             c.eq(f"{name}.mode", rep.mode if rep else None, spec["mode"])
@@ -378,6 +381,16 @@ def main() -> int:
         if "tip" in spec:
             tip = _tip_world(obj)
             c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
+        if "bbox" in spec:  # ワールドの範囲 [x0, y0, z0, x1, y1, z1]（頂点が 1 つに決まらない組み込みメッシュなど。#190）
+            bpy.context.view_layer.update()
+            corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+            box = [min(v[i] for v in corners) for i in range(3)] + [max(v[i] for v in corners) for i in range(3)]
+            c.true(f"{label}.bbox", all(abs(a - b) <= 1e-3 for a, b in zip(box, spec["bbox"])),
+                   f"expected {spec['bbox']}, got {[round(v, 4) for v in box]}")
+        if "normal" in spec:  # 最初の面のワールドでの法線（表の向き）
+            normal = (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized()
+            c.true(f"{label}.normal", (normal - Vector(spec["normal"])).length <= 1e-3,
+                   f"expected {spec['normal']}, got {[round(v, 4) for v in normal]}")
         if "hidden" in spec:
             c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
         if "lod" in spec:
@@ -442,6 +455,8 @@ def main() -> int:
         c.eq("report lights", report.lights, exp["light_count"])
     if "camera_count" in exp:
         c.eq("report cameras", report.cameras, exp["camera_count"])
+    if "decal_count" in exp:
+        c.eq("report decals", report.decals, exp["decal_count"])
 
     for spec in exp.get("shared_meshes", []):
         found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]

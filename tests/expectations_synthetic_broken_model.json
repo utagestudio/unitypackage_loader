@@ -2,9 +2,9 @@
   "options": { "material_mode": "AUTO", "models": "ALL", "import_blend": true },
   "result": "FINISHED",
   "errors": 1,
-  "objects": { "count": 15, "mesh_count": 15, "armature_count": 0 },
-  "materials": { "count": 18, "mapped": 16, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
-  "images": { "count": 2 },
+  "objects": { "count": 16, "mesh_count": 16, "armature_count": 0 },
+  "materials": { "count": 19, "mapped": 17, "families": ["hdrp", "standard", "unknown", "vrchat_mobile"], "methods": ["external", "kept", "name", "prefab", "prefab-split", "shared"] },
+  "images": { "count": 3 },
   "warnings_max": 5,
   "submesh_materials": { "SyntheticPair": ["PairB", "PairA"] },
   "material_checks": [

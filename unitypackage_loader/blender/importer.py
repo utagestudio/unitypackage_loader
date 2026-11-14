@@ -6,18 +6,21 @@
 
 from __future__ import annotations
 
+import math
 import traceback
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import bpy
 from mathutils import Matrix
 
+from ..core.decals import Decal, decal_from_body
 from ..core.hierarchy import (
     CLASS_CAMERA,
     CLASS_LIGHT,
+    CLASS_MONO_BEHAVIOUR,
     SOLE_NODE,
     Expander,
     Hierarchy,
@@ -36,7 +39,14 @@ from ..core.fbx_units import read_unit_scale
 from ..core.model_ids import ModelObject, PartMatch, PartMatcher, fbx_node_names
 from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
-from ..core.mapping import fully_replaced_materials, resolve_materials, slot_assignments, submesh_slot_order
+from ..core.mapping import (
+    expected_materials,
+    fully_replaced_materials,
+    material_textures,
+    resolve_materials,
+    slot_assignments,
+    submesh_slot_order,
+)
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
@@ -56,6 +66,7 @@ from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
 from ..core.scene_import import parts_to_hide, parts_to_remove, prefab_warnings, scene_warnings, unused_in_placement
+from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
 from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
 from ..core.units import (
     UNIT_PREFABS,
@@ -76,6 +87,9 @@ from .scene_objects import (
     apply_node_transforms,
     apply_offsets,
     apply_renderer_worlds,
+    decal_mesh,
+    make_primitive,
+    primitive_mesh,
     arrange_collections,
     attach_to_empty,
     duplicate_objects,
@@ -109,6 +123,7 @@ class ImportOptions:
     scene_lights: bool = True  # シーンのライトを読み込む
     scene_cameras: bool = True  # シーンのカメラを読み込む
     scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、そのシーンの HDRP のライトの強さに反映する（#130）
+    scene_decals: bool = True  # シーンの DecalProjector を板にして読み込む（#165）
     hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     skip_unused_parts: bool = True  # prefab・シーンが使っていない FBX の部品を読み込まない（Scenes / Prefabs 単位。#152）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
@@ -299,12 +314,41 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
 
 
 class _ShaderDeclarations:
-    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。"""
+    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。
+
+    Shader Graph なら、テクスチャを読む UV の Tiling & Offset も読む（``uv_transforms``。#193）。
+    """
 
     def __init__(self, pkg: UnityPackage, warn: Callable[[str], None]):
         self._pkg = pkg
         self._warn = warn
         self._cache: dict[str, frozenset[str] | None] = {}
+        self._transforms: dict[str, dict[str, UVTransform]] = {}
+
+    def uv_transforms(self, guid: str | None) -> dict[str, UVTransform]:
+        if not guid:
+            return {}
+        if guid not in self._transforms:
+            self._transforms[guid] = self._read_transforms(guid)
+        return self._transforms[guid]
+
+    def _read_transforms(self, guid: str) -> dict[str, UVTransform]:
+        entry = self._pkg.get(guid)
+        if entry is None or not entry.has_asset or entry.ext != ".shadergraph":
+            return {}
+
+        def subgraph(sub_guid: str) -> str | None:
+            sub = self._pkg.get(sub_guid)
+            if sub is None or not sub.has_asset or sub.ext != ".shadersubgraph":
+                return None
+            return self._pkg.read_text(sub_guid)
+
+        try:
+            return texture_uv_transforms(self._pkg.read_text(guid), subgraph)
+        except Exception as exc:  # noqa: BLE001 - 補助データなので、テクスチャの Tiling をそのまま使って続ける（#69）
+            self._warn(f"could not read the texture UVs of {entry.pathname}: {exc}")
+            _log_exception(f"could not read the texture UVs of {entry.pathname}")
+            return {}
 
     def get(self, guid: str | None) -> frozenset[str] | None:
         if not guid:
@@ -341,6 +385,8 @@ def prepare_package(
     for entry in pkg.materials():
         try:
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
+            # Shader Graph がグラフの中で UV を変えるテクスチャは、その値を Tiling / Offset として読む（#193）
+            umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
             norm = normalize_material(umat, table, declared.get(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warnings.append(f"could not parse {entry.pathname}: {exc}")
@@ -366,10 +412,7 @@ def prepare_package(
     if not models:
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
-    referenced: set[str] = set()
-    for norm in normalized.values():
-        referenced.update(t.guid for t in norm.texture_refs())
-        referenced.update(norm.extra_texture_guids())
+    referenced = material_textures(normalized, normalized)
     missing = {g for g in referenced if pkg.get(g) is None}
 
     # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
@@ -872,17 +915,19 @@ class _ImportSession:
         self.unity_mats, self.normalized = self.prepared.unity_mats, self.prepared.normalized
 
         # --- 必要なテクスチャを決めて展開 ---
-        # 全モデルを VRM add-on に任せる場合、.mat 由来のマテリアルは組まないのでテクスチャも読まない
-        delegate_all = all(_delegate_to_vrm_addon(m.entry, self.opts) for m in models)
-        needed_tex = set() if delegate_all else set(self.prepared.referenced_textures)
+        # 読み込むモデル・prefab・シーンで割り当てる .mat のテクスチャだけにする（#164）。予測から漏れたものは、
+        # 組み立てで足りなかったところで覚えておき、最後にまとめて展開して組み直す（fill_missed_textures）
+        needed_tex = material_textures(self.expected_materials(groups, scenes), self.normalized)
         if self.opts.import_unreferenced:
             needed_tex.update(e.guid for e in self.pkg.textures())
-        for g in sorted(self.prepared.missing_textures):
+        missing = {g for g in needed_tex if self.pkg.get(g) is None}
+        for g in sorted(missing):
             self.report.warn(f"texture {g} is referenced but not included in the package")
-        needed_tex -= self.prepared.missing_textures
+        needed_tex -= missing
 
         extract_root = resolve_extract_root(self.opts, package_path)
         self.report.extract_root = str(extract_root)
+        self.extract_root = extract_root
         self.step(0.2, "Extracting files")
         sidecars = [g for m in models for g in _sidecar_guids(self.pkg, m.entry)]
         written: set[str] = set()  # 実際に書き出した（展開し直した）ファイル
@@ -897,21 +942,9 @@ class _ImportSession:
 
         # --- 画像の読み込み ---
         self.step(0.5, "Loading textures")
-        self.images: dict[str, bpy.types.Image | None] = {}
+        self.images = _TextureImages(self.pkg)
         self.tex_infos: dict[str, TextureImporterInfo] = {}
-        for guid in sorted(needed_tex):
-            entry = self.pkg.get(guid)
-            info = _texture_info(entry, self.report.warn)
-            self.tex_infos[guid] = info
-            path = self.paths.get(guid)
-            image = load_image(path, info, pack=self.opts.pack_images, refresh=guid in written) if path else None
-            self.images[guid] = image
-            if image is None:
-                self.report.warn(f"could not load texture {entry.pathname} (unsupported format?)")
-            else:
-                self.report.images.append(image.name)
-
-        mat_builder.tag_images(self.images, self.tex_infos)
+        self.load_textures(needed_tex, written)
 
         # --- パッケージ用コレクション ---
         self.scene = self.context.scene
@@ -940,6 +973,9 @@ class _ImportSession:
         # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
         self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
+        self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
+        self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
+        self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
 
         self.model_by_guid = {m.guid: m for m in self.prepared.models}
 
@@ -1019,6 +1055,7 @@ class _ImportSession:
             bpy.data.collections.remove(self.staging)
             if prev_active is not None:
                 view_layer.active_layer_collection = prev_active
+        self.fill_missed_textures()
         for obj in self.hidden_objects:
             if not _is_removed(obj):
                 obj.hide_set(True)
@@ -1027,6 +1064,93 @@ class _ImportSession:
 
         self.collection["unity_package"] = package_path.name
         self.step(1.0, "Done")
+
+    def expected_materials(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> set[str]:
+        """読み込む前に分かる、この回で組む .mat の GUID（#164）。
+
+        モデル自身の割り当て（externalObjects と、走査で読んだ FBX のマテリアル名）と、prefab・シーンの表の割り当てと、
+        シーンの組み込みメッシュのマテリアル。マテリアルを組まないモデル（VRM add-on に任せるもの、同梱 .blend の KEEP）は外す。
+        """
+        found: set[str] = set()
+        own: dict[str, bool] = {}  # モデルの GUID → マテリアルを組むか（組むなら自身の割り当ては加え済み）
+
+        def builds(summary: ModelSummary) -> bool:
+            if summary.guid not in own:
+                entry = summary.entry
+                keep = _delegate_to_vrm_addon(entry, self.opts) or (entry.ext == ".blend" and self.opts.blend_materials == "KEEP")
+                own[summary.guid] = not keep
+                if not keep:
+                    found.update(expected_materials(entry.fbx_materials, summary.info, self.unity_mats, entry.pathname))
+            return own[summary.guid]
+
+        for group in groups:
+            for summary, table in group.models:
+                if builds(summary):
+                    found.update(g for row in (table or {}).values() for g in row.materials if g)
+        for scene_summary in scenes:
+            for placement in scene_summary.placements:
+                summary = self.supported_models.get(placement.model_guid)
+                if summary is not None and builds(summary):
+                    found.update(g for r in placement.renderers.values() for g in r.materials if g)
+            if scene_summary.contents is not None:
+                found.update(p.materials[0] for p in scene_summary.contents.primitives if p.materials and p.materials[0])
+            if self.opts.scene_decals:
+                found.update(decal.material for _, decal in self.scene_decals(scene_summary))
+        return found & self.unity_mats.keys()
+
+    def scene_decals(self, scene_summary: SceneSummary) -> list[tuple[object, Decal]]:
+        """シーンの DecalProjector（コンポーネントと、読めた中身）。マテリアルがパッケージに無いものも含める。"""
+        hierarchy = self.prepared.scene_hierarchies.get(scene_summary.guid)
+        if hierarchy is None:
+            return []
+        found = []
+        for component in scene_components(hierarchy, [CLASS_MONO_BEHAVIOUR]):
+            decal = decal_from_body(component.body)
+            if decal is not None:
+                found.append((component, decal))
+        return found
+
+    def load_textures(self, guids: set[str], written: set[str]) -> None:
+        """展開済みのテクスチャを画像として読み込み、``images`` に入れる（読めなければ None）。"""
+        loaded: dict[str, bpy.types.Image | None] = {}
+        for guid in sorted(guids):
+            entry = self.pkg.get(guid)
+            info = _texture_info(entry, self.report.warn)
+            self.tex_infos[guid] = info
+            path = self.paths.get(guid)
+            image = load_image(path, info, pack=self.opts.pack_images, refresh=guid in written) if path else None
+            loaded[guid] = image
+            if image is None:
+                self.report.warn(f"could not load texture {entry.pathname} (unsupported format?)")
+            else:
+                self.report.images.append(image.name)
+        self.images.update(loaded)
+        mat_builder.tag_images(loaded, self.tex_infos)
+
+    def fill_missed_textures(self) -> None:
+        """組み立てで足りなかったテクスチャ（読み込む前の予測から漏れたもの）を展開して読み込み、そのマテリアルを組み直す（#164）。"""
+        pending, self.images.pending = self.images.pending, []
+        missed = sorted(self.images.missed - self.images.keys())
+        if not pending:
+            return
+        self.step(0.95, "Loading textures")
+        written: set[str] = set()
+        try:
+            self.paths.update(
+                self.pkg.extract(
+                    missed, self.extract_root, overwrite=self.opts.overwrite_extracted,
+                    max_total_size=self.opts.max_extract_size, written=written,
+                )
+            )
+        except PackageError as exc:
+            self.report.warn(f"could not extract textures: {exc}")
+        self.load_textures(set(missed), written)
+        seen: set[int] = set()
+        for bmat, guid, mrep, normalized in pending:
+            if _is_removed(bmat) or id(mrep) in seen:
+                continue
+            seen.add(id(mrep))
+            _build_and_report(bmat, guid, normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
 
     def step(self, fraction: float, message: str) -> None:
         if self.progress is not None:
@@ -1317,6 +1441,51 @@ class _ImportSession:
         )
         return result.light_scale
 
+    def material_for(self, guids: list[str | None]) -> bpy.types.Material | None:
+        """Renderer の ``m_Materials[0]`` の .mat から組んだマテリアル（この回で組み済みなら共有する）。
+
+        組み込みメッシュはサブメッシュが 1 つなので、先頭だけを使う。パッケージに無い .mat（Unity の既定のマテリアルなど）なら None。
+        """
+        guid = guids[0] if guids else None
+        if not guid or guid not in self.unity_mats:
+            return None
+        mat = self.built_by_guid.get(guid)
+        if mat is None:
+            umat = self.unity_mats[guid]
+            mat = bpy.data.materials.new(umat.name or guid[:8])
+            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="builtin-mesh")
+            self.report.materials.append(mrep)
+            _build_and_report(mat, guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            self.built_by_guid[guid] = mat
+        return mat
+
+    def decal_material_for(self, guid: str) -> bpy.types.Material | None:
+        """デカールの板に貼るマテリアル（ベースのテクスチャのアルファで半透明にする。この回で組み済みなら共有する。#165）。
+
+        デカールのマテリアルは不透明として保存されている（ベースのテクスチャのアルファは Decal のシェーダーが投影するときに
+        不透明度として使う）ので、半透明（blend）でアルファをテクスチャから取る中間表現から、メッシュ用とは別に組む。
+        URP の標準の Decal シェーダーは既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る
+        ``_MetallicGlossMap`` や ``_Smoothness`` は使わず、金属感 0・つや消し寄り（下の面の値は分からない）にする。
+        パッケージに無い .mat や、ベースのテクスチャを持たないもの（法線だけのデカールなど）は None。
+        """
+        if guid in self.decal_materials:
+            return self.decal_materials[guid]
+        norm = self.normalized.get(guid)
+        mat = None
+        if norm is not None and norm.base_color_tex is not None:
+            umat = self.unity_mats[guid]
+            mat = bpy.data.materials.new(umat.name or guid[:8])
+            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="decal")
+            self.report.materials.append(mrep)
+            decal_norm = replace(
+                norm, alpha_mode="blend", alpha_from_texture=True, smoothness_from_albedo=False, smoothness_from_specular=False,
+                metallic=0.0, metallic_tex=None, roughness=_DECAL_ROUGHNESS, specular_tex=None, specular_color=None, occlusion_tex=None,
+            )
+            _build_and_report(mat, guid, {guid: decal_norm}, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            mat["unity_decal"] = True
+        self.decal_materials[guid] = mat
+        return mat
+
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
@@ -1434,6 +1603,54 @@ class _ImportSession:
                 removed_unused += removed_by_key.get(key, 0)
             hidden_lods += hidden.hidden_lods
 
+        # --- Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190） ---
+        primitives = scene_summary.contents.primitives if scene_summary.contents is not None else []
+        for primitive in primitives:
+            node = hierarchy.nodes[primitive.key]
+            if primitive.key in empties:
+                parent, local = empties[primitive.key], Matrix.Identity(4)
+            else:
+                parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
+                local = Matrix(unity_to_blender(node.local))
+            obj = make_primitive(node.name, primitive_mesh(primitive.kind, self.primitive_meshes), self.material_for(primitive.materials))
+            target.objects.link(obj)
+            obj.parent = parent
+            obj.matrix_basis = local
+            obj["unity_game_object"] = node.name
+            self.report.objects.append(obj.name)
+            if not primitive.visible:
+                defer_hide(obj, self.hidden_objects)
+            empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
+
+        # --- DecalProjector を板にする（#165） ---
+        skipped_decals = 0
+        if self.opts.scene_decals:
+            for component, decal in self.scene_decals(scene_summary):
+                material = self.decal_material_for(decal.material)
+                if material is None:
+                    skipped_decals += 1
+                    continue
+                node = hierarchy.nodes[component.node]
+                if component.node in empties:
+                    parent, local = empties[component.node], Matrix.Identity(4)
+                else:
+                    parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
+                    local = Matrix(unity_to_blender(node.local))
+                world = component.world
+                lossy = tuple(math.sqrt(sum(world[i][j] ** 2 for i in range(3))) for j in range(3))
+                obj = bpy.data.objects.new(f"{component.name} (Decal)", decal_mesh(decal, lossy, self.decal_meshes))
+                obj.material_slots[0].link = "OBJECT"
+                obj.material_slots[0].material = material
+                obj["unity_decal"] = json_text(component.body)
+                obj.visible_shadow = False  # 投影したデカールは影を落とさない
+                target.objects.link(obj)
+                obj.parent = parent
+                obj.matrix_basis = local
+                self.report.objects.append(obj.name)
+                self.report.decals += 1
+                if not component.active:
+                    defer_hide(obj, self.hidden_objects)
+
         # --- ライト・カメラ ---
         light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
         baked_lights = 0
@@ -1475,6 +1692,7 @@ class _ImportSession:
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
             hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
             skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets, unmatched_parts=unmatched_parts,
+            skipped_decals=skipped_decals,
         ):
             self.report.warn(message)
 
@@ -1490,15 +1708,47 @@ def _run_import(
     _ImportSession(context, filepath, opts, progress, prepared, report).run()
 
 
+_DECAL_ROUGHNESS = 0.8  # デカールの板のつや（下の面の値は分からないので、つや消し寄りにする。#165）
+
+
+class _TextureImages(dict):
+    """テクスチャの GUID → 読み込んだ画像（読めなければ None）。
+
+    まだ読み込んでいないパッケージのテクスチャを引かれたら ``missed`` に覚える。読み込む前の予測から漏れたもので、
+    最後にまとめて展開してから、引いたマテリアル（``pending``）を組み直す（#164）。
+    """
+
+    def __init__(self, pkg: UnityPackage):
+        super().__init__()
+        self._pkg = pkg
+        self.missed: set[str] = set()
+        self.recent: set[str] = set()  # 直前の組み立てで引かれた、読み込んでいないテクスチャ
+        # (マテリアル, .mat の GUID, レポートの行, 組んだときの中間表現の表。デカール用は半透明にしたもの)
+        self.pending: list[tuple[bpy.types.Material, str, MaterialReport, dict]] = []
+
+    def get(self, guid, default=None):
+        if guid not in self and self._pkg.get(guid) is not None:
+            self.missed.add(guid)
+            self.recent.add(guid)
+        return super().get(guid, default)
+
+
 def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:
     norm = normalized[guid]
     mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+    lazy = isinstance(images, _TextureImages)
+    if lazy:
+        images.recent.clear()
     try:
         mode, warnings = mat_builder.build_material(bmat, norm, images, tex_infos, build_opts)
     except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
         mrep.warnings.append(f"node build failed: {exc!r}")
         report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
         _log_exception(f"node build failed for material {bmat.name!r}")
+        return
+    if lazy and images.recent:
+        # 読み込んでいないテクスチャがあった。警告は出さずに、展開してから組み直す（fill_missed_textures）
+        images.pending.append((bmat, guid, mrep, normalized))
         return
     mrep.mode = mode
     mrep.warnings.extend(warnings)
