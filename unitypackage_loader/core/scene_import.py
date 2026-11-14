@@ -143,6 +143,7 @@ def scene_warnings(
     skipped_nodes: int = 0,
     skipped_offsets: int = 0,
     unmatched_parts: int = 0,
+    skipped_decals: int = 0,
 ) -> list[str]:
     """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。"""
     prefix = f"scene {pathname}: "
@@ -165,6 +166,11 @@ def scene_warnings(
             messages.append(
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
+            )
+        if skipped_decals:
+            messages.append(
+                f"{skipped_decals} decal projector(s) were skipped (their material is not in the package "
+                "or has no base color texture)"
             )
         if removed_unused:
             messages.append(removed_warning(removed_unused))

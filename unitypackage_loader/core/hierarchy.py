@@ -47,6 +47,7 @@ from typing import NamedTuple
 
 from .primitives import builtin_mesh_kind
 from .transform import IDENTITY, Mat4, chain, inverse_affine, multiply, trs
+from .decals import is_decal_projector
 from .unity_binary import load_documents
 from .unity_ids import mesh_file_id as _mesh_file_id
 from .unity_yaml import UnityRef, ref_guid, to_float
@@ -58,6 +59,7 @@ CLASS_MESH_RENDERER = 23
 CLASS_MESH_FILTER = 33
 CLASS_MESH_COLLIDER = 64
 CLASS_LIGHT = 108
+CLASS_MONO_BEHAVIOUR = 114  # スクリプトのコンポーネント。DecalProjector の形をしたものだけを持つ（#165）
 CLASS_SKINNED_MESH_RENDERER = 137
 CLASS_LOD_GROUP = 205
 CLASS_TERRAIN = 218
@@ -291,7 +293,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in _RENDERER_CLASSES:
             renderer_docs.append(doc)
-        elif doc.class_id in _COMPONENT_CLASSES:
+        elif doc.class_id in _COMPONENT_CLASSES or (doc.class_id == CLASS_MONO_BEHAVIOUR and is_decal_projector(body)):
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_MESH_COLLIDER:
             mesh = ref_guid(body.get("m_Mesh"))
@@ -1433,6 +1435,7 @@ class SceneContents:
     cameras: int = 0
     ui_elements: int = 0
     other_renderers: int = 0  # パッケージ外のメッシュを指す Renderer（組み込みメッシュの MeshRenderer は ``primitives``）
+    decals: int = 0  # DecalProjector（#165）
     primitives: list[PrimitivePlacement] = field(default_factory=list)
     unresolved_overrides: int = 0
     missing_sources: int = 0
@@ -1475,6 +1478,7 @@ def summarize(
         ui_elements=h.counts[CLASS_RECT_TRANSFORM],
         other_renderers=other,
         primitives=primitives,
+        decals=sum(1 for n in h.nodes.values() for class_id, _ in n.components.values() if class_id == CLASS_MONO_BEHAVIOUR),
         unresolved_overrides=h.unresolved_overrides,
         missing_sources=h.missing_sources,
     )

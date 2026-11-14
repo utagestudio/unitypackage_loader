@@ -6,18 +6,21 @@
 
 from __future__ import annotations
 
+import math
 import traceback
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import bpy
 from mathutils import Matrix
 
+from ..core.decals import Decal, decal_from_body
 from ..core.hierarchy import (
     CLASS_CAMERA,
     CLASS_LIGHT,
+    CLASS_MONO_BEHAVIOUR,
     SOLE_NODE,
     Expander,
     Hierarchy,
@@ -84,6 +87,7 @@ from .scene_objects import (
     apply_node_transforms,
     apply_offsets,
     apply_renderer_worlds,
+    decal_mesh,
     make_primitive,
     primitive_mesh,
     arrange_collections,
@@ -119,6 +123,7 @@ class ImportOptions:
     scene_lights: bool = True  # シーンのライトを読み込む
     scene_cameras: bool = True  # シーンのカメラを読み込む
     scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、そのシーンの HDRP のライトの強さに反映する（#130）
+    scene_decals: bool = True  # シーンの DecalProjector を板にして読み込む（#165）
     hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     skip_unused_parts: bool = True  # prefab・シーンが使っていない FBX の部品を読み込まない（Scenes / Prefabs 単位。#152）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
@@ -969,6 +974,8 @@ class _ImportSession:
         self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
         self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
+        self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
+        self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
 
         self.model_by_guid = {m.guid: m for m in self.prepared.models}
 
@@ -1087,7 +1094,21 @@ class _ImportSession:
                     found.update(g for r in placement.renderers.values() for g in r.materials if g)
             if scene_summary.contents is not None:
                 found.update(p.materials[0] for p in scene_summary.contents.primitives if p.materials and p.materials[0])
+            if self.opts.scene_decals:
+                found.update(decal.material for _, decal in self.scene_decals(scene_summary))
         return found & self.unity_mats.keys()
+
+    def scene_decals(self, scene_summary: SceneSummary) -> list[tuple[object, Decal]]:
+        """シーンの DecalProjector（コンポーネントと、読めた中身）。マテリアルがパッケージに無いものも含める。"""
+        hierarchy = self.prepared.scene_hierarchies.get(scene_summary.guid)
+        if hierarchy is None:
+            return []
+        found = []
+        for component in scene_components(hierarchy, [CLASS_MONO_BEHAVIOUR]):
+            decal = decal_from_body(component.body)
+            if decal is not None:
+                found.append((component, decal))
+        return found
 
     def load_textures(self, guids: set[str], written: set[str]) -> None:
         """展開済みのテクスチャを画像として読み込み、``images`` に入れる（読めなければ None）。"""
@@ -1125,11 +1146,11 @@ class _ImportSession:
             self.report.warn(f"could not extract textures: {exc}")
         self.load_textures(set(missed), written)
         seen: set[int] = set()
-        for bmat, guid, mrep in pending:
+        for bmat, guid, mrep, normalized in pending:
             if _is_removed(bmat) or id(mrep) in seen:
                 continue
             seen.add(id(mrep))
-            _build_and_report(bmat, guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            _build_and_report(bmat, guid, normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
 
     def step(self, fraction: float, message: str) -> None:
         if self.progress is not None:
@@ -1438,6 +1459,33 @@ class _ImportSession:
             self.built_by_guid[guid] = mat
         return mat
 
+    def decal_material_for(self, guid: str) -> bpy.types.Material | None:
+        """デカールの板に貼るマテリアル（ベースのテクスチャのアルファで半透明にする。この回で組み済みなら共有する。#165）。
+
+        デカールのマテリアルは不透明として保存されている（ベースのテクスチャのアルファは Decal のシェーダーが投影するときに
+        不透明度として使う）ので、半透明（blend）でアルファをテクスチャから取る中間表現から、メッシュ用とは別に組む。
+        URP の標準の Decal シェーダーは既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る
+        ``_MetallicGlossMap`` や ``_Smoothness`` は使わず、金属感 0・つや消し寄り（下の面の値は分からない）にする。
+        パッケージに無い .mat や、ベースのテクスチャを持たないもの（法線だけのデカールなど）は None。
+        """
+        if guid in self.decal_materials:
+            return self.decal_materials[guid]
+        norm = self.normalized.get(guid)
+        mat = None
+        if norm is not None and norm.base_color_tex is not None:
+            umat = self.unity_mats[guid]
+            mat = bpy.data.materials.new(umat.name or guid[:8])
+            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="decal")
+            self.report.materials.append(mrep)
+            decal_norm = replace(
+                norm, alpha_mode="blend", alpha_from_texture=True, smoothness_from_albedo=False, smoothness_from_specular=False,
+                metallic=0.0, metallic_tex=None, roughness=_DECAL_ROUGHNESS, specular_tex=None, specular_color=None, occlusion_tex=None,
+            )
+            _build_and_report(mat, guid, {guid: decal_norm}, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            mat["unity_decal"] = True
+        self.decal_materials[guid] = mat
+        return mat
+
     def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
         pathname = scene_summary.pathname
@@ -1574,6 +1622,35 @@ class _ImportSession:
                 defer_hide(obj, self.hidden_objects)
             empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
 
+        # --- DecalProjector を板にする（#165） ---
+        skipped_decals = 0
+        if self.opts.scene_decals:
+            for component, decal in self.scene_decals(scene_summary):
+                material = self.decal_material_for(decal.material)
+                if material is None:
+                    skipped_decals += 1
+                    continue
+                node = hierarchy.nodes[component.node]
+                if component.node in empties:
+                    parent, local = empties[component.node], Matrix.Identity(4)
+                else:
+                    parent = scene_empty(hierarchy, node.parent, target, empties, active, self.hidden_objects) if node.parent is not None else None
+                    local = Matrix(unity_to_blender(node.local))
+                world = component.world
+                lossy = tuple(math.sqrt(sum(world[i][j] ** 2 for i in range(3))) for j in range(3))
+                obj = bpy.data.objects.new(f"{component.name} (Decal)", decal_mesh(decal, lossy, self.decal_meshes))
+                obj.material_slots[0].link = "OBJECT"
+                obj.material_slots[0].material = material
+                obj["unity_decal"] = json_text(component.body)
+                obj.visible_shadow = False  # 投影したデカールは影を落とさない
+                target.objects.link(obj)
+                obj.parent = parent
+                obj.matrix_basis = local
+                self.report.objects.append(obj.name)
+                self.report.decals += 1
+                if not component.active:
+                    defer_hide(obj, self.hidden_objects)
+
         # --- ライト・カメラ ---
         light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
         baked_lights = 0
@@ -1615,6 +1692,7 @@ class _ImportSession:
             pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
             hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
             skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets, unmatched_parts=unmatched_parts,
+            skipped_decals=skipped_decals,
         ):
             self.report.warn(message)
 
@@ -1630,6 +1708,9 @@ def _run_import(
     _ImportSession(context, filepath, opts, progress, prepared, report).run()
 
 
+_DECAL_ROUGHNESS = 0.8  # デカールの板のつや（下の面の値は分からないので、つや消し寄りにする。#165）
+
+
 class _TextureImages(dict):
     """テクスチャの GUID → 読み込んだ画像（読めなければ None）。
 
@@ -1642,7 +1723,8 @@ class _TextureImages(dict):
         self._pkg = pkg
         self.missed: set[str] = set()
         self.recent: set[str] = set()  # 直前の組み立てで引かれた、読み込んでいないテクスチャ
-        self.pending: list[tuple[bpy.types.Material, str, MaterialReport]] = []
+        # (マテリアル, .mat の GUID, レポートの行, 組んだときの中間表現の表。デカール用は半透明にしたもの)
+        self.pending: list[tuple[bpy.types.Material, str, MaterialReport, dict]] = []
 
     def get(self, guid, default=None):
         if guid not in self and self._pkg.get(guid) is not None:
@@ -1666,7 +1748,7 @@ def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg
         return
     if lazy and images.recent:
         # 読み込んでいないテクスチャがあった。警告は出さずに、展開してから組み直す（fill_missed_textures）
-        images.pending.append((bmat, guid, mrep))
+        images.pending.append((bmat, guid, mrep, normalized))
         return
     mrep.mode = mode
     mrep.warnings.extend(warnings)

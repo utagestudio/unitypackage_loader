@@ -116,7 +116,11 @@ ticked):
   unchanged, so scenes from different pipelines can be mixed in one Blender scene.
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
   warnings. Unity's built-in meshes (Cube, Sphere, Capsule, Cylinder, Plane and Quad, such as a Quad laid as the
-  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. UI, terrain and other
+  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. URP / HDRP Decal
+  Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
+  the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
+  close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are
+  approximations. UI, terrain and other
   meshes that are not in the package are not imported and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
   objects inside it (materials, positions of parts such as open doors) are applied when the model's `.meta` is in the
   format of Unity 2018.2 and earlier, which has a name table; otherwise they are counted in the warnings.
