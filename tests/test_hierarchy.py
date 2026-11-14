@@ -27,6 +27,18 @@ from unitypackage_loader.core.hierarchy import (
 )
 from unitypackage_loader.core.transform import multiply, transform_point, unity_to_blender
 from unitypackage_loader.core import unity_ids
+from tests.unity_yaml_writer import (
+    HEADER,
+    ROOT_GAME_OBJECT,
+    ROOT_TRANSFORM,
+    game_object,
+    instance,
+    lod_group,
+    mesh_renderer,
+    mod,
+    stripped_transform,
+    transform,
+)
 
 MODEL = "a" * 32
 NESTED = "b" * 32
@@ -36,78 +48,9 @@ LOOP = "f" * 32
 MAT_A = "1" * 32
 MAT_B = "2" * 32
 
-ROOT_TRANSFORM = -8679921383154817045
-ROOT_GAME_OBJECT = 919132149155446097
-
 # Blender の FBX インポーターで原点に読んだときの、突起の頂点の座標
 SPIKE_TIP = (1.4588, 1.9392, 0.9)
 CHILD_TIP = (-0.5821, 0.9568, 1.2883)
-
-HEADER = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
-
-
-def game_object(file_id, name, active=1):
-    return f"--- !u!1 &{file_id}\nGameObject:\n  m_Name: {name}\n  m_IsActive: {active}\n"
-
-
-def transform(file_id, go, father=0, pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=(1, 1, 1), class_id=4, kind="Transform"):
-    return (
-        f"--- !u!{class_id} &{file_id}\n{kind}:\n  m_GameObject: {{fileID: {go}}}\n"
-        f"  m_LocalRotation: {{x: {rot[0]}, y: {rot[1]}, z: {rot[2]}, w: {rot[3]}}}\n"
-        f"  m_LocalPosition: {{x: {pos[0]}, y: {pos[1]}, z: {pos[2]}}}\n"
-        f"  m_LocalScale: {{x: {scale[0]}, y: {scale[1]}, z: {scale[2]}}}\n"
-        f"  m_Father: {{fileID: {father}}}\n"
-    )
-
-
-def mesh_renderer(filter_id, renderer_id, go, mesh_guid, mat, mesh_file_id=4300000):
-    return (
-        f"--- !u!33 &{filter_id}\nMeshFilter:\n  m_GameObject: {{fileID: {go}}}\n"
-        f"  m_Mesh: {{fileID: {mesh_file_id}, guid: {mesh_guid}, type: 3}}\n"
-        f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
-        f"  m_Materials:\n  - {{fileID: 2100000, guid: {mat}, type: 2}}\n"
-    )
-
-
-def mod(target, guid, path, value="", reference="{fileID: 0}"):
-    return (
-        f"    - target: {{fileID: {target}, guid: {guid}, type: 3}}\n"
-        f"      propertyPath: {path}\n      value: {value}\n      objectReference: {reference}\n"
-    )
-
-
-def instance(file_id, source, parent, mods, removed_game_objects=""):
-    removed = f"    m_RemovedGameObjects:\n{removed_game_objects}" if removed_game_objects else "    m_RemovedGameObjects: []\n"
-    return (
-        f"--- !u!1001 &{file_id}\nPrefabInstance:\n  m_Modification:\n"
-        f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
-        f"    m_RemovedComponents: []\n{removed}"
-        f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
-    )
-
-
-def stripped_transform(file_id, source_file_id, source_guid, instance_id, class_id=4, kind="Transform"):
-    return (
-        f"--- !u!{class_id} &{file_id} stripped\n{kind}:\n"
-        f"  m_CorrespondingSourceObject: {{fileID: {source_file_id}, guid: {source_guid}, type: 3}}\n"
-        f"  m_PrefabInstance: {{fileID: {instance_id}}}\n"
-    )
-
-
-def lod_group(file_id, go, levels, enabled=1):
-    """LODGroup。``levels`` は段の順に並べた Renderer の fileID のリスト。"""
-    body = ""
-    for index, renderers in enumerate(levels):
-        body += f"  - screenRelativeHeight: {0.5 / (index + 1)}\n    fadeTransitionWidth: 0\n"
-        if renderers:
-            body += "    renderers:\n" + "".join(f"    - renderer: {{fileID: {r}}}\n" for r in renderers)
-        else:
-            body += "    renderers: []\n"
-    return (
-        f"--- !u!205 &{file_id}\nLODGroup:\n  m_GameObject: {{fileID: {go}}}\n  serializedVersion: 2\n"
-        f"  m_Size: 2\n  m_FadeMode: 0\n  m_LODs:\n{body}  m_Enabled: {enabled}\n"
-    )
-
 
 UNPACKED_PREFAB = HEADER + "".join([
     game_object(100, "Unpacked"),
@@ -172,7 +115,7 @@ SCENE = HEADER + "".join([
         mod(301, UNPACKED, "m_LocalPosition.y", 0.5),
         mod(303, UNPACKED, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {MAT_B}, type: 2}}"),
         mod(100, UNPACKED, "m_Name", "C"),
-    ], removed_game_objects=f"    - {{fileID: 500, guid: {UNPACKED}, type: 3}}\n"),
+    ], removed_game_objects=[500]),
     # 元がパッケージに無い prefab
     instance(5000, MISSING, 0, []),
     # 非アクティブな親の下の FBX。中のオブジェクトへの上書きは当てられない
@@ -778,18 +721,6 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
 
 
-def instance_with_removals(file_id, source, parent, mods, removed_components=(), removed_game_objects=()):
-    def refs(items):
-        return "".join(f"    - {{fileID: {f}, guid: {source}, type: 3}}\n" for f in items) if items else ""
-    return (
-        f"--- !u!1001 &{file_id}\nPrefabInstance:\n  m_Modification:\n"
-        f"    m_TransformParent: {{fileID: {parent}}}\n    m_Modifications:\n{''.join(mods)}"
-        f"    m_RemovedComponents:{' []' if not removed_components else ''}\n{refs(removed_components)}"
-        f"    m_RemovedGameObjects:{' []' if not removed_game_objects else ''}\n{refs(removed_game_objects)}"
-        f"  m_SourcePrefab: {{fileID: 100100000, guid: {source}, type: 3}}\n"
-    )
-
-
 class ModelPartsTest(unittest.TestCase):
     """モデルの PrefabInstance の中のオブジェクトへの、表示の上書きと削除（Issue #172）。
 
@@ -797,7 +728,7 @@ class ModelPartsTest(unittest.TestCase):
     """
 
     def test_overrides_on_a_model_instance_are_recorded(self):
-        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+        scene = HEADER + instance(2000, MODEL, 0, [
             mod(111, MODEL, "m_IsActive", 0),
             mod(222, MODEL, "m_IsActive", 1),  # 既定値を書いただけでも記録する（見た目を変えるかは読み込み側が決める）
             mod(333, MODEL, "m_Enabled", 0),
@@ -820,10 +751,10 @@ class ModelPartsTest(unittest.TestCase):
 
     def test_overrides_through_a_prefab_reach_the_model(self):
         # prefab の中にモデルを置き、シーンが prefab の上から中のオブジェクトを指す（PrefabInstance の fileID XOR 中の fileID）
-        prefab = HEADER + game_object(10, "Holder") + transform(11, 10) + instance_with_removals(20, MODEL, 11, [
+        prefab = HEADER + game_object(10, "Holder") + transform(11, 10) + instance(20, MODEL, 11, [
             mod(111, MODEL, "m_IsActive", 0),
         ])
-        scene = HEADER + instance_with_removals(3000, NESTED, 0, [
+        scene = HEADER + instance(3000, NESTED, 0, [
             mod(20 ^ 111, NESTED, "m_IsActive", 1),  # prefab で隠したものを、シーンで表示し直す
             mod(20 ^ 222, NESTED, "m_IsActive", 0),
             mod(20 ^ 333, NESTED, "m_Enabled", 0),
@@ -841,7 +772,7 @@ class ModelPartsTest(unittest.TestCase):
 
     def test_recycle_table_names_the_parts(self):
         table = {100000: "//RootNode", 400000: "//RootNode", 100002: "Lid", 400002: "Lid", 2300002: "Lid", 4300002: "Lid"}
-        scene = HEADER + instance_with_removals(2000, MODEL, 0, [
+        scene = HEADER + instance(2000, MODEL, 0, [
             mod(100002, MODEL, "m_IsActive", 0),
             mod(2300002, MODEL, "m_Enabled", 0),
             mod(100004, MODEL, "m_IsActive", 0),  # 表に無い
@@ -907,7 +838,7 @@ class ComponentTest(unittest.TestCase):
         # Unity は GameObject を消しても、その部品への古い上書きを m_Modifications に残すことがある（#68）
         scene = HEADER + instance(
             10, "d" * 32, 0, [mod(3, "d" * 32, "m_Intensity", 2.5)],
-            removed_game_objects=f"    - {{fileID: 1, guid: {'d' * 32}, type: 3}}\n",
+            removed_game_objects=[1],
         )
         exp = Expander(lambda g: parse_asset(self.LAMP) if g == "d" * 32 else None, {})
         hierarchy = exp.expand_raw(parse_asset(scene))
@@ -968,7 +899,6 @@ class RobustnessTest(unittest.TestCase):
         h = Expander(lambda guid: None, {}).expand_raw(parse_asset(SCENE))
         self.assertEqual(placements(h, [MODEL]), [])
         self.assertEqual(h.missing_sources, 5)  # B、A、C、元の無い prefab、Hidden の中の FBX
-
 
 
 class NestingLimitCacheTests(unittest.TestCase):
@@ -1108,7 +1038,7 @@ class SequentialFileIdTest(unittest.TestCase):
         instance(30, NESTED, 22, [mod(2, NESTED, "m_LocalPosition.x", 5)]),
         stripped_transform(31, 2, NESTED, 30),
         instance(40, UNPACKED, 22, [mod(52, UNPACKED, "m_LocalPosition.x", 7)],
-                 removed_game_objects="    - {fileID: 57, guid: " + UNPACKED + ", type: 3}\n"),
+                 removed_game_objects=[57]),
         stripped_transform(41, 52, UNPACKED, 40),
         game_object(60, "Lamp"),
         transform(61, 60, father=41),

@@ -31,7 +31,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests.make_synthetic_package import export_model, guid_of, model_meta, png_bytes, texture_meta, write_package  # noqa: E402
-from tests.make_synthetic_scene_package import (  # noqa: E402
+from tests.unity_yaml_writer import (  # noqa: E402
     HEADER,
     ROOT_GAME_OBJECT,
     ROOT_TRANSFORM,
