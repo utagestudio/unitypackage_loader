@@ -14,6 +14,7 @@ from unitypackage_loader.core.hierarchy import (
     Expander,
     components,
     Hierarchy,
+    ModelCatalog,
     Node,
     PartState,
     RendererInfo,
@@ -242,6 +243,21 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual([(p.kind, p.materials, p.visible) for p in contents.primitives], [("Cube", [MAT_A], True)])
         self.assertEqual(self.hierarchy.nodes[contents.primitives[0].key].name, "Cube")
         self.assertEqual(contents.missing_sources, 1)
+
+
+class ModelCatalogTest(unittest.TestCase):
+    """読み込み側が 4 つの表をまとめて渡すための ModelCatalog（#198）。"""
+
+    def test_same_result_as_passing_the_tables(self):
+        assets = {NESTED: NESTED_PREFAB, UNPACKED: UNPACKED_PREFAB, LOOP: LOOP_PREFAB}
+        catalog = ModelCatalog(names={MODEL: "Probe"})
+        h = catalog.expander(lambda guid: parse_asset(assets[guid]) if guid in assets else None).expand_raw(parse_asset(SCENE))
+        expected = placements(expander().expand_raw(parse_asset(SCENE)), {MODEL: "Probe"})
+        self.assertEqual(
+            [(p.model_guid, p.world, sorted(p.renderers)) for p in catalog.placements(h)],
+            [(p.model_guid, p.world, sorted(p.renderers)) for p in expected],
+        )
+        self.assertEqual(catalog.summarize(h).model_guids, [MODEL])
 
 
 class DuplicateNameTest(unittest.TestCase):

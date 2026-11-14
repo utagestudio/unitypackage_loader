@@ -24,13 +24,12 @@ from ..core.hierarchy import (
     SOLE_NODE,
     Expander,
     Hierarchy,
+    ModelCatalog,
     PartState,
     RawAsset,
     built_from_renderers,
     effective_active,
     parse_asset,
-    placements,
-    summarize,
 )
 from ..core.hierarchy import components as scene_components
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
@@ -206,6 +205,7 @@ class PreparedPackage:
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
     pipeline_source: str = "default"  # lights（ライト・カメラの追加データ）/ materials / default
+    catalog: ModelCatalog = field(default_factory=ModelCatalog)  # 展開と配置に使うモデルの表（_catalog）
     _scenes: list[SceneSummary] | None = field(default=None, repr=False)
     _expander: Expander | None = field(default=None, repr=False)  # prefab の展開結果を持つ（シーンの展開で使い回す）
 
@@ -217,10 +217,9 @@ class PreparedPackage:
         if self._scenes is None:
             unsupported = {m.guid: m.skip_reason for m in self.models if not m.supported}
             if self._expander is None:
-                model_names, recycle = _model_tables(self.models)
-                self._expander = Expander(_prefab_reader(self.pkg, self.warnings.append), model_names, recycle)
+                self._expander = self.catalog.expander(_prefab_reader(self.pkg, self.warnings.append))
             self._scenes, self.scene_hierarchies = _prepare_scenes(
-                self.pkg, self._expander, self.models, self.warnings.append, unsupported
+                self.pkg, self._expander, self.catalog, self.warnings.append, unsupported
             )
         return self._scenes
 
@@ -422,10 +421,9 @@ def prepare_package(
     # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
     # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
-    model_names, recycle = _model_tables(models)
-    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
+    catalog = _catalog(models)
     collider_meshes: set[str] = set()
-    expander = Expander(_prefab_reader(pkg, warnings.append, collider_meshes), model_names, recycle)
+    expander = catalog.expander(_prefab_reader(pkg, warnings.append, collider_meshes))
     used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
     prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
     prefab_whole_models: dict[str, set[str]] = {}
@@ -436,8 +434,8 @@ def prepare_package(
             hierarchy = expander.expand_asset(entry.guid)
             if hierarchy is None:  # 読めなかった（警告は読むときに出している）
                 continue
-            placed = placements(hierarchy, model_names, recycle, sole_nodes, top_nodes)
-            tables = tables_from_hierarchy(hierarchy, model_names, recycle, placed)
+            placed = catalog.placements(hierarchy)
+            tables = tables_from_hierarchy(hierarchy, catalog.names, catalog.recycle_names, placed)
             whole = models_placed_whole(hierarchy, placed)
             parts = parts_from_placements(placed)
             inactive = inactive_models(placed)
@@ -475,6 +473,7 @@ def prepare_package(
         prefab_inactive_models=prefab_inactive_models, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=pipeline.pipeline,
         pipeline_source=pipeline.source,
+        catalog=catalog,
     )
 
 
@@ -486,19 +485,19 @@ def _asset_bytes(pkg: UnityPackage, entries: list[AssetEntry]):
             yield data
 
 
-def _model_tables(models: list[ModelSummary]) -> tuple[dict[str, str], dict[str, dict[int, str]]]:
-    """展開器に渡す、モデルの GUID → ルートの名前と、古い形式の .meta の fileIDToRecycleName（中への上書きを名前に結び付ける。#53）。"""
-    return {m.guid: Path(m.entry.pathname).stem for m in models}, {m.guid: m.info.recycle_names for m in models}
+def _catalog(models: list[ModelSummary]) -> ModelCatalog:
+    """展開と配置に使うモデルの表。
 
-
-def _sole_nodes(models: list[ModelSummary]) -> dict[str, str]:
-    """FBX のノードが 1 つだけのモデルの GUID → そのノード名（表の無い 1 メッシュの FBX の配置に使う。#181）。"""
-    return {m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node}
-
-
-def _top_nodes(models: list[ModelSummary]) -> dict[str, str]:
-    """FBX の最上位のノードが 1 つだけのモデルの GUID → そのノード名（Unity が畳むノード。#185）。"""
-    return {m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node}
+    ルートの名前はファイル名から拡張子を除いたもの。古い形式の .meta の fileIDToRecycleName は中への上書きを名前に
+    結び付けるのに使う（#53）。FBX のノードが 1 つだけのモデル（表の無い 1 メッシュの FBX。#181）と、最上位のノードが
+    1 つだけのモデル（Unity が畳むノード。#185）は、走査のときに FBX から読んだノード名。
+    """
+    return ModelCatalog(
+        names={m.guid: Path(m.entry.pathname).stem for m in models},
+        recycle_names={m.guid: m.info.recycle_names for m in models},
+        sole_nodes={m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node},
+        top_nodes={m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node},
+    )
 
 
 def _prefab_reader(
@@ -526,21 +525,19 @@ def _prefab_reader(
 
 
 def _prepare_scenes(
-    pkg: UnityPackage, expander: Expander, models: list[ModelSummary], warn: Callable[[str], None], unsupported: dict[str, str]
+    pkg: UnityPackage, expander: Expander, catalog: ModelCatalog, warn: Callable[[str], None], unsupported: dict[str, str]
 ) -> tuple[list[SceneSummary], dict[str, Hierarchy]]:
     """シーンを展開して候補にする。prefab の展開結果は prefab の表づくりと共有する（``expander`` のキャッシュ）。"""
     entries = pkg.scenes()
     if not entries:
         return [], {}
-    model_names, recycle = _model_tables(models)
-    sole_nodes, top_nodes = _sole_nodes(models), _top_nodes(models)
     scenes: list[SceneSummary] = []
     hierarchies: dict[str, Hierarchy] = {}
     for entry in entries:
         contents = None
         try:
             hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
-            contents = summarize(hierarchy, model_names, recycle, sole_nodes, top_nodes)
+            contents = catalog.summarize(hierarchy)
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             _warn_skipped(warn, f"could not read scene {entry.pathname}", exc)

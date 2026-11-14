@@ -1482,3 +1482,26 @@ def summarize(
         unresolved_overrides=h.unresolved_overrides,
         missing_sources=h.missing_sources,
     )
+
+
+@dataclass(frozen=True)
+class ModelCatalog:
+    """パッケージのモデルについて、展開と配置に使う表をまとめたもの。
+
+    ``Expander`` / ``placements`` / ``summarize`` には、この 4 つの表を別々の引数で渡す。読み込み側で毎回 4 つを
+    並べて渡し、prefab とシーンで 2 回作っていたので、1 つにまとめて使い回す（#198）。
+    """
+
+    names: Mapping[str, str] = field(default_factory=dict)  # モデルの GUID → ルートの名前（ファイル名から拡張子を除いたもの）
+    recycle_names: Mapping[str, dict[int, str]] = field(default_factory=dict)  # 古い形式の .meta の fileIDToRecycleName（#53）
+    sole_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX のノードが 1 つだけのモデル → そのノード名（#181）
+    top_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX の最上位のノードが 1 つだけのモデル → そのノード名（#185）
+
+    def expander(self, read_asset: Callable[[str], RawAsset | None]) -> Expander:
+        return Expander(read_asset, dict(self.names), dict(self.recycle_names))
+
+    def placements(self, h: Hierarchy) -> list[ModelPlacement]:
+        return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
+
+    def summarize(self, h: Hierarchy) -> SceneContents:
+        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
