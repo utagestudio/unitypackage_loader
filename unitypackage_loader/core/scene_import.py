@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 from .hierarchy import Hierarchy, ModelPlacement, SceneContents, built_from_renderers
@@ -11,6 +12,7 @@ from .unity_ids import mesh_file_id
 
 __all__ = [
     "HiddenParts",
+    "PlacementStats",
     "lod_warning",
     "parts_warning",
     "parts_to_hide",
@@ -131,29 +133,47 @@ def parts_to_hide(
     return HiddenParts(hide, unused_count, lods, lod_count)
 
 
-def scene_warnings(
-    pathname: str,
-    contents: SceneContents | None,
-    *,
-    baked_lights: int = 0,
-    light_notes: Iterable[str] = (),
-    hidden_unused: int = 0,
-    removed_unused: int = 0,
-    hidden_lods: int = 0,
-    skipped_nodes: int = 0,
-    skipped_offsets: int = 0,
-    unmatched_parts: int = 0,
-    skipped_decals: int = 0,
-) -> list[str]:
+@dataclass
+class PlacementStats:
+    """prefab 1 つ・シーン 1 つを読み込む間に数えるもの（読み込んだ後の警告に使う）。
+
+    以前は読み込み側が prefab とシーンで別々のローカル変数として数え、警告を作る関数に kwargs で渡していた（#198）。
+    """
+
+    hidden_unused: int = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品（#58）
+    removed_unused: int = 0  # 同じく、読み込まなかった FBX の部品（#152）
+    hidden_lods: int = 0  # LODGroup の遠景用の段として隠したオブジェクト（#104）
+    unmatched_parts: int = 0  # モデルの中への表示の上書き・削除で、当てられなかったもの（#172）
+    skipped_nodes: int = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き（シーンだけ）
+    skipped_offsets: int = 0  # 置き直せなかった、アーマチュアで変形する部品（シーンだけ）
+    skipped_decals: int = 0  # マテリアルが無いか使えない DecalProjector（シーンだけ。#165）
+    baked_lights: int = 0  # Unity ではライトマップにしか効かないライト（シーンだけ）
+    light_notes: set[str] = field(default_factory=set)  # ライトの換算の注意（シーンだけ）
+
+    def part_warnings(self) -> list[str]:
+        """FBX の部品を隠した・読み込まなかった・当てられなかったことの警告（prefab とシーンで共通）。"""
+        messages: list[str] = []
+        if self.removed_unused:
+            messages.append(removed_warning(self.removed_unused))
+        if self.hidden_unused:
+            messages.append(unused_warning(self.hidden_unused))
+        if self.hidden_lods:
+            messages.append(lod_warning(self.hidden_lods))
+        if self.unmatched_parts:
+            messages.append(parts_warning(self.unmatched_parts))
+        return messages
+
+
+def scene_warnings(pathname: str, contents: SceneContents | None, stats: PlacementStats) -> list[str]:
     """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。"""
     prefix = f"scene {pathname}: "
     messages: list[str] = []
-    if baked_lights:
+    if stats.baked_lights:
         messages.append(
-            f"{baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
+            f"{stats.baked_lights} light(s) only affect lightmaps in Unity (baked or area lights); "
             "they were imported as real-time lights"
         )
-    messages.extend(sorted(light_notes))
+    messages.extend(sorted(stats.light_notes))
     if contents is not None:
         if contents.unresolved_overrides:
             messages.append(
@@ -167,45 +187,27 @@ def scene_warnings(
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
             )
-        if skipped_decals:
+        if stats.skipped_decals:
             messages.append(
-                f"{skipped_decals} decal projector(s) were skipped (their material is not in the package "
+                f"{stats.skipped_decals} decal projector(s) were skipped (their material is not in the package "
                 "or has no base color texture)"
             )
-        if removed_unused:
-            messages.append(removed_warning(removed_unused))
-        if hidden_unused:
-            messages.append(unused_warning(hidden_unused))
-        if hidden_lods:
-            messages.append(lod_warning(hidden_lods))
-        if unmatched_parts:
-            messages.append(parts_warning(unmatched_parts))
-        if skipped_nodes:
+        messages.extend(stats.part_warnings())
+        if stats.skipped_nodes:
             messages.append(
-                f"{skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
+                f"{stats.skipped_nodes} position override(s) on nested or armature-deformed parts inside a model "
                 "were not applied"
             )
-        if skipped_offsets:
+        if stats.skipped_offsets:
             messages.append(
-                f"{skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
+                f"{stats.skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
             )
     return [prefix + m for m in messages]
 
 
-def prefab_warnings(
-    *, hidden_unused: int = 0, removed_unused: int = 0, hidden_lods: int = 0, unmatched_parts: int = 0
-) -> list[str]:
+def prefab_warnings(stats: PlacementStats) -> list[str]:
     """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
-    messages: list[str] = []
-    if removed_unused:
-        messages.append(removed_warning(removed_unused))
-    if hidden_unused:
-        messages.append(unused_warning(hidden_unused))
-    if hidden_lods:
-        messages.append(lod_warning(hidden_lods))
-    if unmatched_parts:
-        messages.append(parts_warning(unmatched_parts))
-    return messages
+    return stats.part_warnings()
 
 
 def parts_warning(unmatched_parts: int) -> str:

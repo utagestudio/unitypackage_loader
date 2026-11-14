@@ -61,7 +61,14 @@ from ..core.prefab import (
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.report import ImportReport, MaterialReport
-from ..core.scene_import import parts_to_hide, parts_to_remove, prefab_warnings, scene_warnings, unused_in_placement
+from ..core.scene_import import (
+    PlacementStats,
+    parts_to_hide,
+    parts_to_remove,
+    prefab_warnings,
+    scene_warnings,
+    unused_in_placement,
+)
 from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
 from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
 from ..core.units import (
@@ -986,7 +993,7 @@ class _ImportSession:
                         skipped = self.model_by_guid.get(guid)
                         if skipped is not None and not skipped.supported:
                             self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-                hidden_lods = hidden_unused = removed_unused = unmatched_parts = 0
+                stats = PlacementStats()
                 whole, parts_by_model, inactive = group.analysis.whole_models, group.analysis.parts, group.analysis.inactive_models
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
@@ -1002,24 +1009,21 @@ class _ImportSession:
                     # Models 単位の表は prefab をまたいで統合したものなので、LOD を隠すのは prefab 単位のときだけ
                     if group.prefab is not None:
                         match = self.last_matcher.match(parts) if parts and self.last_matcher else PartMatch()
-                        unmatched_parts += match.unmatched
+                        stats.unmatched_parts += match.unmatched
                         # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
                         unused = set(match.removed)
                         if summary.guid not in whole:
                             unused |= unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
                         if self.opts.skip_unused_parts:
                             objects, removed = self.remove_unused(objects, unused)
-                            removed_unused += removed
-                        hidden_unused += self.hide_named(objects, unused)
+                            stats.removed_unused += removed
+                        stats.hidden_unused += self.hide_named(objects, unused)
                         self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
                         if summary.guid in inactive:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
                             self.hide_named(objects, {o.name for o in objects})
-                        hidden_lods += self.hide_prefab_rows(objects, prefab_table)
+                        stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
                 if group.prefab is not None:
-                    for message in prefab_warnings(
-                        hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
-                        unmatched_parts=unmatched_parts,
-                    ):
+                    for message in prefab_warnings(stats):
                         self.report.warn(f"prefab {group.prefab.pathname}: {message}")
             for scene_summary in scenes:
                 try:
@@ -1537,14 +1541,9 @@ class _ImportSession:
         active = effective_active(hierarchy)
         empties: dict[int, bpy.types.Object] = {}
         templates: dict[tuple, SceneTemplate] = {}
-        skipped_offsets = 0
         unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor
-        skipped_nodes = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き
-        hidden_unused = 0  # Unity の prefab・シーンが使っていないので隠した FBX の部品
-        removed_unused = 0  # 同じく、読み込まなかった FBX の部品（#152）
+        stats = PlacementStats()
         removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
-        hidden_lods = 0  # LODGroup の遠景用の段として隠したオブジェクト
-        unmatched_parts = 0  # モデルの中への表示の上書き・削除で、当てられなかったもの（#172）
         matchers: dict[tuple, PartMatcher | None] = {}  # テンプレートの key → 中のオブジェクトの fileID の計算
         count = len(scene_summary.placements)
         for index, placement in enumerate(scene_summary.placements):
@@ -1608,16 +1607,16 @@ class _ImportSession:
                 if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
                     spec = overrides.pop(root_node, placement.node_transforms.get(root_node, {}))
                     placed = apply_collapsed_root(template, objects, root, root_node, spec, unit_scales[summary.guid])
-                    skipped_nodes += 0 if placed else 1
+                    stats.skipped_nodes += 0 if placed else 1
                 if overrides:
-                    skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
+                    stats.skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
             if summary.entry.ext == ".fbx" and any(r.relative is not None for r in placement.renderers.values()):
                 # Renderer ごとに Unity の位置と比べて置き直す（上書きで動いた部品も含む。#186）
                 if summary.guid not in unit_scales:
                     unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid])
-                skipped_offsets += apply_renderer_worlds(template, objects, root, placement.renderers, unit_scales[summary.guid])
+                stats.skipped_offsets += apply_renderer_worlds(template, objects, root, placement.renderers, unit_scales[summary.guid])
             elif placement.offsets:
-                skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
+                stats.skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
             hidden = parts_to_hide(
                 hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods
             )
@@ -1625,7 +1624,7 @@ class _ImportSession:
             # 複製した配置では並び順で対応させる
             matcher = matchers.get(key)
             match = matcher.match(parts) if parts and matcher is not None else PartMatch()
-            unmatched_parts += match.unmatched
+            stats.unmatched_parts += match.unmatched
             own = {t.name: o.name for t, o in zip(template.objects, objects)}
             removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
             hide_here = {own[n] for n in match.hidden if n in own} | removed_here
@@ -1634,12 +1633,12 @@ class _ImportSession:
                     obj["unity_lod"] = hidden.lods[obj.name]
                 if obj.name in hidden.names or obj.name in hide_here:
                     defer_hide(obj, self.hidden_objects)
-            hidden_unused += hidden.unused
+            stats.hidden_unused += hidden.unused
             if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
-                hidden_unused += len(removed_here - hidden.names)
+                stats.hidden_unused += len(removed_here - hidden.names)
             if placement.active:  # 非アクティブな配置は、隠したときと同じく数えない
-                removed_unused += removed_by_key.get(key, 0)
-            hidden_lods += hidden.hidden_lods
+                stats.removed_unused += removed_by_key.get(key, 0)
+            stats.hidden_lods += hidden.hidden_lods
 
         # --- Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190） ---
         primitives = scene_summary.contents.primitives if scene_summary.contents is not None else []
@@ -1661,12 +1660,11 @@ class _ImportSession:
             empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
 
         # --- DecalProjector を板にする（#165） ---
-        skipped_decals = 0
         if self.opts.scene_decals:
             for component, decal in self.scene_decals(scene_summary):
                 material = self.decal_material_for(decal.material)
                 if material is None:
-                    skipped_decals += 1
+                    stats.skipped_decals += 1
                     continue
                 node = hierarchy.nodes[component.node]
                 if component.node in empties:
@@ -1691,8 +1689,6 @@ class _ImportSession:
 
         # --- ライト・カメラ ---
         light_scale = self.light_scale(scene_summary, target) if self.opts.scene_lights else 1.0
-        baked_lights = 0
-        light_notes: set[str] = set()
         wanted = ([CLASS_LIGHT] if self.opts.scene_lights else []) + ([CLASS_CAMERA] if self.opts.scene_cameras else [])
         for component in scene_components(hierarchy, wanted) if wanted else []:
             node = hierarchy.nodes[component.node]
@@ -1711,8 +1707,8 @@ class _ImportSession:
                 obj["unity_render_pipeline_source"] = self.prepared.pipeline_source
                 if light_scale != 1.0:
                     obj["unity_light_scale"] = light_scale
-                baked_lights += values.baked_only
-                light_notes.update(values.notes)
+                stats.baked_lights += values.baked_only
+                stats.light_notes.update(values.notes)
                 self.report.lights += 1
             else:
                 obj = make_camera(component.name, convert_camera(component.body))
@@ -1726,12 +1722,7 @@ class _ImportSession:
             obj.matrix_basis = Matrix.LocRotScale(location, rotation, None)  # ライト・カメラにはスケールを掛けない
             if not component.active:
                 defer_hide(obj, self.hidden_objects)
-        for message in scene_warnings(
-            pathname, scene_summary.contents, baked_lights=baked_lights, light_notes=light_notes,
-            hidden_unused=hidden_unused, removed_unused=removed_unused, hidden_lods=hidden_lods,
-            skipped_nodes=skipped_nodes, skipped_offsets=skipped_offsets, unmatched_parts=unmatched_parts,
-            skipped_decals=skipped_decals,
-        ):
+        for message in scene_warnings(pathname, scene_summary.contents, stats):
             self.report.warn(message)
 
 
