@@ -1,7 +1,8 @@
 import unittest
 
 from tests import _paths  # noqa: F401
-from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelPlacement, Node, PlacedRenderer, SceneContents
+from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, Node
+from unitypackage_loader.core.placement import ModelPlacement, PlacedRenderer, SceneContents
 from unitypackage_loader.core.scene_import import (
     PlacementStats,
     parts_to_hide,

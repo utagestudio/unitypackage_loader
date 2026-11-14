@@ -6,7 +6,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
-from .hierarchy import Hierarchy, ModelPlacement, SceneContents, built_from_renderers
+from .hierarchy import Hierarchy
+from .placement import ModelPlacement, SceneContents, built_from_renderers
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 

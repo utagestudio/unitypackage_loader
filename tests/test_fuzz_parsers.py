@@ -22,15 +22,9 @@ from tests import test_profiles_vrchat_mobile as tpv
 from tests import shader_graph_writer as sgw
 from tests import test_shader_source as tss
 from tests.test_unity_binary import legacy_material
-from unitypackage_loader.core.hierarchy import (
-    Expander,
-    components,
-    effective_active,
-    parse_asset,
-    placements,
-    summarize,
-    world_matrices,
-)
+from unitypackage_loader.core.expander import Expander
+from unitypackage_loader.core.hierarchy import components, effective_active, parse_asset, world_matrices
+from unitypackage_loader.core.placement import placements, summarize
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
 from unitypackage_loader.core.model_ids import parse_fbx_node_names

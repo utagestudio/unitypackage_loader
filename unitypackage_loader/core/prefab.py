@@ -20,16 +20,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
-from .hierarchy import (
-    CLASS_MESH_RENDERER,
-    Hierarchy,
-    ModelNames,
-    ModelPlacement,
-    PartState,
-    built_from_renderers,
-    pending_renderer_id,
-    placements,
-)
+from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, PartState, pending_renderer_id
+from .placement import ModelNames, ModelPlacement, built_from_renderers, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 

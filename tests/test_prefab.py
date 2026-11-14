@@ -6,18 +6,16 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
+from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import (
     NAMED_MODEL_ROOT_GAME_OBJECT,
     NAMED_MODEL_ROOT_TRANSFORM,
-    Expander,
-    ModelPlacement,
     PartState,
-    PlacedRenderer,
     parse_asset,
     pending_object,
     pending_renderer,
-    placements,
 )
+from unitypackage_loader.core.placement import ModelPlacement, PlacedRenderer, placements
 from unitypackage_loader.core.transform import IDENTITY
 from unitypackage_loader.core.prefab import (
     RendererMaterials,

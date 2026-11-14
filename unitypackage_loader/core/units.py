@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
-from .hierarchy import ModelPlacement, SceneContents
+from .placement import ModelPlacement, SceneContents
 from .prefab import RendererMaterials
 
 UNIT_SCENES = "SCENES"

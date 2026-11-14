@@ -11,7 +11,9 @@ from pathlib import Path
 
 import bpy
 
-from ..core.hierarchy import Expander, Hierarchy, ModelCatalog, RawAsset, parse_asset
+from ..core.expander import Expander
+from ..core.hierarchy import Hierarchy, RawAsset, parse_asset
+from ..core.placement import ModelCatalog
 from ..core.lights import decide_pipeline, pipelines_in_assets
 from ..core.mapping import material_textures, resolve_materials
 from ..core.material import NormalizedMaterial, UnityMaterial, parse_material

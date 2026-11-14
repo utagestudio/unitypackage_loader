@@ -9,7 +9,8 @@ import bpy
 from mathutils import Matrix
 
 from ..core.fbx_units import read_unit_scale
-from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE, built_from_renderers
+from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE
+from ..core.placement import built_from_renderers
 from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light
 from ..core.model_ids import PartMatch, PartMatcher

@@ -9,12 +9,11 @@ Blender の FBX インポーターで原点に読んだときの頂点の座標�
 import unittest
 
 from tests import _paths  # noqa: F401
+from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import (
     SOLE_NODE,
-    Expander,
     components,
     Hierarchy,
-    ModelCatalog,
     Node,
     PartState,
     RendererInfo,
@@ -22,10 +21,9 @@ from unitypackage_loader.core.hierarchy import (
     parse_asset,
     pending_object,
     pending_renderer,
-    placements,
-    summarize,
     world_matrices,
 )
+from unitypackage_loader.core.placement import ModelCatalog, placements, summarize
 from unitypackage_loader.core.transform import multiply, transform_point, unity_to_blender
 from unitypackage_loader.core import unity_ids
 from tests.unity_yaml_writer import (
