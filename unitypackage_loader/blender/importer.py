@@ -290,6 +290,15 @@ def _log_exception(message: str) -> None:
         traceback.print_exc()
 
 
+def _warn_skipped(warn: Callable[[str], None], what: str, exc: Exception) -> None:
+    """補助データを読めずに外したり既定値で続けたりするときに、except の中で呼ぶ（#69）。
+
+    警告には ``what: 例外の文`` だけを出し、traceback は verbose ログが有効ならコンソールに出す。
+    """
+    warn(f"{what}: {exc}")
+    _log_exception(what)
+
+
 def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
     """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
     if not entry.meta_text:
@@ -297,8 +306,7 @@ def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporter
     try:
         return ModelImporterInfo.from_meta(entry.meta_text)
     except Exception as exc:  # noqa: BLE001 - 補助データなので、そのモデルだけ既定値で続ける（#69）
-        warn(f"could not parse .meta of {entry.pathname}: {exc}")
-        _log_exception(f"could not parse .meta of {entry.pathname}")
+        _warn_skipped(warn, f"could not parse .meta of {entry.pathname}", exc)
         return ModelImporterInfo()
 
 
@@ -308,8 +316,7 @@ def _texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpo
     try:
         return TextureImporterInfo.from_meta(entry.meta_text)
     except Exception as exc:  # noqa: BLE001 - 補助データなので、その画像だけ既定値で続ける（#69）
-        warn(f"could not parse .meta of {entry.pathname}: {exc}")
-        _log_exception(f"could not parse .meta of {entry.pathname}")
+        _warn_skipped(warn, f"could not parse .meta of {entry.pathname}", exc)
         return TextureImporterInfo()
 
 
@@ -346,8 +353,7 @@ class _ShaderDeclarations:
         try:
             return texture_uv_transforms(self._pkg.read_text(guid), subgraph)
         except Exception as exc:  # noqa: BLE001 - 補助データなので、テクスチャの Tiling をそのまま使って続ける（#69）
-            self._warn(f"could not read the texture UVs of {entry.pathname}: {exc}")
-            _log_exception(f"could not read the texture UVs of {entry.pathname}")
+            _warn_skipped(self._warn, f"could not read the texture UVs of {entry.pathname}", exc)
             return {}
 
     def get(self, guid: str | None) -> frozenset[str] | None:
@@ -364,8 +370,7 @@ class _ShaderDeclarations:
         try:
             return declared_properties(self._pkg.read_asset(guid), entry.ext) or None
         except Exception as exc:  # noqa: BLE001 - 補助データなので、宣言を使わずに続ける（#69）
-            self._warn(f"could not read the properties of {entry.pathname}: {exc}")
-            _log_exception(f"could not read the properties of {entry.pathname}")
+            _warn_skipped(self._warn, f"could not read the properties of {entry.pathname}", exc)
             return None
 
 
@@ -389,8 +394,7 @@ def prepare_package(
             umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
             norm = normalize_material(umat, table, declared.get(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
-            warnings.append(f"could not parse {entry.pathname}: {exc}")
-            _log_exception(f"could not parse {entry.pathname}")
+            _warn_skipped(warnings.append, f"could not parse {entry.pathname}", exc)
             continue
         unity_mats[entry.guid] = umat
         normalized[entry.guid] = norm
@@ -439,8 +443,7 @@ def prepare_package(
             inactive = inactive_models(placed)
             used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
-            warnings.append(f"could not resolve prefab {entry.pathname}: {exc}")
-            _log_exception(f"could not resolve prefab {entry.pathname}")
+            _warn_skipped(warnings.append, f"could not resolve prefab {entry.pathname}", exc)
             continue
         if hierarchy.unresolved_material_overrides:  # 位置などの上書きは Models / Prefabs 単位では使わないので数えない
             warnings.append(
@@ -516,8 +519,7 @@ def _prefab_reader(
                 collider_meshes.update(g.lower() for g in raw.collider_meshes)
             return raw
         except Exception as exc:  # noqa: BLE001 - prefab は補助情報なので、その prefab だけを外して続ける
-            warn(f"could not parse prefab {pkg.get(guid).pathname}: {exc}")
-            _log_exception(f"could not parse prefab {pkg.get(guid).pathname}")
+            _warn_skipped(warn, f"could not parse prefab {pkg.get(guid).pathname}", exc)
             return None
 
     return read
@@ -541,8 +543,7 @@ def _prepare_scenes(
             contents = summarize(hierarchy, model_names, recycle, sole_nodes, top_nodes)
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
-            warn(f"could not read scene {entry.pathname}: {exc}")
-            _log_exception(f"could not read scene {entry.pathname}")
+            _warn_skipped(warn, f"could not read scene {entry.pathname}", exc)
         scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
     return scenes, hierarchies
 
@@ -1150,7 +1151,82 @@ class _ImportSession:
             if _is_removed(bmat) or id(mrep) in seen:
                 continue
             seen.add(id(mrep))
-            _build_and_report(bmat, guid, normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            self.build_and_report(bmat, guid, mrep, normalized)
+
+    def new_material(self, guid: str, method: str, fbx_name: str = "", normalized: dict | None = None) -> bpy.types.Material:
+        """.mat から新しい Blender マテリアルを作って組み、レポートに行を足す（``normalized`` はデカール用などの別の中間表現）。"""
+        mat = bpy.data.materials.new(self.unity_mats[guid].name or guid[:8])
+        mrep = MaterialReport(blender_name=mat.name, fbx_name=fbx_name, guid=guid, method=method)
+        self.report.materials.append(mrep)
+        self.build_and_report(mat, guid, mrep, normalized)
+        return mat
+
+    def build_and_report(self, bmat, guid: str, mrep: MaterialReport, normalized: dict | None = None) -> None:
+        """.mat の中間表現でマテリアルのノードを組み、結果をレポートの行に書く。
+
+        ``normalized`` を渡さなければこの回の中間表現の表を使う。読み込んでいないテクスチャを引いたら、警告を出さずに
+        ``images.pending`` に回し、最後に展開してから組み直す（``fill_missed_textures``。#164）。
+        """
+        normalized = self.normalized if normalized is None else normalized
+        norm = normalized[guid]
+        mrep.describe(norm)
+        self.images.recent.clear()
+        try:
+            mode, warnings = mat_builder.build_material(bmat, norm, self.images, self.tex_infos, self.build_opts)
+        except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
+            mrep.warnings.append(f"node build failed: {exc!r}")
+            self.report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
+            _log_exception(f"node build failed for material {bmat.name!r}")
+            return
+        if self.images.recent:
+            # 読み込んでいないテクスチャがあった。警告は出さずに、展開してから組み直す（fill_missed_textures）
+            self.images.pending.append((bmat, guid, mrep, normalized))
+            return
+        mrep.mode = mode
+        mrep.warnings.extend(warnings)
+        for w in warnings:
+            if w.startswith(("shader table entry", "shader approximation:")):
+                self.report.warn(w)  # シェーダー単位の注意なので 1 回だけ
+            else:
+                self.report.warn(f"material {bmat.name!r}: {w}")
+        mrep.textures = [
+            f"{role}={self.pkg.get(t.guid).pathname if self.pkg.get(t.guid) else t.guid}"
+            for role, t in (
+                ("base", norm.base_color_tex),
+                ("normal", norm.normal_tex),
+                ("emission", norm.emission_tex),
+                ("metallic", norm.metallic_tex),
+            )
+            if t is not None
+        ]
+
+    def split_slots_by_prefab(self, objects, assignments, resolution) -> int:
+        """(オブジェクト, スロット) ごとに prefab の .mat を割り当てる。割り当てたスロット数を返す。
+
+        モデルがマテリアルを持たないとスロットは 0 個になるが、Unity では Renderer の ``m_Materials[0]`` で描かれる。
+        このときはスロット 0 を作ってから割り当てる（#102）。
+        """
+        by_name = {o.name: o for o in objects if o.type == "MESH"}
+        count = 0
+        for (obj_name, index), guid in assignments.items():
+            obj = by_name.get(obj_name)
+            if obj is None:
+                continue
+            if index >= len(obj.material_slots):
+                if index != 0:  # index が 0 で範囲外なら、スロットが 1 つも無いメッシュ
+                    continue
+                obj.data.materials.append(None)
+            slot = obj.material_slots[index]
+            current = slot.material
+            current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
+            mat = self.built_by_guid.get(guid)
+            if current_guid == guid or (current is not None and current is mat):
+                continue
+            if mat is None:
+                mat = self.built_by_guid[guid] = self.new_material(guid, "prefab-split", current.name if current is not None else "")
+            slot.material = mat
+            count += 1
+        return count
 
     def step(self, fraction: float, message: str) -> None:
         if self.progress is not None:
@@ -1239,14 +1315,13 @@ class _ImportSession:
                 mrep.method = "delegated" if delegated else "kept"
                 if res.guid:
                     norm = self.normalized[res.guid]
-                    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                    mrep.describe(norm)
                     if self.opts.store_props:
                         mat_builder.store_props(bmat, norm)
                 continue
             if bmat.name in replaced:
                 if res.guid:
-                    norm = self.normalized[res.guid]
-                    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                    mrep.describe(self.normalized[res.guid])
                 remaining.append(bmat)  # 差し替えの後、使われなくなったところで "replaced" にして消す
                 continue
             if res.warning:
@@ -1274,7 +1349,7 @@ class _ImportSession:
             if shared is not None and shared is not bmat and _named_after_mat(bmat, shared, self.unity_mats[res.guid]):
                 # 共有するマテリアルの名前は、なるべく .mat の名前にする。先に組んだものが FBX 側の別の名前（prefab で
                 # 解決したものなど）なら、.mat と同じ名前のこちらを組み、先のものの使用箇所をこちらへ付け替える
-                _build_and_report(bmat, res.guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+                self.build_and_report(bmat, res.guid, mrep)
                 old_name = shared.name
                 shared.user_remap(bmat)
                 for row in self.report.materials:
@@ -1289,13 +1364,12 @@ class _ImportSession:
                 remaining.pop()
                 _replace_material(new["objects"], bmat, shared)
                 bpy.data.materials.remove(bmat)
-                norm = self.normalized[res.guid]
-                mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
+                mrep.describe(self.normalized[res.guid])
                 mrep.method = "shared"
                 mrep.blender_name = shared.name
                 continue
 
-            _build_and_report(bmat, res.guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            self.build_and_report(bmat, res.guid, mrep)
             self.built_by_guid.setdefault(res.guid, bmat)
 
         if not keep_materials:
@@ -1306,10 +1380,7 @@ class _ImportSession:
 
         # prefab がスロットごとに別の .mat を指している場合は、そのスロットだけ別マテリアルに差し替える
         if assignments and not keep_materials:
-            split = _split_slots_by_prefab(
-                new["objects"], assignments, resolution, self.unity_mats, self.normalized, self.built_by_guid,
-                self.images, self.tex_infos, self.build_opts, self.pkg, self.report,
-            )
+            split = self.split_slots_by_prefab(new["objects"], assignments, resolution)
             if split:
                 self.report.split_slots += split
                 # 差し替えで使われなくなった FBX マテリアルは片付ける
@@ -1424,8 +1495,7 @@ class _ImportSession:
                 if result is not None:
                     break
         except Exception as exc:  # noqa: BLE001 - 露出は補助的な設定なので、読めなければ倍率 1 で続ける（#69）
-            self.report.warn(f"scene {pathname}: could not read the HDRP exposure: {exc}")
-            _log_exception(f"could not read the HDRP exposure of {pathname}")
+            _warn_skipped(self.report.warn, f"scene {pathname}: could not read the HDRP exposure", exc)
             return 1.0
         if result is None:
             return 1.0
@@ -1451,12 +1521,7 @@ class _ImportSession:
             return None
         mat = self.built_by_guid.get(guid)
         if mat is None:
-            umat = self.unity_mats[guid]
-            mat = bpy.data.materials.new(umat.name or guid[:8])
-            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="builtin-mesh")
-            self.report.materials.append(mrep)
-            _build_and_report(mat, guid, self.normalized, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
-            self.built_by_guid[guid] = mat
+            mat = self.built_by_guid[guid] = self.new_material(guid, "builtin-mesh")
         return mat
 
     def decal_material_for(self, guid: str) -> bpy.types.Material | None:
@@ -1473,15 +1538,11 @@ class _ImportSession:
         norm = self.normalized.get(guid)
         mat = None
         if norm is not None and norm.base_color_tex is not None:
-            umat = self.unity_mats[guid]
-            mat = bpy.data.materials.new(umat.name or guid[:8])
-            mrep = MaterialReport(blender_name=mat.name, fbx_name="", guid=guid, method="decal")
-            self.report.materials.append(mrep)
             decal_norm = replace(
                 norm, alpha_mode="blend", alpha_from_texture=True, smoothness_from_albedo=False, smoothness_from_specular=False,
                 metallic=0.0, metallic_tex=None, roughness=_DECAL_ROUGHNESS, specular_tex=None, specular_color=None, occlusion_tex=None,
             )
-            _build_and_report(mat, guid, {guid: decal_norm}, self.images, self.tex_infos, self.build_opts, self.pkg, self.report, mrep)
+            mat = self.new_material(guid, "decal", normalized={guid: decal_norm})
             mat["unity_decal"] = True
         self.decal_materials[guid] = mat
         return mat
@@ -1720,82 +1781,6 @@ class _TextureImages(dict):
             self.missed.add(guid)
             self.recent.add(guid)
         return super().get(guid, default)
-
-
-def _build_and_report(bmat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep) -> None:
-    norm = normalized[guid]
-    mrep.family, mrep.shader_name, mrep.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
-    lazy = isinstance(images, _TextureImages)
-    if lazy:
-        images.recent.clear()
-    try:
-        mode, warnings = mat_builder.build_material(bmat, norm, images, tex_infos, build_opts)
-    except Exception as exc:  # noqa: BLE001 - 1 マテリアルの失敗で全体を止めない
-        mrep.warnings.append(f"node build failed: {exc!r}")
-        report.warn(f"material {bmat.name!r}: node build failed: {exc!r}")
-        _log_exception(f"node build failed for material {bmat.name!r}")
-        return
-    if lazy and images.recent:
-        # 読み込んでいないテクスチャがあった。警告は出さずに、展開してから組み直す（fill_missed_textures）
-        images.pending.append((bmat, guid, mrep, normalized))
-        return
-    mrep.mode = mode
-    mrep.warnings.extend(warnings)
-    for w in warnings:
-        if w.startswith(("shader table entry", "shader approximation:")):
-            report.warn(w)  # シェーダー単位の注意なので 1 回だけ
-        else:
-            report.warn(f"material {bmat.name!r}: {w}")
-    mrep.textures = [
-        f"{role}={pkg.get(t.guid).pathname if pkg.get(t.guid) else t.guid}"
-        for role, t in (
-            ("base", norm.base_color_tex),
-            ("normal", norm.normal_tex),
-            ("emission", norm.emission_tex),
-            ("metallic", norm.metallic_tex),
-        )
-        if t is not None
-    ]
-
-
-def _split_slots_by_prefab(objects, assignments, resolution, unity_mats, normalized, built_by_guid,
-                           images, tex_infos, build_opts, pkg, report) -> int:
-    """(オブジェクト, スロット) ごとに prefab の .mat を割り当てる。割り当てたスロット数を返す。
-
-    モデルがマテリアルを持たないとスロットは 0 個になるが、Unity では Renderer の ``m_Materials[0]`` で描かれる。
-    このときはスロット 0 を作ってから割り当てる（#102）。
-    """
-    by_name = {o.name: o for o in objects if o.type == "MESH"}
-    count = 0
-    for (obj_name, index), guid in assignments.items():
-        obj = by_name.get(obj_name)
-        if obj is None:
-            continue
-        if index >= len(obj.material_slots):
-            if index != 0:  # index が 0 で範囲外なら、スロットが 1 つも無いメッシュ
-                continue
-            obj.data.materials.append(None)
-        slot = obj.material_slots[index]
-        current = slot.material
-        current_guid = resolution[current.name].guid if current is not None and current.name in resolution else None
-        mat = built_by_guid.get(guid)
-        if current_guid == guid or (current is not None and current is mat):
-            continue
-        if mat is None:
-            umat = unity_mats[guid]
-            mat = bpy.data.materials.new(umat.name or guid[:8])
-            mrep = MaterialReport(
-                blender_name=mat.name,
-                fbx_name=current.name if current is not None else "",
-                guid=guid,
-                method="prefab-split",
-            )
-            report.materials.append(mrep)
-            _build_and_report(mat, guid, normalized, images, tex_infos, build_opts, pkg, report, mrep)
-            built_by_guid[guid] = mat
-        slot.material = mat
-        count += 1
-    return count
 
 
 def _submesh_order(obj) -> list[int]:
