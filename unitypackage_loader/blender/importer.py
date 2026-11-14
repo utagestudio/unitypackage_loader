@@ -25,7 +25,6 @@ from ..core.hierarchy import (
     Expander,
     Hierarchy,
     ModelCatalog,
-    PartState,
     RawAsset,
     built_from_renderers,
     effective_active,
@@ -50,15 +49,13 @@ from ..core.material import NormalizedMaterial, UnityMaterial, parse_material
 from ..core.meta import ModelImporterInfo, TextureImporterInfo, strip_numeric_suffix
 from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import (
+    PrefabAnalysis,
     RendererMaterials,
+    analyze_prefab,
     find_renderer,
-    merge_prefab_tables,
-    models_placed_whole,
     has_pending_renderers,
-    inactive_models,
-    parts_from_placements,
+    merge_prefab_tables,
     resolve_model_renderers,
-    tables_from_hierarchy,
     unused_parts,
 )
 from ..core.profiles import ShaderTable, normalize_material
@@ -191,16 +188,10 @@ class PreparedPackage:
     models: list[ModelSummary]
     referenced_textures: set[str]
     missing_textures: set[str]
-    # prefab の pathname → モデル GUID → GameObject 名をキーにした表
-    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = field(default_factory=dict)
+    # prefab の pathname → その prefab の解析結果（モデルごとの表など）。モデルを使う prefab だけ
+    prefab_analyses: dict[str, PrefabAnalysis] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     prefabs: list[PrefabSummary] = field(default_factory=list)  # 読み込む単位 Prefabs の候補（pathname 順）
-    # prefab の pathname → FBX を丸ごと置いているモデルの GUID（表に無い部品も隠さない。#151）
-    prefab_whole_models: dict[str, set[str]] = field(default_factory=dict)
-    # prefab の pathname → モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（#172）
-    prefab_parts: dict[str, dict[str, dict[str, PartState]]] = field(default_factory=dict)
-    # prefab の pathname → prefab の中の配置がすべて非アクティブなモデルの GUID（すべての部品を隠す。#177）
-    prefab_inactive_models: dict[str, set[str]] = field(default_factory=dict)
     scene_entries: list[AssetEntry] = field(default_factory=list)  # パッケージ内のシーン（pathname 順。展開は後回し）
     scene_hierarchies: dict[str, Hierarchy] = field(default_factory=dict)  # シーンの GUID → 展開した階層（ensure_scenes で作る）
     pipeline: str = "BUILTIN"  # レンダーパイプライン（ライトの強さの換算に使う。決め方は core/lights.decide_pipeline）
@@ -253,8 +244,8 @@ class PreparedPackage:
 
     def table_for(self, model_guid: str) -> dict[str, RendererMaterials]:
         """Models 単位でモデルに当てはめる表。そのモデルを使う prefab をパス順に先勝ちで統合したもの。"""
-        candidates = sorted(p for p, tables in self.prefab_tables.items() if model_guid in tables)
-        return merge_prefab_tables([self.prefab_tables[p][model_guid] for p in candidates])
+        candidates = sorted(p for p, analysis in self.prefab_analyses.items() if model_guid in analysis.tables)
+        return merge_prefab_tables([self.prefab_analyses[p].tables[model_guid] for p in candidates])
 
 
 def build_shader_table(extra_path: str = "") -> ShaderTable:
@@ -425,20 +416,14 @@ def prepare_package(
     collider_meshes: set[str] = set()
     expander = catalog.expander(_prefab_reader(pkg, warnings.append, collider_meshes))
     used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
-    prefab_tables: dict[str, dict[str, dict[str, RendererMaterials]]] = {}
-    prefab_whole_models: dict[str, set[str]] = {}
-    prefab_parts: dict[str, dict[str, dict[str, PartState]]] = {}
-    prefab_inactive_models: dict[str, set[str]] = {}
+    prefab_analyses: dict[str, PrefabAnalysis] = {}
     for entry in pkg.prefabs():
         try:
             hierarchy = expander.expand_asset(entry.guid)
             if hierarchy is None:  # 読めなかった（警告は読むときに出している）
                 continue
             placed = catalog.placements(hierarchy)
-            tables = tables_from_hierarchy(hierarchy, catalog.names, catalog.recycle_names, placed)
-            whole = models_placed_whole(hierarchy, placed)
-            parts = parts_from_placements(placed)
-            inactive = inactive_models(placed)
+            analysis = analyze_prefab(hierarchy, placed)
             used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             _warn_skipped(warnings.append, f"could not resolve prefab {entry.pathname}", exc)
@@ -448,13 +433,8 @@ def prepare_package(
                 f"prefab {entry.pathname}: {hierarchy.unresolved_material_overrides} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
-        if tables:
-            prefab_tables[entry.pathname] = tables
-            prefab_whole_models[entry.pathname] = whole
-            if parts:
-                prefab_parts[entry.pathname] = parts
-            if inactive:
-                prefab_inactive_models[entry.pathname] = inactive
+        if analysis.tables:
+            prefab_analyses[entry.pathname] = analysis
     for m in models:
         m.collider_only = m.guid in collider_meshes and m.guid not in used_by_prefabs
     unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
@@ -466,11 +446,11 @@ def prepare_package(
     )
     if pipeline.warning:
         warnings.append(pipeline.warning)
+    prefab_tables = {pathname: analysis.tables for pathname, analysis in prefab_analyses.items()}
     prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
     return PreparedPackage(
-        path, pkg, unity_mats, normalized, models, referenced, missing, prefab_tables, warnings,
-        prefabs=prefabs, prefab_whole_models=prefab_whole_models, prefab_parts=prefab_parts,
-        prefab_inactive_models=prefab_inactive_models, scene_entries=pkg.scenes(), _expander=expander,
+        path, pkg, unity_mats, normalized, models, referenced, missing,
+        prefab_analyses=prefab_analyses, warnings=warnings, prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
         pipeline=pipeline.pipeline,
         pipeline_source=pipeline.source,
         catalog=catalog,
@@ -790,6 +770,7 @@ class _ImportGroup:
 
     prefab: PrefabSummary | None  # Models 単位なら None（パッケージのコレクションに直接入れる）
     models: list[tuple[ModelSummary, dict[str, RendererMaterials]]]
+    analysis: PrefabAnalysis = field(default_factory=PrefabAnalysis)  # prefab の解析結果（Models 単位なら空）
 
 
 def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_ImportGroup]:
@@ -798,10 +779,11 @@ def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_Import
     supported = {m.guid: m for m in prepared.supported_models}
     groups = []
     for prefab in _select_prefabs(prepared, opts):
-        tables = prepared.prefab_tables.get(prefab.pathname, {})
+        analysis = prepared.prefab_analyses.get(prefab.pathname, PrefabAnalysis())
+        tables = analysis.tables
         models = [(supported[g], tables[g]) for g in prefab.model_guids if g in supported and g in tables]
         if models:
-            groups.append(_ImportGroup(prefab, models))
+            groups.append(_ImportGroup(prefab, models, analysis))
     return groups
 
 
@@ -1005,9 +987,7 @@ class _ImportSession:
                         if skipped is not None and not skipped.supported:
                             self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
                 hidden_lods = hidden_unused = removed_unused = unmatched_parts = 0
-                whole = self.prepared.prefab_whole_models.get(group.prefab.pathname, set()) if group.prefab else set()
-                parts_by_model = self.prepared.prefab_parts.get(group.prefab.pathname, {}) if group.prefab else {}
-                inactive = self.prepared.prefab_inactive_models.get(group.prefab.pathname, set()) if group.prefab else set()
+                whole, parts_by_model, inactive = group.analysis.whole_models, group.analysis.parts, group.analysis.inactive_models
                 for summary, prefab_table in group.models:
                     self.step(0.55 + 0.4 * done / max(total, 1), f"Importing {summary.entry.name}")
                     done += 1
