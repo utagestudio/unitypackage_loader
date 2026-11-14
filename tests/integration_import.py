@@ -244,6 +244,9 @@ def main() -> int:
             c.eq(f"{name}.surface_render_method", mat.surface_render_method, spec["render_method"])
         if "backface_culling" in spec:
             c.eq(f"{name}.use_backface_culling", mat.use_backface_culling, spec["backface_culling"])
+        if "alpha_linked" in spec:  # 出力につながる BSDF の Alpha に何かがつながっているか（テクスチャのアルファで透けるか）
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+            c.eq(f"{name}.alpha_linked", bool(bsdf and bsdf.inputs["Alpha"].is_linked), spec["alpha_linked"])
         if "mode" in spec:
             rep = next((m for m in report.materials if m.blender_name == name), None)
             c.eq(f"{name}.mode", rep.mode if rep else None, spec["mode"])
@@ -452,6 +455,8 @@ def main() -> int:
         c.eq("report lights", report.lights, exp["light_count"])
     if "camera_count" in exp:
         c.eq("report cameras", report.cameras, exp["camera_count"])
+    if "decal_count" in exp:
+        c.eq("report decals", report.decals, exp["decal_count"])
 
     for spec in exp.get("shared_meshes", []):
         found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
