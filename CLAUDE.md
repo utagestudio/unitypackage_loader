@@ -19,7 +19,7 @@
   1. モデル `.meta` の externalObjects（完全一致 → 連番サフィックス除去）
   2. `.mat` 名との一致（同名複数ならモデルに近いフォルダ優先）
   3. prefab の Renderer.m_Materials（同名 GameObject の同じサブメッシュ）
-  さらに、prefab がスロットごとに別の .mat を指す場合は **スロット単位で Blender マテリアルを分割**する（`blender/importer.py`）。
+  さらに、prefab がスロットごとに別の .mat を指す場合は **スロット単位で Blender マテリアルを分割**する（`blender/session_materials.py`）。
   prefab の割り当ては 1・2 より優先する。表はモデル単位（Renderer のメッシュ参照の GUID で振り分け、`core/prefab.py`）で、
   候補が複数あるモデルはダイアログの行で prefab を選べる（既定はパス順の先勝ち統合）。prefab の展開（Variant / ネスト・上書き・削除・古い形式。
   fileID は PrefabInstance の fileID XOR 元の fileID。Node の key は通し番号で、上書きは PrefabInstance ごとの表で引く。#107）は Scenes 単位と同じ `core/hierarchy.py` の `Expander` で行い、表はその配置から作る（#71）。
@@ -47,7 +47,7 @@
 ```
 unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
-  blender/                bpy 依存（importer / scene_objects / materials / nodes / textures / toon_group / outline）
+  blender/                bpy 依存（importer / prepare / model_import / session_materials / scene_placement / scene_objects / materials / nodes / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成

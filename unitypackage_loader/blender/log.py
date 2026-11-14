@@ -36,3 +36,11 @@ def warn_skipped(warn: Callable[[str], None], what: str, exc: Exception) -> None
     """
     warn(f"{what}: {exc}")
     log_exception(what)
+
+
+def record_failure(report, message: str) -> None:
+    """モデルやシーン 1 つの読み込みの失敗をレポートの errors に記録する（残りの読み込みは続ける。except の中で呼ぶ）。"""
+    message = message.strip()  # Blender の例外の文は末尾に改行が付く
+    if message not in report.errors:
+        report.errors.append(message)
+    log_exception(message)

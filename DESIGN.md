@@ -567,7 +567,13 @@ unitypackage_loader/
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
 ├─ blender/                      # bpy 依存
-│   ├─ importer.py               # 全体の流れ（prepare_package、1 回のインポートの状態と手順 _ImportSession）
+│   ├─ importer.py               # 全体の流れ（run_import、1 回のインポートの手順 _ImportSession）。外から使う名前の窓口
+│   ├─ options.py                # ImportOptions（1 回の読み込みの設定）
+│   ├─ prepare.py                # パッケージの事前解析（prepare_package / PreparedPackage。ダイアログと読み込みで共有）
+│   ├─ model_import.py           # モデルファイルを Blender のインポーターで読む処理と、bpy.data の差分
+│   ├─ session_materials.py      # 1 回の読み込みの中でのマテリアルの組み立て・共有・スロット分割（SessionMaterials）
+│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・デカール・ライト・カメラ）
+│   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
 │   ├─ nodes.py                  # ノードの組み立ての共通関数
@@ -575,9 +581,12 @@ unitypackage_loader/
 │   ├─ outline.py                # Solidify によるアウトライン
 │   └─ textures.py               # 画像読み込み・カラースペース
 └─ tests/
-    ├─ test_unity_yaml.py        # pytest（bpy 不要）
-    ├─ test_mapping.py
-    └─ integration_import.py     # blender -b --python で実行、_local/ のサンプルで検証
+    ├─ test_*.py                 # unittest（bpy 不要）
+    ├─ unity_yaml_writer.py      # テストと合成パッケージの生成で使う、Unity の YAML を組み立てる関数
+    ├─ make_synthetic_*.py       # 合成パッケージの生成（Blender で実行）
+    ├─ integration_import.py     # blender -b --python で実行し、期待値 JSON と照合する
+    ├─ integration_runs.json     # 合成パッケージの生成スクリプトと、どのパッケージをどの期待値で回すかの一覧
+    └─ run_integration.py        # 一覧の生成と全期待値の実行（手元と CI で同じものを使う）
 ```
 
 `core/` を bpy 非依存にするのが要点。パーサーとマッピングは標準ライブラリの unittest で回せる（`python3 -m unittest discover -s tests -t .`。追加依存無し）。
@@ -851,6 +860,12 @@ def resolve(model_entry, fbx_material_names, index) -> dict[str, str | None]:
 
 ### 4.7 `blender/importer.py` オーケストレーション
 
+1 回の読み込みは `_ImportSession`（`importer.py`）が手順を並べる: 解析（`analyze`）→ 読み込むモデルの決定 → 展開（`extract`）→
+画像の読み込み → prefab のグループごと（`import_group`）かシーンごと（`SceneImport`。`scene_placement.py`）のモデルの読み込み →
+足りなかったテクスチャの補い（`fill_missed_textures`）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
+モデルファイルの読み込みは `model_import.py` にある。以前は `importer.py` 1 つ（約 1,900 行）だったのを、役割ごとに分けた（#198）。
+下の擬似コードは最初の設計で、流れを示すもの。
+
 ```python
 def run(ctx, filepath, opts) -> Report:
     pkg = UnityPackage(filepath); index = pkg.scan()
@@ -880,7 +895,7 @@ def run(ctx, filepath, opts) -> Report:
   モデル 1 つを選んでも全部を展開していた）。組む `.mat` は読み込む前に決める: モデル自身の割り当て（externalObjects と、走査のときに FBX から読んだ
   マテリアル名を `resolve_materials` の 1・2 に通したもの。`AssetEntry.fbx_materials`）、prefab・シーンの表の `m_Materials`、シーンの組み込みメッシュのマテリアル。
   VRM add-on に任せるモデルと同梱 .blend の KEEP はマテリアルを組まないので数えない。
-  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`_TextureImages`）、
+  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`session_materials.TextureImages`）、
   そのマテリアルの警告は出さずにおく。全部を読み込んだ後にまとめて展開・読み込みして、そのマテリアルだけを組み直す（tar をもう 1 回走査する）。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
