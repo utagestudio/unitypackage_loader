@@ -75,6 +75,7 @@ from .scene_objects import (
     apply_collapsed_root,
     apply_node_transforms,
     apply_offsets,
+    apply_renderer_worlds,
     arrange_collections,
     attach_to_empty,
     duplicate_objects,
@@ -1403,7 +1404,12 @@ class _ImportSession:
                     skipped_nodes += 0 if placed else 1
                 if overrides:
                     skipped_nodes += apply_node_transforms(template, objects, overrides, unit_scales[summary.guid])
-            if placement.offsets:
+            if summary.entry.ext == ".fbx" and any(r.relative is not None for r in placement.renderers.values()):
+                # Renderer ごとに Unity の位置と比べて置き直す（上書きで動いた部品も含む。#186）
+                if summary.guid not in unit_scales:
+                    unit_scales[summary.guid] = read_unit_scale(self.paths[summary.guid])
+                skipped_offsets += apply_renderer_worlds(template, objects, root, placement.renderers, unit_scales[summary.guid])
+            elif placement.offsets:
                 skipped_offsets += apply_offsets(objects, placement.world, placement.offsets, scale)
             hidden = parts_to_hide(
                 hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods

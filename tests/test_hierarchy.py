@@ -16,6 +16,7 @@ from unitypackage_loader.core.hierarchy import (
     Hierarchy,
     Node,
     PartState,
+    RendererInfo,
     effective_active,
     parse_asset,
     pending_object,
@@ -24,7 +25,7 @@ from unitypackage_loader.core.hierarchy import (
     summarize,
     world_matrices,
 )
-from unitypackage_loader.core.transform import transform_point, unity_to_blender
+from unitypackage_loader.core.transform import multiply, transform_point, unity_to_blender
 from unitypackage_loader.core import unity_ids
 
 MODEL = "a" * 32
@@ -238,6 +239,41 @@ class PlacementTest(unittest.TestCase):
         unpacked = self.by_name["C"]
         self.assertEqual(set(unpacked.offsets), {"Child"})
         self.assert_point(blender_point(unpacked.offsets["Child"], CHILD_TIP), (0.5821, -44.9414, 36.7786))
+
+    def test_unpacked_renderer_keeps_matrix_from_root(self):
+        # ルートの行列 · relative が GameObject のワールド行列（上書きで動いた Child も含む。#186）
+        unpacked = self.by_name["C"]
+        worlds = world_matrices(self.hierarchy)
+        for name in ("Child", "Spike"):
+            key = next(
+                k for k, n in self.hierarchy.nodes.items()
+                if n.name == name and n.renderer is not None and self.root_of(k) == unpacked.root
+            )
+            relative = unpacked.renderers[name].relative
+            self.assertIsNotNone(relative)
+            for a, b in zip(multiply(unpacked.world, relative), worlds[key]):
+                for x, y in zip(a, b):
+                    self.assertAlmostEqual(x, y, places=5)
+
+    def root_of(self, key):
+        while self.hierarchy.nodes[key].parent is not None:
+            key = self.hierarchy.nodes[key].parent
+        return key
+
+    def test_same_name_renderers_have_no_matrix(self):
+        # 同じ配置に同名の Renderer が 2 つあると、どちらの位置か決められないので置き直さない（#186）
+        h = Hierarchy()
+        h.nodes[1] = Node(1, "Kit", [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0])
+        for key, x in ((2, 1.0), (3, 2.0)):
+            h.nodes[key] = Node(key, "Door", [x, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0], parent=1, scope=1)
+            h.nodes[key].renderer = RendererInfo(MODEL, [MAT_A], 23, mesh_file_id=10202)
+        h.nodes[1].scope = 1
+        (placement,) = placements(h, [MODEL])
+        self.assertEqual(set(placement.renderers), {"Door"})
+        self.assertIsNone(placement.renderers["Door"].relative)
+
+    def test_model_instance_renderers_have_no_matrix(self):
+        self.assertTrue(all(r.relative is None for r in self.by_name["B"].renderers.values()))
 
     def test_material_override_on_unpacked_renderer(self):
         unpacked = self.by_name["C"]

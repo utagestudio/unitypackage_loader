@@ -39,7 +39,7 @@
       "prefab": "Assets/Synthetic/Prefabs/Partial.prefab",
       "objects": 1,
       "parts": {
-        "Spike.001": {
+        "Spike.002": {
           "hidden": false
         }
       }
@@ -123,6 +123,10 @@
           "absent": true
         }
       }
+    },
+    "Moved": {
+      "prefab": "Assets/Synthetic/Prefabs/Moved.prefab",
+      "objects": 5
     }
   },
   "warnings_max": 9,
