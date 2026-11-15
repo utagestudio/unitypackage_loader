@@ -9,9 +9,11 @@ from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.profiles import normalize_material
 from unitypackage_loader.core.shader_source import (
     GRAPH_TARGET_PROPERTIES,
+    ShaderDefaults,
     ShaderSourceError,
     declared_properties,
     restrict_to_declared,
+    shader_defaults,
 )
 
 # 自作の .shader。コメント、属性、文字列の中の括弧、既定値の {} を含む
@@ -194,6 +196,94 @@ class NormalizeWithDeclaredTests(unittest.TestCase):
         self.assertEqual(n.family, "standard")
         self.assertEqual(n.base_color_tex.guid, TEX_A)
         self.assertEqual(n.metallic, 1.0)
+
+
+
+# Amplify Shader Editor で作った葉のシェーダー（Tokyo Street / Japanese Street の AE/Leaves と同じ形）。
+# 切り抜くかどうかはシェーダーのタグと clip() だけで決まり、マテリアルの m_CustomRenderQueue は -1
+LEAVES = """Shader "AE/Leaves"
+{
+	Properties
+	{
+		_Cutoff( "Mask Clip Value", Float ) = 0.73
+		_Base_Color("Base_Color", 2D) = "white" {}
+		[HideInInspector] __dirty( "", Int ) = 1
+	}
+	SubShader
+	{
+		// Tags{ "Queue" = "Transparent" }
+		Tags{ "RenderType" = "TransparentCutout"  "Queue" = "AlphaTest+0" }
+		Cull Off
+		CGPROGRAM
+		#pragma surface surf Standard keepalpha addshadow fullforwardshadows
+		void surf( Input i , inout SurfaceOutputStandard o ) { clip( tex2D( _Base_Color, i.uv ).a - _Cutoff ); }
+		ENDCG
+	}
+	Fallback "Diffuse"
+}
+"""
+
+
+class ShaderDefaultsTests(unittest.TestCase):
+    """.shader の SubShader の Queue と固定の Cull（#202）。"""
+
+    def test_alpha_test_queue_and_cull_off(self):
+        defaults = shader_defaults(LEAVES, ".shader")
+        self.assertEqual(defaults, ShaderDefaults(queue=2450, render_type="TransparentCutout", cull_off=True))
+        self.assertEqual(defaults.alpha_mode, "cutout")
+
+    def test_render_type_wins_over_queue(self):
+        # AE/AE_Decal は AlphaTest のキューで decal:blend（半透明に重ねる）
+        text = 'Shader "X" { SubShader { Tags { "Queue" = "AlphaTest" "IgnoreProjector" = "True" "RenderType" = "Transparent" } } }'
+        self.assertEqual(shader_defaults(text, ".shader").alpha_mode, "blend")
+        self.assertEqual(ShaderDefaults(queue=2450).alpha_mode, "cutout")
+        self.assertEqual(ShaderDefaults(queue=3000).alpha_mode, "blend")
+        self.assertIsNone(ShaderDefaults(queue=2450, render_type="Opaque").alpha_mode)
+        self.assertIsNone(ShaderDefaults(queue=2000).alpha_mode)
+
+    def test_queue_offset_and_names(self):
+        for tag, queue in (("Transparent-1", 2999), ("Geometry", 2000), ("AlphaTest+51", 2501), ("Overlay", 4000)):
+            text = 'Shader "X" { SubShader { Tags { "RenderType"="Opaque" "Queue" = "%s" } Pass { } } }' % tag
+            self.assertEqual(shader_defaults(text, ".shader").queue, queue, tag)
+            self.assertEqual(shader_defaults(text, ".shader").render_type, "Opaque")
+
+    def test_pass_tags_and_property_cull_are_not_defaults(self):
+        # Pass の Tags の Queue は Unity が使わない。Cull [_Cull] はマテリアルのプロパティで決まる
+        text = 'Shader "X" { SubShader { Pass { Tags { "Queue"="Transparent" "LightMode"="ForwardBase" } Cull [_Cull] } } }'
+        self.assertEqual(shader_defaults(text, ".shader"), ShaderDefaults())
+
+    def test_without_subshader_or_graph(self):
+        self.assertEqual(shader_defaults('Shader "X" { Properties { } }', ".shader"), ShaderDefaults())
+        self.assertEqual(shader_defaults(graph_v2("_Color"), ".shadergraph"), ShaderDefaults())
+
+    def test_cutout_from_shader_queue(self):
+        # 前のシェーダー（Standard の Opaque）の _Mode と _SrcBlend が残っていても、宣言されていないので読まず、
+        # シェーダーの Queue（AlphaTest）で切り抜く。_Cutoff はマテリアルの値。両面
+        text = mat_yaml(
+            "Flowers", CUSTOM, tex=[("_Base_Color", TEX_A, (1, 1), (0, 0)), ("_MainTex", TEX_N, (1, 1), (0, 0))],
+            floats=[("_Cutoff", 0.5), ("_Mode", 0), ("_SrcBlend", 1), ("_DstBlend", 0)],
+        )
+        mat = parse_material(text)
+        self.assertEqual(mat.render_queue, -1)  # シェーダーの既定のまま
+        n = normalize_material(mat, declared=declared_properties(LEAVES, ".shader"), defaults=shader_defaults(LEAVES, ".shader"))
+        self.assertEqual((n.alpha_mode, n.alpha_cutoff, n.alpha_from_texture), ("cutout", 0.5, True))
+        self.assertFalse(n.cull_backface)
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        # 定義が無ければこれまでどおり（不透明・片面）
+        n = normalize_material(mat)
+        self.assertEqual((n.alpha_mode, n.cull_backface), ("opaque", True))
+
+    def test_material_queue_and_cull_win(self):
+        # マテリアルが Render Queue を上書きしていればそれを使い、カリングのプロパティがあればそれに従う
+        text = mat_yaml("Solid", CUSTOM, tex=[("_Base_Color", TEX_A, (1, 1), (0, 0))], floats=[("_Cull", 2)], queue=2000)
+        shader = LEAVES.replace("_Cutoff(", '_Cull("Cull", Float) = 2\n\t\t_Cutoff(')
+        n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+        self.assertEqual((n.alpha_mode, n.cull_backface), ("opaque", True))
+
+    def test_table_shader_ignores_defaults(self):
+        text = mat_yaml("Std", STANDARD, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], floats=[("_Mode", 0)])
+        n = normalize_material(parse_material(text), defaults=ShaderDefaults(queue=2450, cull_off=True))
+        self.assertEqual((n.alpha_mode, n.cull_backface), ("opaque", True))
 
 
 if __name__ == "__main__":

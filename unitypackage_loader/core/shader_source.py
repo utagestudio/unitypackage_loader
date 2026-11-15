@@ -3,17 +3,22 @@
 シェーダーを切り替えたマテリアルには、前のシェーダーのプロパティが残る（Unity は切り替えてもプロパティを消さない）。
 Standard / URP / HDRP の名前を決まった順に読むと、いまのシェーダーが使わない残りを拾ってしまうので、
 定義があるシェーダーでは宣言されたものだけを読む（#118）。シェーダーの処理そのものは解釈しない。
+
+.shader からは、マテリアルが上書きしていないときに Unity が使う描画の既定（SubShader の ``RenderType`` / ``Queue`` タグと、固定の ``Cull``）も読む
+（``shader_defaults``。#202）。アルファで切り抜くかどうかがシェーダーの中だけで決まっている自作シェーダーのため。
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from .material import UnityMaterial
 
-__all__ = ["SHADER_SOURCE_EXTS", "ShaderSourceError", "declared_properties", "restrict_to_declared"]
+__all__ = [
+    "SHADER_SOURCE_EXTS", "ShaderDefaults", "ShaderSourceError", "declared_properties", "restrict_to_declared", "shader_defaults",
+]
 
 SHADER_SOURCE_EXTS = frozenset({".shader", ".shadergraph"})
 
@@ -37,8 +42,67 @@ _PROPERTIES = re.compile(r"\bProperties\s*\{")
 _PROPERTY = re.compile(r"(?:\[[^\]\n]*\]\s*)*\b([A-Za-z_]\w*)\s*\(\s*\"")
 
 
+# ShaderLab の Queue の名前と値（"AlphaTest+1" のように足し引きできる）
+_QUEUE_NAMES = {"background": 1000, "geometry": 2000, "alphatest": 2450, "geometrylast": 2500, "transparent": 3000, "overlay": 4000}
+_SUBSHADER = re.compile(r"\bSubShader\s*\{")
+_PASS = re.compile(r"\bPass\s*\{")
+_TAGS = re.compile(r"\bTags\s*\{([^}]*)\}")
+_RENDER_TYPE = re.compile(r"\"RenderType\"\s*=\s*\"\s*(\w+)\s*\"")
+_QUEUE = re.compile(r"\"Queue\"\s*=\s*\"\s*([A-Za-z]+)\s*(?:([+-])\s*(\d+))?\s*\"")
+_CULL = re.compile(r"\bCull\s+(Off|Back|Front)\b", re.I)
+
+
 class ShaderSourceError(ValueError):
     """シェーダーの定義として読めない。"""
+
+
+@dataclass(frozen=True)
+class ShaderDefaults:
+    """.shader の最初の SubShader に書かれた描画の既定（#202）。分からないものは None。"""
+
+    queue: int | None = None  # SubShader の Tags の "Queue"。マテリアルの m_CustomRenderQueue が -1 のときに使われる
+    render_type: str | None = None  # SubShader の Tags の "RenderType"（Opaque / TransparentCutout / Transparent など）
+    cull_off: bool = False  # 最初の Cull が固定の Off（両面）。"Cull [_Cull]" のようにプロパティで決めるものは含めない
+
+    @property
+    def alpha_mode(self) -> str | None:
+        """タグから見たアルファの扱い。RenderType を優先し（AlphaTest のキューで半透明に重ねるデカールがある）、無ければ Queue。"""
+        render_type = (self.render_type or "").lower()
+        if render_type == "transparent":
+            return "blend"
+        if render_type == "transparentcutout":
+            return "cutout"
+        if render_type or self.queue is None:
+            return None
+        if self.queue >= 3000:
+            return "blend"
+        return "cutout" if self.queue >= 2450 else None
+
+
+def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
+    """.shader の描画の既定。.shadergraph（描画の設定はマテリアルのプロパティに出る）や、読めないものは空。"""
+    if ext.lower() != ".shader":
+        return ShaderDefaults()
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+    text = _COMMENT.sub("", text)
+    sub = _SUBSHADER.search(text)
+    if sub is None:
+        return ShaderDefaults()
+    body = text[sub.end():]
+    first_pass = _PASS.search(body)
+    head = body[:first_pass.start()] if first_pass else body  # Pass の Tags の Queue は Unity が使わない
+    queue = render_type = None
+    for tags in _TAGS.finditer(head):
+        match = _QUEUE.search(tags.group(1))
+        if queue is None and match and match.group(1).lower() in _QUEUE_NAMES:
+            queue = _QUEUE_NAMES[match.group(1).lower()]
+            if match.group(2):
+                queue += int(match.group(3)) * (1 if match.group(2) == "+" else -1)
+        match = _RENDER_TYPE.search(tags.group(1))
+        if render_type is None and match:
+            render_type = match.group(1)
+    cull = _CULL.search(body)
+    return ShaderDefaults(queue=queue, render_type=render_type, cull_off=bool(cull and cull.group(1).lower() == "off"))
 
 
 def declared_properties(data: bytes | str, ext: str) -> frozenset[str]:

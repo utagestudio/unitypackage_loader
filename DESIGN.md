@@ -556,7 +556,7 @@ unitypackage_loader/
 │   ├─ placement.py              # 展開した階層からモデルの配置を求める（placements / summarize / ModelCatalog）
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
-│   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
+│   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
 │   ├─ profiles/
@@ -766,6 +766,13 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 - シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないシェーダーは、generic の別名（上記）に当たればそのテクスチャを使い、
   当たらなければ残りで黒くなる代わりに白（テクスチャ無し）になる（Japanese Street の `Leaves.shader` は `_Base_Color` / `_Normal` で、別名を足すまで AE_Flower などが白かった）。
   表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
+- `.shader` からは描画の既定も読む（`shader_defaults`、Issue #202）。最初の `SubShader` の自身の `Tags`（`Pass` の中は Unity がキューに使わないので見ない）の
+  `RenderType` と `Queue`（`AlphaTest+0` のような足し引きも）、最初の固定の `Cull Off / Back / Front`（`Cull [_Cull]` はマテリアルのプロパティに任せる）。
+  表に無いシェーダーで、マテリアルからは不透明としか読めず、`m_CustomRenderQueue` が -1（シェーダーの既定のまま）なら、`RenderType` が `TransparentCutout` なら切り抜き、
+  `Transparent` なら半透明、`RenderType` が無ければ `Queue` で決める（2450 以上で切り抜き、3000 以上で半透明）。`RenderType` を優先するのは、`AE/AE_Decal` が
+  `AlphaTest` のキューで `decal:blend`（半透明に重ねる）だから。マテリアルにカリングのプロパティが無く、シェーダーが固定の `Cull Off` なら両面にする。
+  Tokyo Street の `Flowers`（`AE/Leaves`。`clip(_Base_Color.a - _Cutoff)` で切り抜く両面のシェーダー）が、葉の周りの四角い板ごと不透明に出ていた。
+  手元の 17 パッケージで変わるのは同じ作者の 4 つ（Tokyo Street の Flowers・Decals_Wall、Japanese Street の AE_Flower・AE_Grass_01 が両面に）だけ。
 
 **Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
 
