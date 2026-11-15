@@ -1,0 +1,72 @@
+{
+  "options": { "material_mode": "AUTO", "models": "ALL", "outlines": true, "outline_width_scale": 0.01 },
+  "errors": 0,
+  "objects": { "count": 3, "mesh_count": 3, "armature_count": 0 },
+  "materials": {
+    "count": 5, "mapped": 4, "families": ["", "liltoon", "mtoon", "standard"], "methods": ["external", "none"],
+    "modes": ["PRINCIPLED", "TOON"]
+  },
+  "images": { "count": 4, "packed": false },
+  "warnings_max": 1,
+  "warnings_contain": ["material 'OrphanMat': no matching .mat in package"],
+  "submesh_materials": { "SyntheticToonBody": ["LilHairMat", "LilBodyMat"], "SyntheticToonProp": ["OrphanMat", "ToonStdMat"] },
+  "outlines": { "count": 2, "objects": { "SyntheticToonBody": 0.001, "SyntheticToonFace": 0.002, "SyntheticToonProp": null } },
+  "material_checks": [
+    { "name": "LilBodyMat", "mode": "TOON", "method": "external", "alpha_mode": "opaque", "render_method": "DITHERED", "backface_culling": false,
+      "shader_name": "lts_o", "base_image": "ToonColor.png", "has_unity_data": true,
+      "node_groups": ["UnityToon"], "node_types": ["ShaderNodeNormalMap"], "node_types_absent": ["ShaderNodeBsdfPrincipled"] },
+    { "name": "LilHairMat", "mode": "TOON", "alpha_mode": "blend", "render_method": "BLENDED", "shader_name": "lts_trans", "node_groups": ["UnityToon"] },
+    { "name": "MToonFaceMat", "mode": "TOON", "alpha_mode": "opaque", "shader_name": "VRM/MToon", "node_groups": ["UnityToon"] },
+    { "name": "ToonStdMat", "mode": "PRINCIPLED", "shader_name": "Standard", "base_image": "ToonColor.png", "normal_image": "ToonNormal.png",
+      "node_groups": [], "emission_strength": 1.0 },
+    { "name": "OrphanMat", "method": "none", "has_unity_data": false, "node_types": ["ShaderNodeBsdfPrincipled"] }
+  ],
+  "steps": [
+    {
+      "operator": "unitypkg.rebuild_material", "select": ["SyntheticToonBody"], "properties": { "mode": "PRINCIPLED" },
+      "checks": { "material_checks": [
+        { "name": "LilBodyMat", "node_groups": [], "node_types": ["ShaderNodeBsdfPrincipled", "ShaderNodeNormalMap"], "base_image": "ToonColor.png" },
+        { "name": "LilHairMat", "node_groups": [], "node_types": ["ShaderNodeBsdfPrincipled"], "render_method": "BLENDED" },
+        { "name": "MToonFaceMat", "node_groups": ["UnityToon"] }
+      ] }
+    },
+    {
+      "operator": "unitypkg.rebuild_material", "select": ["SyntheticToonBody"], "properties": { "mode": "TOON", "scope": "ACTIVE" },
+      "checks": { "material_checks": [
+        { "name": "LilBodyMat", "node_groups": ["UnityToon"], "node_types_absent": ["ShaderNodeBsdfPrincipled"] },
+        { "name": "LilHairMat", "node_groups": [], "node_types": ["ShaderNodeBsdfPrincipled"] }
+      ] }
+    },
+    {
+      "operator": "unitypkg.rebuild_material", "select": ["SyntheticToonFace"], "properties": { "mode": "UNLIT", "force_opaque": true },
+      "checks": { "material_checks": [
+        { "name": "MToonFaceMat", "node_groups": [], "node_types": ["ShaderNodeEmission"], "node_types_absent": ["ShaderNodeBsdfPrincipled"] }
+      ] }
+    },
+    {
+      "operator": "unitypkg.rebuild_material", "select": ["SyntheticToonProp"], "properties": { "mode": "TOON" },
+      "checks": { "material_checks": [
+        { "name": "ToonStdMat", "node_groups": ["UnityToon"] },
+        { "name": "OrphanMat", "node_types": ["ShaderNodeBsdfPrincipled"], "has_unity_data": false }
+      ] }
+    },
+    {
+      "operator": "unitypkg.set_backface_culling", "select": ["SyntheticToonBody"], "properties": { "enable": true },
+      "checks": { "material_checks": [
+        { "name": "LilBodyMat", "backface_culling": true },
+        { "name": "LilHairMat", "backface_culling": false }
+      ] }
+    },
+    {
+      "operator": "unitypkg.remove_outlines", "select": ["SyntheticToonBody"],
+      "checks": { "outlines": { "objects": { "SyntheticToonBody": null, "SyntheticToonFace": 0.002 } },
+                  "submesh_materials": { "SyntheticToonBody": ["LilHairMat", "LilBodyMat"] } }
+    },
+    {
+      "operator": "unitypkg.add_outlines", "select": ["SyntheticToonBody"], "properties": { "width_scale": 0.02 },
+      "checks": { "outlines": { "objects": { "SyntheticToonBody": 0.002 } } }
+    },
+    { "operator": "unitypkg.add_outlines", "select": ["SyntheticToonProp"], "result": "CANCELLED",
+      "checks": { "outlines": { "objects": { "SyntheticToonProp": null } } } }
+  ]
+}

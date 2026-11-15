@@ -11,8 +11,10 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.package import PackageError
 from ..core.report import describe_exception, sanitize_display
+from ..blender import log
 from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
 from . import select_models
+from .common import options_from_operator, report_level
 
 
 class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
@@ -213,6 +215,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         from ..core.report import ImportReport
 
         prefs = get_prefs(context)
+        log.set_verbose(prefs is None or prefs.verbose_log)
         paths = self._selected_paths()
         if not paths:
             self.report({"ERROR"}, "No package selected")
@@ -220,41 +223,8 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         batch = len(paths) > 1
 
         def make_opts() -> ImportOptions:
-            return ImportOptions(
-                # 一括インポート時はダイアログを出さず全モデルを読む
-                models="ALL" if (batch and self.models == "ASK") else self.models,
-                unit=self.unit,
-                arrange=self.arrange,
-                scene_lights=self.scene_lights,
-                scene_cameras=self.scene_cameras,
-                scene_exposure=self.scene_exposure,
-                scene_decals=self.scene_decals,
-                hide_lods=self.hide_lods,
-                skip_unused_parts=self.skip_unused_parts,
-                material_mode=self.material_mode,
-                force_opaque=self.force_opaque,
-                backface_culling=self.backface_culling,
-                use_normal_maps=self.use_normal_maps,
-                use_emission=self.use_emission,
-                reuse_existing=self.reuse_existing,
-                store_props=self.store_props,
-                extract_mode=self.extract_mode,
-                extract_path=self.extract_path,
-                pack_images=self.pack_images,
-                import_unreferenced=self.import_unreferenced,
-                overwrite_extracted=self.overwrite_extracted,
-                fbx_importer=self.fbx_importer,
-                use_anim=self.use_anim,
-                ignore_leaf_bones=self.ignore_leaf_bones,
-                global_scale=self.global_scale,
-                import_blend=self.import_blend,
-                blend_materials=self.blend_materials,
-                use_vrm_addon=self.use_vrm_addon,
-                outlines=self.outlines,
-                outline_width_scale=self.outline_width_scale,
-                shader_table_path=prefs.shader_table_path if prefs else "",
-                max_extract_size=(prefs.max_extract_mb << 20) if prefs else 0,
-            )
+            # 一括インポート時はダイアログを出さず全モデルを読む
+            return options_from_operator(self, prefs, models="ALL" if (batch and self.models == "ASK") else self.models)
 
         wm = context.window_manager
         wm.progress_begin(0, 100)
@@ -296,7 +266,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         finally:
             wm.progress_end()
 
-        if prefs is None or prefs.verbose_log:
+        if log.verbose():
             for report in reports:
                 print(report.as_text())
             for f in failures:
@@ -317,8 +287,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 summary += f". {warnings} warning(s) — see the system console"
             self.report({"WARNING" if warnings else "INFO"}, summary)
         else:
-            report = reports[0]
-            self.report({"WARNING" if report.warnings or report.errors else "INFO"}, report.summary())
+            self.report({report_level(reports[0])}, reports[0].summary())
         return {"FINISHED"}
 
 

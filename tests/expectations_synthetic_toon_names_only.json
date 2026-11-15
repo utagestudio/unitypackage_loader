@@ -1,0 +1,24 @@
+{
+  "options": { "material_mode": "NAMES_ONLY", "models": "ALL", "outlines": true },
+  "errors": 0,
+  "objects": { "count": 3 },
+  "materials": { "count": 5, "mapped": 4, "methods": ["external", "none"], "modes": ["NAMES_ONLY"] },
+  "images": { "count": 4 },
+  "warnings_max": 1,
+  "outlines": { "count": 2, "objects": { "SyntheticToonBody": 0.001, "SyntheticToonFace": 0.002, "SyntheticToonProp": null } },
+  "material_checks": [
+    { "name": "LilBodyMat", "mode": "NAMES_ONLY", "has_unity_data": true, "shader_name": "lts_o", "alpha_mode": "opaque",
+      "node_groups": [], "node_types": ["ShaderNodeBsdfPrincipled"], "node_types_absent": ["ShaderNodeTexImage"] },
+    { "name": "LilHairMat", "mode": "NAMES_ONLY", "alpha_mode": "blend", "render_method": "BLENDED", "node_types_absent": ["ShaderNodeTexImage"] },
+    { "name": "OrphanMat", "method": "none", "has_unity_data": false }
+  ],
+  "steps": [
+    {
+      "operator": "unitypkg.rebuild_material", "select": ["SyntheticToonBody"], "properties": { "mode": "AUTO" },
+      "checks": { "material_checks": [
+        { "name": "LilBodyMat", "node_groups": ["UnityToon"], "base_image": "ToonColor.png" },
+        { "name": "LilHairMat", "node_groups": ["UnityToon"] }
+      ] }
+    }
+  ]
+}

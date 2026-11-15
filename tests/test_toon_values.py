@@ -17,7 +17,6 @@ from unitypackage_loader.core.material import (
     MATCAP_NORMAL,
     NormalizedMaterial,
     ToonMatCap,
-    ToonRim,
     ToonShadow,
     parse_material,
     toon_values_from_extras,

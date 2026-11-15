@@ -33,9 +33,13 @@ class MaterialReport:
     family: str = ""
     shader_name: str = ""
     alpha_mode: str = ""
-    mode: str = ""  # PRINCIPLED / UNLIT / NAMES_ONLY
+    mode: str = ""  # PRINCIPLED / TOON / UNLIT / NAMES_ONLY
     textures: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    def describe(self, norm) -> None:
+        """.mat の中間表現（``NormalizedMaterial``）から、シェーダーの系統・名前・透明の扱いを写す。"""
+        self.family, self.shader_name, self.alpha_mode = norm.family, norm.shader_name or "", norm.alpha_mode
 
 
 @dataclass

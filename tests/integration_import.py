@@ -5,8 +5,11 @@
     blender -b --python tests/integration_import.py -- [package.unitypackage] [expectations.json]
 
 引数を省略すると ``_local/unitypackages/`` の最初の .unitypackage と ``_local/expectations.json`` を使う。
-期待値ファイルの書式は ``tests/expectations.schema.md`` を参照。検証用データはリポジトリに
-含めないため、どちらも gitignore 対象。
+期待値ファイルの書式は ``tests/expectations.schema.md`` を参照。合成パッケージの期待値をまとめて回すときは
+``tests/run_integration.py`` を使う。
+
+期待値のキーごとに確認する関数を分け、``CHECKS`` の順に呼ぶ（#199）。読み込みの後にオペレーターを呼ぶ ``steps`` では、
+各手順の ``checks`` を同じ関数で確かめる。
 """
 
 from __future__ import annotations
@@ -15,33 +18,21 @@ import json
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
 from mathutils import Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LOCAL_DIR = REPO_ROOT / "_local"
-PACKAGES_DIR = LOCAL_DIR / "unitypackages"  # 検証用 .unitypackage の置き場
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests._paths import LOCAL_DIR, PACKAGES_DIR, find_package, local_packages  # noqa: E402
+
 # 失敗したときに片付けられているかを数えるデータの種類
 _DATA_KINDS = ("objects", "collections", "meshes", "materials", "images", "armatures", "actions", "lights", "cameras")
-
-
-def _local_packages() -> list[Path]:
-    """検証用の .unitypackage。``_local/unitypackages/`` を先に、続けて ``_local/`` 直下を探す。"""
-    found: list[Path] = []
-    for directory in (PACKAGES_DIR, LOCAL_DIR):
-        if directory.is_dir():
-            found += sorted(directory.glob("*.unitypackage"))
-    return found
-
-
-def _find_package(name: str) -> Path | None:
-    """ファイル名から検証用パッケージを探す。見つからなければ ``None``。"""
-    for candidate in (PACKAGES_DIR / name, LOCAL_DIR / name):
-        if candidate.is_file():
-            return candidate
-    return None
 
 
 def _args() -> tuple[Path, Path]:
@@ -54,7 +45,7 @@ def _args() -> tuple[Path, Path]:
     else:
         # 期待値ファイルの "package" キー（ファイル名）→ 無ければ最初のパッケージ
         named = json.loads(expectations.read_text("utf-8")).get("package")
-        package = _find_package(named) if named else next(iter(_local_packages()), None)
+        package = find_package(named) if named else next(iter(local_packages()), None)
         if package is None:
             raise SystemExit(f"package not found in {PACKAGES_DIR}: {named or '*.unitypackage'}")
     if not package.is_file():
@@ -64,8 +55,6 @@ def _args() -> tuple[Path, Path]:
 
 def _register_from_repo() -> None:
     """symlink 先ではなくリポジトリの実体をそのまま登録する。"""
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
     import unitypackage_loader
 
     unitypackage_loader.register()
@@ -93,6 +82,28 @@ class Check:
             self.passed += 1
         else:
             self.failures.append(f"{label}: {detail or 'condition failed'}")
+
+    def close(self, label: str, actual: float, expected: float, tolerance: float) -> None:
+        self.true(label, abs(actual - expected) <= tolerance, f"expected {expected}, got {actual}")
+
+    def near(self, label: str, actual: Vector, expected, tolerance: float = 1e-3) -> None:
+        self.true(label, (actual - Vector(expected)).length <= tolerance,
+                  f"expected {expected}, got {[round(v, 4) for v in actual]}")
+
+
+@dataclass
+class Context:
+    """確認する関数に渡すもの。``exp`` はいま確かめている期待値（``steps`` の中では手順の ``checks``）。"""
+
+    c: Check
+    exp: dict
+    report: object  # core.report.ImportReport
+    package: Path
+
+
+# ---------------------------------------------------------------------------
+# 探すためのヘルパー
+# ---------------------------------------------------------------------------
 
 
 def _strip_suffix(name: str) -> str:
@@ -136,6 +147,475 @@ def _image_of(mat: bpy.types.Material, label: str):
     return None
 
 
+def _principled(mat: bpy.types.Material):
+    return next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+
+
+def _mat_files(materials) -> list[str]:
+    """マテリアルの元の .mat のファイル名（unity_material_path の末尾）。読み直すと名前に連番が付くので、こちらで比べる。"""
+    return sorted({m.get("unity_material_path", "").rsplit("/", 1)[-1] for m in materials if m is not None})
+
+
+# ---------------------------------------------------------------------------
+# 期待値のキーごとの確認
+# ---------------------------------------------------------------------------
+
+
+def check_result_state(ctx: Context) -> None:
+    """片付け（``leaves_nothing``）と、成否によらず元に戻っているはずのもの。"""
+    c, exp, report = ctx.c, ctx.exp, ctx.report
+    if "errors" in exp:
+        c.eq("error count", len(report.errors), exp["errors"])
+    # 読み込み中だけビューレイヤーから外すパッケージのコレクションと、作業用のコレクション（#75）は、成否によらず元に戻っている
+    c.eq("staging collections left", [x.name for x in bpy.data.collections if x.name.endswith("(importing)")], [])
+    excluded: list[str] = []
+    pending = list(bpy.context.view_layer.layer_collection.children)
+    while pending:
+        layer = pending.pop()
+        if layer.exclude:
+            excluded.append(layer.name)
+        pending.extend(layer.children)
+    c.eq("excluded layer collections", excluded, [])
+    # マテリアルのノードの組み立ては、失敗しても警告にして続ける。期待値に書いていなくても失敗は見逃さない
+    c.eq("node build failures", [w for w in report.warnings if "node build failed" in w], [])
+
+
+def check_objects(ctx: Context) -> None:
+    c, objs = ctx.c, ctx.exp.get("objects", {})
+    if "count" in objs:
+        c.eq("object count", len(ctx.report.objects), objs["count"])
+    if "mesh_count" in objs:
+        c.eq("mesh count", sum(1 for o in bpy.data.objects if o.type == "MESH"), objs["mesh_count"])
+    if "armature_count" in objs:
+        c.eq("armature count", sum(1 for o in bpy.data.objects if o.type == "ARMATURE"), objs["armature_count"])
+
+
+def check_materials(ctx: Context) -> None:
+    c, report, mats = ctx.c, ctx.report, ctx.exp.get("materials", {})
+    if "count" in mats:
+        c.eq("material count", len(report.materials), mats["count"])
+    if "mapped" in mats:
+        c.eq("mapped materials", report.mapped_count, mats["mapped"])
+    if "families" in mats:
+        c.eq("shader families", sorted({m.family for m in report.materials}), sorted(mats["families"]))
+    if "methods" in mats:
+        c.eq("mapping methods", sorted({m.method for m in report.materials}), sorted(mats["methods"]))
+    if "modes" in mats:
+        c.eq("material modes", sorted({m.mode for m in report.materials if m.mode}), sorted(mats["modes"]))
+
+
+def check_images(ctx: Context) -> None:
+    c, images = ctx.c, ctx.exp.get("images", {})
+    if "count" in images:
+        c.eq("image count", len(ctx.report.images), images["count"])
+    if "packed" in images:
+        # レポートに載った画像（このアドオンが読み込んだもの）がすべて .blend に取り込まれているか
+        unpacked = [n for n in ctx.report.images if bpy.data.images.get(n) is None or bpy.data.images[n].packed_file is None]
+        c.eq("images not packed", unpacked if images["packed"] else [], [])
+
+
+def check_warnings(ctx: Context) -> None:
+    c, exp, report = ctx.c, ctx.exp, ctx.report
+    if "warnings_max" in exp:
+        c.le("warning count", len(report.warnings), exp["warnings_max"])
+    for text in exp.get("warnings_contain", []):
+        c.true(f"warning contains {text!r}", any(text in w for w in report.warnings))
+    for text in exp.get("warnings_exclude", []):
+        c.eq(f"warnings without {text!r}", [w for w in report.warnings if text in w], [])
+    if "split_slots" in exp:
+        c.eq("split slots", report.split_slots, exp["split_slots"])
+
+
+def check_submesh_materials(ctx: Context) -> None:
+    """ポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、
+    どのポリゴン群にどのマテリアルが付いたかを確かめる。"""
+    c = ctx.c
+    for obj_name, names in ctx.exp.get("submesh_materials", {}).items():
+        obj = bpy.data.objects.get(obj_name)
+        c.true(f"object {obj_name} exists", obj is not None)
+        if obj is None:
+            continue
+        seen: list[int] = []
+        for polygon in obj.data.polygons:
+            if polygon.material_index not in seen:
+                seen.append(polygon.material_index)
+        slots = obj.material_slots
+        actual = [slots[i].material.name if i < len(slots) and slots[i].material else "" for i in seen]
+        c.eq(f"{obj_name}.submesh_materials", actual, names)
+
+
+def _check_bsdf_inputs(c: Check, name: str, mat, expected: dict) -> None:
+    """Principled の入力の値（つながっていれば "linked"。#117）。"""
+    bsdf = _principled(mat)
+    for key, value in expected.items():
+        sock = bsdf.inputs[key] if bsdf is not None else None
+        if sock is None:
+            actual = None
+        elif sock.is_linked:
+            actual = "linked"
+        elif hasattr(sock.default_value, "__len__"):
+            actual = [round(v, 4) for v in sock.default_value[:3]]
+        else:
+            actual = round(sock.default_value, 4)
+        c.eq(f"{name}.bsdf.{key}", actual, value)
+
+
+def check_material_checks(ctx: Context) -> None:
+    c, report = ctx.c, ctx.report
+    for spec in ctx.exp.get("material_checks", []):
+        name = spec["name"]
+        mat = bpy.data.materials.get(name)
+        if spec.get("absent"):  # 作られていない（同名のマテリアルを使ったときの連番付きの名前など）
+            c.true(f"material {name} absent", mat is None)
+            continue
+        c.true(f"material {name} exists", mat is not None)
+        if mat is None:
+            continue
+        for key, value in spec.get("props", {}).items():  # カスタムプロパティの値（無ければ None）
+            c.eq(f"{name}[{key!r}]", mat.get(key), value)
+        if "alpha_mode" in spec:
+            c.eq(f"{name}.alpha_mode", mat.get("unity_alpha_mode"), spec["alpha_mode"])
+        if "render_method" in spec:
+            c.eq(f"{name}.surface_render_method", mat.surface_render_method, spec["render_method"])
+        if "backface_culling" in spec:
+            c.eq(f"{name}.use_backface_culling", mat.use_backface_culling, spec["backface_culling"])
+        if "alpha_linked" in spec:  # 出力につながる BSDF の Alpha に何かがつながっているか（テクスチャのアルファで透けるか）
+            bsdf = _principled(mat)
+            c.eq(f"{name}.alpha_linked", bool(bsdf and bsdf.inputs["Alpha"].is_linked), spec["alpha_linked"])
+        if "mode" in spec:
+            rep = next((m for m in report.materials if m.blender_name == name), None)
+            c.eq(f"{name}.mode", rep.mode if rep else None, spec["mode"])
+        if "method" in spec:
+            rep = next((m for m in report.materials if m.blender_name == name), None)
+            c.eq(f"{name}.method", rep.method if rep else None, spec["method"])
+        if "shader_name" in spec:
+            c.eq(f"{name}.shader_name", mat.get("unity_shader_name"), spec["shader_name"])
+        if "has_unity_data" in spec:  # Unity の情報（unity_normalized など）をカスタムプロパティに残したか
+            c.eq(f"{name}.has_unity_data", "unity_normalized" in mat, spec["has_unity_data"])
+        for role, label in (("base", "Base Color"), ("normal", "Normal")):
+            key = f"{role}_image"
+            if key in spec:
+                image = _image_of(mat, label) or (_image_of(mat, f"{label} (unused)") if role == "normal" else None)
+                c.eq(f"{name}.{key}", image.name if image else None, spec[key])
+                if image is not None and f"{role}_colorspace" in spec:
+                    c.eq(f"{name}.{role}_colorspace", image.colorspace_settings.name, spec[f"{role}_colorspace"])
+        if "emission_strength" in spec or "emission_color" in spec:
+            bsdf = _principled(mat)
+            c.true(f"{name} has Principled BSDF", bsdf is not None)
+            if bsdf is not None and "emission_strength" in spec:
+                c.eq(f"{name}.emission_strength", round(bsdf.inputs["Emission Strength"].default_value, 4), spec["emission_strength"])
+            if bsdf is not None and "emission_color" in spec:
+                actual = [round(v, 4) for v in bsdf.inputs["Emission Color"].default_value[:3]]
+                c.eq(f"{name}.emission_color", actual, spec["emission_color"])
+        if "smoothness_scale" in spec:
+            # Roughness = 1 - Smoothness の元に掛けた倍率（倍率 1 なら掛け算のノードは無い。#112）
+            nodes = mat.node_tree.nodes
+            inverted = any(n.type == "MATH" and n.label.startswith("Roughness = 1 - Smoothness") for n in nodes)
+            scale = next((n.inputs[1].default_value for n in nodes if n.type == "MATH" and n.label.startswith("Smoothness ×")), 1.0)
+            c.eq(f"{name}.smoothness_scale", round(scale, 4) if inverted else None, spec["smoothness_scale"])
+        if "bsdf_inputs" in spec:
+            _check_bsdf_inputs(c, name, mat, spec["bsdf_inputs"])
+        for key, value in spec.get("normalized", {}).items():
+            # 中間表現（unity_normalized）の値。色は 4 桁に丸めて比べる（#118）
+            actual = json.loads(mat.get("unity_normalized", "{}")).get(key)
+            if isinstance(actual, list):
+                actual = [round(v, 4) if isinstance(v, float) else v for v in actual]
+            c.eq(f"{name}.normalized.{key}", actual, value)
+        node_types = {n.bl_idname for n in mat.node_tree.nodes} if mat.node_tree else set()
+        if "node_types" in spec:
+            c.true(f"{name}.node_types", set(spec["node_types"]) <= node_types, f"missing {set(spec['node_types']) - node_types}")
+        if "node_types_absent" in spec:
+            c.eq(f"{name}.node_types_absent", sorted(set(spec["node_types_absent"]) & node_types), [])
+        if "node_groups" in spec:  # ノードグループのノードが使うグループの名前（Toon の UnityToon など）
+            groups = sorted({n.node_tree.name for n in mat.node_tree.nodes if n.type == "GROUP" and n.node_tree} if mat.node_tree else set())
+            c.eq(f"{name}.node_groups", groups, sorted(spec["node_groups"]))
+
+
+def check_outlines(ctx: Context) -> None:
+    """アウトライン（Solidify。``outlines`` オプションと、アウトラインのオペレーター）。
+
+    ``count`` はレポートのアウトラインの数、``objects`` はオブジェクト名 → Solidify の厚さ（付いていなければ null）。
+    """
+    c, spec = ctx.c, ctx.exp.get("outlines")
+    if spec is None:
+        return
+    if "count" in spec:
+        c.eq("report outlines", ctx.report.outlines, spec["count"])
+    for obj_name, thickness in spec.get("objects", {}).items():
+        obj = bpy.data.objects.get(obj_name)
+        c.true(f"object {obj_name} exists", obj is not None)
+        if obj is None:
+            continue
+        mod = obj.modifiers.get("UnityOutline")
+        if thickness is None:
+            c.true(f"{obj_name} has no outline", mod is None)
+            continue
+        c.true(f"{obj_name} has an outline", mod is not None and mod.type == "SOLIDIFY")
+        if mod is not None:
+            c.close(f"{obj_name}.outline thickness", mod.thickness, thickness, 1e-5)
+
+
+def check_prefabs(ctx: Context) -> None:
+    if "count" in ctx.exp.get("prefabs", {}):
+        ctx.c.eq("prefab count", len(ctx.report.prefabs), ctx.exp["prefabs"]["count"])
+
+
+def check_collections(ctx: Context) -> None:
+    """読み込む単位 Prefabs で prefab ごとに作られるコレクション。マテリアルは Blender 上の名前ではなく、
+    元の .mat のファイル名（unity_material_path の末尾）で比べる（同じモデルを読み直すと名前に連番が付くため）。"""
+    c = ctx.c
+    for coll_name, spec in ctx.exp.get("collections", {}).items():
+        coll = bpy.data.collections.get(coll_name)
+        c.true(f"collection {coll_name} exists", coll is not None)
+        if coll is None:
+            continue
+        objects = list(coll.all_objects)
+        if "objects" in spec:
+            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
+        if "prefab" in spec:
+            c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
+        if "mat_files" in spec:
+            mats = [slot.material for obj in objects if obj.type == "MESH" for slot in obj.material_slots]
+            c.eq(f"{coll_name}.mat_files", _mat_files(mats), sorted(spec["mat_files"]))
+        # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
+        for obj_name, part in spec.get("parts", {}).items():
+            obj = next((o for o in objects if o.name == obj_name), None)
+            if part.get("absent"):  # 読み込まないもの（使われていない部品。#152）
+                c.true(f"{coll_name}/{obj_name} absent", obj is None)
+                continue
+            c.true(f"{coll_name}/{obj_name} exists", obj is not None)
+            if obj is None:
+                continue
+            if "hidden" in part:
+                c.eq(f"{coll_name}/{obj_name}.hidden", obj.hide_get(), part["hidden"])
+            if "lod" in part:
+                c.eq(f"{coll_name}/{obj_name}.lod", obj.get("unity_lod"), part["lod"])
+
+
+def check_prefab_overlap(ctx: Context) -> None:
+    if "prefab_collections_overlap" not in ctx.exp:
+        return
+    bpy.context.view_layer.update()
+    boxes = []
+    for coll in bpy.data.collections:
+        if coll.get("unity_prefab") is None:
+            continue
+        xs, ys = [], []
+        for obj in coll.all_objects:
+            if obj.type != "MESH":
+                continue
+            for corner in obj.bound_box:
+                p = obj.matrix_world @ Vector(corner)
+                xs.append(p.x)
+                ys.append(p.y)
+        if xs:
+            boxes.append((coll.name, min(xs), max(xs), min(ys), max(ys)))
+    overlaps = [
+        (a[0], b[0])
+        for i, a in enumerate(boxes)
+        for b in boxes[i + 1 :]
+        if a[1] < b[2] and b[1] < a[2] and a[3] < b[4] and b[3] < a[4]
+    ]
+    ctx.c.eq("prefab collections overlap", bool(overlaps), ctx.exp["prefab_collections_overlap"])
+
+
+def check_scenes(ctx: Context) -> None:
+    if "count" in ctx.exp.get("scenes", {}):
+        ctx.c.eq("scene count", len(ctx.report.scenes), ctx.exp["scenes"]["count"])
+
+
+def check_placed_objects(ctx: Context) -> None:
+    """読み込む単位 Scenes で配置したオブジェクト。複製すると名前に連番が付くので、最上位の Empty（Unity の最上位の
+    GameObject）の名前とオブジェクト名（連番を除く）で探す。parent があれば直接の親の Empty の名前でも絞る。
+    tip は重心から最も遠い頂点のワールド座標。"""
+    c = ctx.c
+    for spec in ctx.exp.get("placed_objects", []):
+        label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
+        found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
+        if spec.get("absent"):  # 読み込まないもの（使われていない部品。#152）
+            c.eq(f"{label} found", len(found), 0)
+            continue
+        c.eq(f"{label} found", len(found), 1)
+        if len(found) != 1:
+            continue
+        obj = found[0]
+        if "tip" in spec:
+            c.near(f"{label}.tip", _tip_world(obj), spec["tip"])
+        if "bbox" in spec:  # ワールドの範囲 [x0, y0, z0, x1, y1, z1]（頂点が 1 つに決まらない組み込みメッシュなど。#190）
+            bpy.context.view_layer.update()
+            corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+            box = [min(v[i] for v in corners) for i in range(3)] + [max(v[i] for v in corners) for i in range(3)]
+            c.true(f"{label}.bbox", all(abs(a - b) <= 1e-3 for a, b in zip(box, spec["bbox"])),
+                   f"expected {spec['bbox']}, got {[round(v, 4) for v in box]}")
+        if "normal" in spec:  # 最初の面のワールドでの法線（表の向き）
+            c.near(f"{label}.normal", (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized(), spec["normal"])
+        if "hidden" in spec:
+            c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "lod" in spec:
+            c.eq(f"{label}.lod", obj.get("unity_lod"), spec["lod"])
+        if "mat_files" in spec:
+            c.eq(f"{label}.mat_files", _mat_files(s.material for s in obj.material_slots), sorted(spec["mat_files"]))
+
+
+_LIGHT_ATTRS = ("type", "sensor_fit", "shape", "use_shadow", "use_custom_distance", "use_temperature")
+_LIGHT_NUMBERS = ("energy", "lens", "ortho_scale", "clip_end", "cutoff_distance", "temperature", "spot_size", "spot_blend", "size", "size_y")
+
+
+def check_lights_and_cameras(ctx: Context) -> None:
+    """シーンのライト・カメラ（#49）。direction はオブジェクトの -Z（ライト・カメラの向き）のワールドでの向き。"""
+    c, exp = ctx.c, ctx.exp
+    if not (exp.get("lights") or exp.get("cameras")):
+        return
+    bpy.context.view_layer.update()
+    for key, kind in (("lights", "LIGHT"), ("cameras", "CAMERA")):
+        for spec in exp.get(key, []):
+            obj = bpy.data.objects.get(spec["name"])
+            label = f"{kind.lower()} {spec['name']}"
+            c.true(f"{label} exists", obj is not None and obj.type == kind)
+            if obj is None or obj.type != kind:
+                continue
+            for attr in _LIGHT_ATTRS:
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", getattr(obj.data, attr), spec[attr])
+            for attr in _LIGHT_NUMBERS:
+                if attr in spec:
+                    c.close(f"{label}.{attr}", getattr(obj.data, attr), spec[attr], 1e-3 * max(1.0, abs(spec[attr])))
+            if "direction" in spec:
+                c.near(f"{label}.direction", (obj.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized(), spec["direction"])
+            if "location" in spec:
+                c.near(f"{label}.location", obj.matrix_world.translation, spec["location"])
+            if "hidden" in spec:
+                c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+            if "light_scale" in spec:  # HDRP の露出の分としてライトに掛けた倍率（#130）
+                c.close(f"{label}.light_scale", obj.get("unity_light_scale", 1.0), spec["light_scale"], 1e-3 * spec["light_scale"])
+            # 強さの換算に使ったパイプラインと、その根拠（#120）
+            for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
+                if attr in spec:
+                    c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
+
+
+def check_dialog_selected(ctx: Context) -> None:
+    """選択ダイアログの候補で、既定でチェックが入るもの（#134: Scenes は最初の読み込めるシーンだけ）。"""
+    if "dialog_selected" not in ctx.exp:
+        return
+    from unitypackage_loader.blender import importer
+    from unitypackage_loader.operators import select_models
+
+    prepared = importer.prepare_package(str(ctx.package))
+    items = select_models.dialog_items(bpy.context)
+    items.clear()
+    select_models.add_prefab_and_model_items(items, prepared)
+    select_models.add_scene_items(items, prepared)
+    for kind, expected in ctx.exp["dialog_selected"].items():
+        actual = sorted(it.pathname for it in items if it.kind == kind and it.selected)
+        ctx.c.eq(f"dialog selected {kind}", actual, sorted(expected))
+    items.clear()
+
+
+def check_scene_settings(ctx: Context) -> None:
+    c, exp, report = ctx.c, ctx.exp, ctx.report
+    if "scene_exposure" in exp:
+        # シーンの露出は変えない（#130。HDRP の露出はライトの強さに掛ける）
+        c.close("scene exposure", bpy.context.scene.view_settings.exposure, exp["scene_exposure"], 1e-3)
+    if "scene_camera" in exp:
+        camera = bpy.context.scene.camera
+        c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])
+    if "light_count" in exp:
+        c.eq("report lights", report.lights, exp["light_count"])
+    if "camera_count" in exp:
+        c.eq("report cameras", report.cameras, exp["camera_count"])
+    if "decal_count" in exp:
+        c.eq("report decals", report.decals, exp["decal_count"])
+
+
+def check_shared_meshes(ctx: Context) -> None:
+    c = ctx.c
+    for spec in ctx.exp.get("shared_meshes", []):
+        found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
+        labels = "+".join(f"{o['top']}/{o['object']}" for o in spec["objects"])
+        if all(len(f) == 1 for f in found):
+            shared = len({f[0].data.name for f in found}) == 1
+            c.eq(f"{labels} share mesh data", shared, spec["shared"])
+        else:
+            c.true(f"{labels} found", False, "objects not found")
+
+
+def check_shape_keys(ctx: Context) -> None:
+    c = ctx.c
+    for obj_name, count in ctx.exp.get("shape_keys", {}).items():
+        obj = bpy.data.objects.get(obj_name)
+        c.true(f"object {obj_name} exists", obj is not None)
+        if obj is not None:
+            actual = len(obj.data.shape_keys.key_blocks) if obj.data.shape_keys else 0
+            c.eq(f"{obj_name}.shape_keys", actual, count)
+
+
+# 読み込みの後に、この順で確かめる。``steps`` の手順の ``checks`` も同じ表で確かめる（片付けの確認を除く）
+CHECKS: list[Callable[[Context], None]] = [
+    check_objects,
+    check_materials,
+    check_images,
+    check_warnings,
+    check_submesh_materials,
+    check_material_checks,
+    check_outlines,
+    check_prefabs,
+    check_collections,
+    check_prefab_overlap,
+    check_scenes,
+    check_placed_objects,
+    check_lights_and_cameras,
+    check_dialog_selected,
+    check_scene_settings,
+    check_shared_meshes,
+    check_shape_keys,
+]
+
+
+# ---------------------------------------------------------------------------
+# 読み込みの前後の操作
+# ---------------------------------------------------------------------------
+
+
+def prepare_before(exp: dict) -> None:
+    """読み込む前の .blend の状態を作る（``before``）。``materials`` に挙げた名前の空のマテリアルを作る
+    （同名のマテリアルを使う ``reuse_existing`` の確認に使う）。"""
+    for name in exp.get("before", {}).get("materials", []):
+        mat = bpy.data.materials.new(name)
+        mat["test_preexisting"] = True
+
+
+def run_steps(ctx: Context) -> None:
+    """読み込みの後にオペレーターを呼び、手順ごとの ``checks`` を確かめる（``steps``）。
+
+    手順は ``operator``（``unitypkg.rebuild_material`` のような名前）、``select``（選ぶオブジェクト名。最初のものを
+    アクティブにする）、``properties``、``result``（既定は FINISHED）、``checks``（``CHECKS`` と同じ書式）。
+    """
+    for index, step in enumerate(ctx.exp.get("steps", [])):
+        label = f"step {index + 1} ({step['operator']})"
+        names = step.get("select", [])
+        objects = [bpy.data.objects.get(n) for n in names]
+        ctx.c.true(f"{label}: objects exist", all(o is not None for o in objects), f"missing {names}")
+        for obj in bpy.context.view_layer.objects:
+            obj.select_set(False)
+        for obj in objects:
+            if obj is not None:
+                obj.hide_set(False)
+                obj.select_set(True)
+        if objects and objects[0] is not None:
+            bpy.context.view_layer.objects.active = objects[0]
+        module, name = step["operator"].split(".")
+        try:
+            result = getattr(getattr(bpy.ops, module), name)("EXEC_DEFAULT", **step.get("properties", {}))
+        except RuntimeError as exc:
+            print(f"{label}: operator error: {exc}")
+            result = {"CANCELLED"}
+        ctx.c.eq(f"{label}: result", set(result), {step.get("result", "FINISHED")})
+        sub = Context(ctx.c, step.get("checks", {}), ctx.report, ctx.package)
+        for check in CHECKS:
+            check(sub)
+
+
 def main() -> int:
     package, expectations_path = _args()
     exp = json.loads(expectations_path.read_text("utf-8"))
@@ -152,6 +632,7 @@ def main() -> int:
 
     from unitypackage_loader.blender import importer
 
+    prepare_before(exp)
     extract_dir = tempfile.mkdtemp(prefix="unitypackage_loader_test_")
     options = {"filepath": str(package), "extract_mode": "CUSTOM", "extract_path": extract_dir}
     options.update(exp.get("options", {}))
@@ -168,312 +649,15 @@ def main() -> int:
     c.true("report exists", report is not None)
     if report is None:
         return _finish(c)
-    if "errors" in exp:
-        c.eq("error count", len(report.errors), exp["errors"])
     if exp.get("leaves_nothing"):
         for name in _DATA_KINDS:
             c.eq(f"{name} left behind", len(getattr(bpy.data, name)), counts_before[name])
-    # 読み込み中だけビューレイヤーから外すパッケージのコレクションと、作業用のコレクション（#75）は、成否によらず元に戻っている
-    c.eq("staging collections left", [x.name for x in bpy.data.collections if x.name.endswith("(importing)")], [])
-    excluded: list[str] = []
-    pending = list(bpy.context.view_layer.layer_collection.children)
-    while pending:
-        layer = pending.pop()
-        if layer.exclude:
-            excluded.append(layer.name)
-        pending.extend(layer.children)
-    c.eq("excluded layer collections", excluded, [])
-    # マテリアルのノードの組み立ては、失敗しても警告にして続ける。期待値に書いていなくても失敗は見逃さない
-    c.eq("node build failures", [w for w in report.warnings if "node build failed" in w], [])
 
-    objs = exp.get("objects", {})
-    meshes = [o for o in bpy.data.objects if o.type == "MESH"]
-    armatures = [o for o in bpy.data.objects if o.type == "ARMATURE"]
-    if "count" in objs:
-        c.eq("object count", len(report.objects), objs["count"])
-    if "mesh_count" in objs:
-        c.eq("mesh count", len(meshes), objs["mesh_count"])
-    if "armature_count" in objs:
-        c.eq("armature count", len(armatures), objs["armature_count"])
-
-    mats = exp.get("materials", {})
-    if "count" in mats:
-        c.eq("material count", len(report.materials), mats["count"])
-    if "mapped" in mats:
-        c.eq("mapped materials", report.mapped_count, mats["mapped"])
-    if "families" in mats:
-        c.eq("shader families", sorted({m.family for m in report.materials}), sorted(mats["families"]))
-    if "methods" in mats:
-        c.eq("mapping methods", sorted({m.method for m in report.materials}), sorted(mats["methods"]))
-
-    if "count" in exp.get("images", {}):
-        c.eq("image count", len(report.images), exp["images"]["count"])
-    if "warnings_max" in exp:
-        c.le("warning count", len(report.warnings), exp["warnings_max"])
-    for text in exp.get("warnings_contain", []):
-        c.true(f"warning contains {text!r}", any(text in w for w in report.warnings))
-    for text in exp.get("warnings_exclude", []):
-        c.eq(f"warnings without {text!r}", [w for w in report.warnings if text in w], [])
-    if "split_slots" in exp:
-        c.eq("split slots", report.split_slots, exp["split_slots"])
-
-    # ポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、
-    # どのポリゴン群にどのマテリアルが付いたかを確かめる
-    for obj_name, names in exp.get("submesh_materials", {}).items():
-        obj = bpy.data.objects.get(obj_name)
-        c.true(f"object {obj_name} exists", obj is not None)
-        if obj is None:
-            continue
-        seen: list[int] = []
-        for polygon in obj.data.polygons:
-            if polygon.material_index not in seen:
-                seen.append(polygon.material_index)
-        slots = obj.material_slots
-        actual = [slots[i].material.name if i < len(slots) and slots[i].material else "" for i in seen]
-        c.eq(f"{obj_name}.submesh_materials", actual, names)
-
-    for spec in exp.get("material_checks", []):
-        name = spec["name"]
-        mat = bpy.data.materials.get(name)
-        c.true(f"material {name} exists", mat is not None)
-        if mat is None:
-            continue
-        if "alpha_mode" in spec:
-            c.eq(f"{name}.alpha_mode", mat.get("unity_alpha_mode"), spec["alpha_mode"])
-        if "render_method" in spec:
-            c.eq(f"{name}.surface_render_method", mat.surface_render_method, spec["render_method"])
-        if "backface_culling" in spec:
-            c.eq(f"{name}.use_backface_culling", mat.use_backface_culling, spec["backface_culling"])
-        if "alpha_linked" in spec:  # 出力につながる BSDF の Alpha に何かがつながっているか（テクスチャのアルファで透けるか）
-            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-            c.eq(f"{name}.alpha_linked", bool(bsdf and bsdf.inputs["Alpha"].is_linked), spec["alpha_linked"])
-        if "mode" in spec:
-            rep = next((m for m in report.materials if m.blender_name == name), None)
-            c.eq(f"{name}.mode", rep.mode if rep else None, spec["mode"])
-        if "shader_name" in spec:
-            c.eq(f"{name}.shader_name", mat.get("unity_shader_name"), spec["shader_name"])
-        for role, label in (("base", "Base Color"), ("normal", "Normal")):
-            key = f"{role}_image"
-            if key in spec:
-                image = _image_of(mat, label) or (_image_of(mat, f"{label} (unused)") if role == "normal" else None)
-                c.eq(f"{name}.{key}", image.name if image else None, spec[key])
-                if image is not None and f"{role}_colorspace" in spec:
-                    c.eq(f"{name}.{role}_colorspace", image.colorspace_settings.name, spec[f"{role}_colorspace"])
-        if "emission_strength" in spec or "emission_color" in spec:
-            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-            c.true(f"{name} has Principled BSDF", bsdf is not None)
-            if bsdf is not None and "emission_strength" in spec:
-                c.eq(f"{name}.emission_strength", round(bsdf.inputs["Emission Strength"].default_value, 4), spec["emission_strength"])
-            if bsdf is not None and "emission_color" in spec:
-                actual = [round(v, 4) for v in bsdf.inputs["Emission Color"].default_value[:3]]
-                c.eq(f"{name}.emission_color", actual, spec["emission_color"])
-        if "smoothness_scale" in spec:
-            # Roughness = 1 - Smoothness の元に掛けた倍率（倍率 1 なら掛け算のノードは無い。#112）
-            nodes = mat.node_tree.nodes
-            inverted = any(n.type == "MATH" and n.label.startswith("Roughness = 1 - Smoothness") for n in nodes)
-            scale = next((n.inputs[1].default_value for n in nodes if n.type == "MATH" and n.label.startswith("Smoothness ×")), 1.0)
-            c.eq(f"{name}.smoothness_scale", round(scale, 4) if inverted else None, spec["smoothness_scale"])
-        if "bsdf_inputs" in spec:
-            # Principled の入力の値（つながっていれば "linked"。#117）
-            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-            for key, value in spec["bsdf_inputs"].items():
-                sock = bsdf.inputs[key] if bsdf is not None else None
-                if sock is None:
-                    actual = None
-                elif sock.is_linked:
-                    actual = "linked"
-                elif hasattr(sock.default_value, "__len__"):
-                    actual = [round(v, 4) for v in sock.default_value[:3]]
-                else:
-                    actual = round(sock.default_value, 4)
-                c.eq(f"{name}.bsdf.{key}", actual, value)
-        for key, value in spec.get("normalized", {}).items():
-            # 中間表現（unity_normalized）の値。色は 4 桁に丸めて比べる（#118）
-            actual = json.loads(mat.get("unity_normalized", "{}")).get(key)
-            if isinstance(actual, list):
-                actual = [round(v, 4) if isinstance(v, float) else v for v in actual]
-            c.eq(f"{name}.normalized.{key}", actual, value)
-        if "node_types" in spec:
-            c.true(
-                f"{name}.node_types",
-                set(spec["node_types"]) <= {n.bl_idname for n in mat.node_tree.nodes},
-                f"missing {set(spec['node_types']) - {n.bl_idname for n in mat.node_tree.nodes}}",
-            )
-
-    if "count" in exp.get("prefabs", {}):
-        c.eq("prefab count", len(report.prefabs), exp["prefabs"]["count"])
-
-    # 読み込む単位 Prefabs で prefab ごとに作られるコレクション。マテリアルは Blender 上の名前ではなく、
-    # 元の .mat のファイル名（unity_material_path の末尾）で比べる（同じモデルを読み直すと名前に連番が付くため）
-    for coll_name, spec in exp.get("collections", {}).items():
-        coll = bpy.data.collections.get(coll_name)
-        c.true(f"collection {coll_name} exists", coll is not None)
-        if coll is None:
-            continue
-        objects = list(coll.all_objects)
-        if "objects" in spec:
-            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
-        if "prefab" in spec:
-            c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
-        if "mat_files" in spec:
-            files = {
-                slot.material.get("unity_material_path", "").rsplit("/", 1)[-1]
-                for obj in objects
-                if obj.type == "MESH"
-                for slot in obj.material_slots
-                if slot.material is not None
-            }
-            c.eq(f"{coll_name}.mat_files", sorted(files), sorted(spec["mat_files"]))
-        # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
-        for obj_name, part in spec.get("parts", {}).items():
-            obj = next((o for o in objects if o.name == obj_name), None)
-            if part.get("absent"):  # 読み込まないもの（使われていない部品。#152）
-                c.true(f"{coll_name}/{obj_name} absent", obj is None)
-                continue
-            c.true(f"{coll_name}/{obj_name} exists", obj is not None)
-            if obj is None:
-                continue
-            if "hidden" in part:
-                c.eq(f"{coll_name}/{obj_name}.hidden", obj.hide_get(), part["hidden"])
-            if "lod" in part:
-                c.eq(f"{coll_name}/{obj_name}.lod", obj.get("unity_lod"), part["lod"])
-
-    if "prefab_collections_overlap" in exp:
-        bpy.context.view_layer.update()
-        boxes = []
-        for coll in bpy.data.collections:
-            if coll.get("unity_prefab") is None:
-                continue
-            xs, ys = [], []
-            for obj in coll.all_objects:
-                if obj.type != "MESH":
-                    continue
-                for corner in obj.bound_box:
-                    p = obj.matrix_world @ Vector(corner)
-                    xs.append(p.x)
-                    ys.append(p.y)
-            if xs:
-                boxes.append((coll.name, min(xs), max(xs), min(ys), max(ys)))
-        overlaps = [
-            (a[0], b[0])
-            for i, a in enumerate(boxes)
-            for b in boxes[i + 1 :]
-            if a[1] < b[2] and b[1] < a[2] and a[3] < b[4] and b[3] < a[4]
-        ]
-        c.eq("prefab collections overlap", bool(overlaps), exp["prefab_collections_overlap"])
-
-    if "count" in exp.get("scenes", {}):
-        c.eq("scene count", len(report.scenes), exp["scenes"]["count"])
-
-    # 読み込む単位 Scenes で配置したオブジェクト。複製すると名前に連番が付くので、最上位の Empty（Unity の最上位の
-    # GameObject）の名前とオブジェクト名（連番を除く）で探す。parent があれば直接の親の Empty の名前でも絞る。
-    # tip は重心から最も遠い頂点のワールド座標
-    for spec in exp.get("placed_objects", []):
-        label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
-        found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
-        if spec.get("absent"):  # 読み込まないもの（使われていない部品。#152）
-            c.eq(f"{label} found", len(found), 0)
-            continue
-        c.eq(f"{label} found", len(found), 1)
-        if len(found) != 1:
-            continue
-        obj = found[0]
-        if "tip" in spec:
-            tip = _tip_world(obj)
-            c.true(f"{label}.tip", (tip - Vector(spec["tip"])).length <= 1e-3, f"expected {spec['tip']}, got {[round(v, 4) for v in tip]}")
-        if "bbox" in spec:  # ワールドの範囲 [x0, y0, z0, x1, y1, z1]（頂点が 1 つに決まらない組み込みメッシュなど。#190）
-            bpy.context.view_layer.update()
-            corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-            box = [min(v[i] for v in corners) for i in range(3)] + [max(v[i] for v in corners) for i in range(3)]
-            c.true(f"{label}.bbox", all(abs(a - b) <= 1e-3 for a, b in zip(box, spec["bbox"])),
-                   f"expected {spec['bbox']}, got {[round(v, 4) for v in box]}")
-        if "normal" in spec:  # 最初の面のワールドでの法線（表の向き）
-            normal = (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized()
-            c.true(f"{label}.normal", (normal - Vector(spec["normal"])).length <= 1e-3,
-                   f"expected {spec['normal']}, got {[round(v, 4) for v in normal]}")
-        if "hidden" in spec:
-            c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
-        if "lod" in spec:
-            c.eq(f"{label}.lod", obj.get("unity_lod"), spec["lod"])
-        if "mat_files" in spec:
-            files = sorted({s.material.get("unity_material_path", "").rsplit("/", 1)[-1] for s in obj.material_slots if s.material})
-            c.eq(f"{label}.mat_files", files, sorted(spec["mat_files"]))
-
-    # シーンのライト・カメラ（#49）。direction はオブジェクトの -Z（ライト・カメラの向き）のワールドでの向き
-    bpy.context.view_layer.update()
-    for key, kind in (("lights", "LIGHT"), ("cameras", "CAMERA")):
-        for spec in exp.get(key, []):
-            obj = bpy.data.objects.get(spec["name"])
-            label = f"{kind.lower()} {spec['name']}"
-            c.true(f"{label} exists", obj is not None and obj.type == kind)
-            if obj is None or obj.type != kind:
-                continue
-            for attr in ("type", "sensor_fit", "shape", "use_shadow", "use_custom_distance", "use_temperature"):
-                if attr in spec:
-                    c.eq(f"{label}.{attr}", getattr(obj.data, attr), spec[attr])
-            for attr in ("energy", "lens", "ortho_scale", "clip_end", "cutoff_distance", "temperature", "spot_size", "spot_blend", "size", "size_y"):
-                if attr in spec:
-                    actual = getattr(obj.data, attr)
-                    c.true(f"{label}.{attr}", abs(actual - spec[attr]) <= 1e-3 * max(1.0, abs(spec[attr])), f"expected {spec[attr]}, got {actual}")
-            if "direction" in spec:
-                direction = (obj.matrix_world.to_3x3() @ Vector((0, 0, -1))).normalized()
-                c.true(f"{label}.direction", (direction - Vector(spec["direction"])).length <= 1e-3,
-                       f"expected {spec['direction']}, got {[round(v, 4) for v in direction]}")
-            if "location" in spec:
-                c.true(f"{label}.location", (obj.matrix_world.translation - Vector(spec["location"])).length <= 1e-3,
-                       f"expected {spec['location']}, got {[round(v, 4) for v in obj.matrix_world.translation]}")
-            if "hidden" in spec:
-                c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
-            if "light_scale" in spec:  # HDRP の露出の分としてライトに掛けた倍率（#130）
-                actual = obj.get("unity_light_scale", 1.0)
-                c.true(f"{label}.light_scale", abs(actual - spec["light_scale"]) <= 1e-3 * spec["light_scale"], f"expected {spec['light_scale']}, got {actual}")
-            # 強さの換算に使ったパイプラインと、その根拠（#120）
-            for attr, prop in (("pipeline", "unity_render_pipeline"), ("pipeline_source", "unity_render_pipeline_source")):
-                if attr in spec:
-                    c.eq(f"{label}.{attr}", obj.get(prop), spec[attr])
-    if "dialog_selected" in exp:
-        # 選択ダイアログの候補で、既定でチェックが入るもの（#134: Scenes は最初の読み込めるシーンだけ）
-        from unitypackage_loader.operators import select_models
-
-        prepared = importer.prepare_package(str(package))
-        items = getattr(bpy.context.window_manager, select_models._ITEMS_PROP)
-        items.clear()
-        select_models._add_prefab_and_model_items(items, prepared)
-        select_models._add_scene_items(items, prepared)
-        for kind, expected in exp["dialog_selected"].items():
-            actual = sorted(it.pathname for it in items if it.kind == kind and it.selected)
-            c.eq(f"dialog selected {kind}", actual, sorted(expected))
-        items.clear()
-    if "scene_exposure" in exp:
-        # シーンの露出は変えない（#130。HDRP の露出はライトの強さに掛ける）
-        actual = bpy.context.scene.view_settings.exposure
-        c.true("scene exposure", abs(actual - exp["scene_exposure"]) <= 1e-3, f"expected {exp['scene_exposure']}, got {actual}")
-    if "scene_camera" in exp:
-        camera = bpy.context.scene.camera
-        c.eq("scene camera", camera.name if camera else None, exp["scene_camera"])
-    if "light_count" in exp:
-        c.eq("report lights", report.lights, exp["light_count"])
-    if "camera_count" in exp:
-        c.eq("report cameras", report.cameras, exp["camera_count"])
-    if "decal_count" in exp:
-        c.eq("report decals", report.decals, exp["decal_count"])
-
-    for spec in exp.get("shared_meshes", []):
-        found = [_find_placed(o["top"], o["object"]) for o in spec["objects"]]
-        labels = "+".join(f"{o['top']}/{o['object']}" for o in spec["objects"])
-        if all(len(f) == 1 for f in found):
-            shared = len({f[0].data.name for f in found}) == 1
-            c.eq(f"{labels} share mesh data", shared, spec["shared"])
-        else:
-            c.true(f"{labels} found", False, "objects not found")
-
-    for obj_name, count in exp.get("shape_keys", {}).items():
-        obj = bpy.data.objects.get(obj_name)
-        c.true(f"object {obj_name} exists", obj is not None)
-        if obj is not None:
-            actual = len(obj.data.shape_keys.key_blocks) if obj.data.shape_keys else 0
-            c.eq(f"{obj_name}.shape_keys", actual, count)
-
+    ctx = Context(c, exp, report, package)
+    check_result_state(ctx)
+    for check in CHECKS:
+        check(ctx)
+    run_steps(ctx)
     return _finish(c)
 
 

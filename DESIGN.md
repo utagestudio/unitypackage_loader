@@ -50,7 +50,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 **読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。prefab で表示されていない部品（非アクティブな GameObject の下にあるか、Renderer が無効なもの。表の行の `RendererMaterials.visible`）は、読み込んだうえで隠す（Scenes 単位の `PlacedRenderer.visible` と同じ扱い。件数は警告に出さない）。同じモデルの配置が prefab の中に複数あれば、どれかで表示されていれば表示する。prefab の中の配置がすべて非アクティブなモデル（非アクティブな GameObject の下に FBX を丸ごと置いたもの。`prefab.inactive_models`）は、すべての部品を隠す。以前は Prefabs 単位にこの処理が無く、Synty のキャラクターの展開済み prefab（27 体分の GameObject を持ち、自分以外を非アクティブにしている）で全員が重なって表示されていた（Issue #177）。
 
-**読み込む単位 Scenes**（§3.3、Issue #48）: `core/hierarchy.py` で .unity を展開し、モデルの配置を求めて読み込む。
+**読み込む単位 Scenes**（§3.3、Issue #48）: .unity を展開し（`core/expander.py`）、モデルの配置を求めて（`core/placement.py`）読み込む。1 つのアセットの読み取りと展開した階層のデータは `core/hierarchy.py`。
 
 - 展開: Transform（RectTransform を含む）・GameObject・Renderer を読み、PrefabInstance は元のアセットを再帰的に差し込む（深さ 16、Transform 20 万個まで、循環は打ち切り）。差し込んだオブジェクトの fileID は prefab と同じく「PrefabInstance の fileID XOR 元の fileID」。シーンの fileID はこの規則に従わない（調査で確認）ので、外からの参照（子を付ける親、`m_TransformParent`）は stripped ドキュメントの `m_CorrespondingSourceObject` / `m_PrefabInstance` を対応表にして引く。展開した Node の key は fileID ではなく展開ごとの通し番号で、上書き・削除・stripped の参照は PrefabInstance ごとの「元のアセットでの fileID → 差し込んだ Node」の表で引く。fileID を連番に振り直したパッケージでは XOR の値が小さく偏り、別の PrefabInstance のものと重なって互いを上書きしていたため（Issue #107）。XOR の値はアセット全体の表にも載せ（重なれば先のものを残す）、外側から入れ子の中を指す上書きに使う。上書きは位置・回転・スケール、`m_IsActive`、`m_Name`、Renderer の `m_Enabled` とマテリアルを当て、`m_RemovedGameObjects` / `m_RemovedComponents` を除く。
 - 配置は 2 種類。モデルの PrefabInstance は、そのルートの Transform（fileID は FBX によらない定数で、.meta の `fileIdsGeneration` が 2 なら -8679921383154817045、1 かキーが無ければ -4216859302048453862。展開器は両方をルートに向ける）を配置のルートにする。中のオブジェクトへの上書きは、新しい形式では fileID が名前と階層パスのハッシュなので、表では名前に結び付けられない。マテリアルの上書きと、表示の上書き・削除は対象の fileID ごとに配置に記録し、読み込んだオブジェクトから計算した fileID と突き合わせて当てる（下記「表の無いモデルの中への上書き」。Issue #31 / #172）。それ以外（中のノードの位置など）は数えて警告に出す。Unity 2018.2 以前の形式の .meta は `fileIDToRecycleName`（fileID → 名前）を持つので、それで名前を引けた上書きは当てる（下記「古い形式のモデルの中への上書き」）。モデルのメッシュを直接指す Renderer（FBX を展開した prefab や、FBX から切り離してシーンに置いた小物）は、Renderer ごとにモデルのルートを決め、同じルート・同じモデルの Renderer をまとめる（下記「Renderer をまとめるモデルのルート」）。
@@ -100,6 +100,8 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     面ごとに Unity での外向きの法線と比べて頂点の並びを決める。
   - メッシュは読み込みの回ごとに種類ごとに 1 つ作って共有し、マテリアルはオブジェクトのスロット（`link = "OBJECT"`）に付ける。
     `m_Materials[0]` の .mat から組む（組み込みメッシュはサブメッシュが 1 つ）。パッケージに無い .mat（Unity の既定のマテリアル）なら空のスロット。
+    `m_Materials` が空の MeshRenderer は Unity では何も描かれないので作らない（Gothic Lights の Torch-Fire.prefab が、
+    パーティクルの親の GameObject に Cube とマテリアルの無い MeshRenderer を付けていて、白い箱が出ていた）。
   - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
     以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
   - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
@@ -144,13 +146,13 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
 
 **1 メッシュの FBX をモデルの PrefabInstance で置いた配置**（Issue #99）: この形の FBX では Unity がノードを `//RootNode` に畳み、**モデルのルートの Transform の値が FBX のノードの変換 L** になる（Issue #98 と同じ事実の裏返し）。シーンの上書きは L の成分を置き換えるので、上書きしなかった成分には L の値が残る（位置と回転だけ動かした配置では、スケールは FBX のノードの値のまま）。展開した階層はルートを単位行列で作るため、そのままでは上書きの無い成分が失われ、さらに Blender のオブジェクトが持つノードの変換と二重に掛かっていた。
 
-- `core/hierarchy.py`: 表から畳まれたノードの名前を求め（`collapsed_root_name`）、配置の `root_node` に入れる。ルートの Transform への上書きは、当てるのに加えて成分ごとに `node_transforms[root_node]` へ記録する（上書きの無い成分は None）
+- `core/hierarchy.py` / `core/expander.py` / `core/placement.py`: 表から畳まれたノードの名前を求め（`collapsed_root_name`）、配置の `root_node` に入れる。ルートの Transform への上書きは、当てるのに加えて成分ごとに `node_transforms[root_node]` へ記録する（上書きの無い成分は None）
 - `blender/scene_objects.py` の `apply_collapsed_root`: 原点に読み込んだオブジェクトの行列から L を逆算し、上書きを当てた M で配置の Empty を C·M·C⁻¹ に直し、オブジェクトはノードを単位行列にした C·A にする。Empty を直すので、そこに付けたシーン側の子も Unity と同じ位置になる
 - 期待値は Unity 6000.6.0f1 で同じ置き方（位置と回転だけ上書き）を再現した頂点のワールド座標で確かめた（合成シーンの `SlabInstance`）
 - 表の無いモデル（Issue #111）: `.meta` の表が空だと 1 メッシュの FBX か分からないので、展開ではルートの Transform への上書きを成分ごとに`node_transforms[SOLE_NODE]` へ記録し、`root_node` を `SOLE_NODE` にしておく（ルートを上書きしていなければ記録しない）。読み込み側は、読み込んだオブジェクトが子の無い 1 つだけなら畳まれた形とみなし、そのオブジェクトの名前で `apply_collapsed_root` を当てる。オブジェクトが複数なら Unity のルートは単位行列が基準なので、展開した行列のまま置く。実例は Shibuya.unitypackage の `SM_MetroEntrance_02`（ノードの回転は Unity で euler (270, 180, 0)。シーンが回転を (270, 2.47, 0) に上書きするので、Y の 180 度は Unity では消える）で、Unity 6000.6.0f1 の batchmode で求めたワールドのバウンディングボックスと突き合わせた。合成シーンでは、`SlabInstance` と同じ FBX を表の無い `.meta` で置いた `SlabBareInstance` で確かめる
 - prefab で包んだ形（Issue #111）: 地下鉄の入口は、FBX をルートの位置 0・回転なしで置いた prefab を、シーンがさらに上書きしている。以前は FBX を直接置いた階層の上書きしか成分付きで記録しておらず、外側の上書きが読み込み側に渡っていなかった（表のあるモデルでも同じ）。そこで畳まれうるモデルのルートの Node に `collapsed_key`（表から求めたノード名か `SOLE_NODE`）を持たせ、`_apply_modification` が位置・回転・スケールを当てるときに、どの階層の上書きでも `model_transforms[collapsed_key]` に記録する。合成シーンの `SlabBareWrapped` / `SlabWrapped` で確かめる
 
-**シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
+**シーンのライト・カメラ**（Issue #49）: `core/hierarchy.py` / `core/expander.py` が Light（108）/ Camera（20）の中身を持ち、prefab の上書き（`m_Intensity`、`m_Color.g` など配列以外のパス）と `m_RemovedComponents` を当てる。`core/lights.py` で Blender の値に換算し、GameObject の親の Empty の下に置く（Unity のライト・カメラは +Z、Blender は -Z を向くので、変換した行列に右から `LIGHT_CAMERA_BASIS` を掛け、スケールは外す）。元の値は `unity_light` / `unity_camera`（JSON）に残す。無効なもの・非アクティブな GameObject のものは非表示、シーンにカメラが無ければ最初の有効なカメラをシーンのカメラにする。ダイアログの Scenes に「Also Import: Lights / Cameras」（既定 ON）。
 
 ライトの強さは推測で決めず、Unity 6（Built-in と URP 17.6、Linear）と Blender 5.2 EEVEE で、環境光を切って白い拡散面をライトの真下から見た画素値（線形 HDR）を測って合わせた（Unity は batchmode でも `-nographics` を付けなければ GPU で描画でき、RenderTexture から読める。Blender は `light_threshold = 0`、`use_soft_falloff = False` にして測る）。
 
@@ -198,7 +200,7 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
   - UnityJapanOffice の NoonA / NightA は自動露出（EV 2〜7、補正 0）なので、ライトに約 4.45 倍（+2.15 段）を掛ける。
 - カメラ: `field of view` は縦の画角（`sensor_fit = VERTICAL`）。Physical Camera は焦点距離・センサー・Gate Fit（Vertical / Horizontal はそのまま、Fill / Overscan / None は AUTO）・レンズシフト。平行投影は `ortho_scale = 2 × orthographic size`。クリップ距離はそのまま
 
-**Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`hierarchy.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で、表では名前に結び付けられない。マテリアルの上書きは対象の fileID ごとに残し、読み込んだオブジェクトから計算した fileID と突き合わせて当てる（上記「表の無いモデルの中への上書き」。Issue #31 / #109）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
+**Prefab Variant / ネストされた prefab**: Scenes 単位と同じ展開（`expander.Expander`、上記「展開」）で扱う。PrefabInstance の `m_SourcePrefab`（2018.2 以前は `m_ParentPrefab`）がパッケージ内の prefab なら、その Renderer を引き継ぎ、`m_Modifications` のマテリアル（`m_Materials.Array.data[N]` と `m_Materials.Array.size`。書かれた順に当てる。Unity は propertyPath の順に書くので `data[N]` が `size` より先に来る）・名前・有効状態を重ね、`m_RemovedGameObjects` / `m_RemovedComponents` で消されたものを除く。上書きの `target` は元 prefab 内の fileID。引き継いだオブジェクトの fileID は Unity と同じく「PrefabInstance の fileID XOR 元の fileID」（上位ビットは落とす）で、実パッケージの stripped ドキュメントで一致を確認済み。これで Variant の Variant もたどれる。循環は打ち切り、深さは 16 段、上書きで受け付ける配列長は 1024 まで。展開結果は GUID ごとにキャッシュするが、深さの上限で打ち切った結果は、同じかより深い位置からだけ使い回し、浅い位置からは展開し直す（循環で外した結果は、細工されたデータで展開し直しが指数的に増えないよう、そのまま使い回す）。元がモデル（FBX 等）の上書きは、対象 fileID がモデル内部の ID（.meta の `internalIDToNameTable` が空なら Unity がハッシュで生成）で、表では名前に結び付けられない。マテリアルの上書きは対象の fileID ごとに残し、読み込んだオブジェクトから計算した fileID と突き合わせて当てる（上記「表の無いモデルの中への上書き」。Issue #31 / #109）。以前は Models / Prefabs 単位だけ別の解析器を使っていて、古い形式・削除・stripped の対応表に対応しておらず、読み込む単位によって割り当てが食い違いえた（Issue #71 で統合）。
 
 **スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。すべてのスロットが別の .mat に差し替わると分かっている FBX マテリアルは、組み立てずに差し替えに回す（`core/mapping.py` の `fully_replaced_materials`。Issue #77）。
 
@@ -545,14 +547,16 @@ unitypackage_loader/
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
 │   ├─ material.py               # UnityMaterial / NormalizedMaterial dataclass
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
-│   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は hierarchy.py）
+│   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は expander.py）
 │   ├─ model_ids.py              # 読み込んだオブジェクト → モデルの中の fileID（表の無いモデルの中への上書きの対象を決める）
 │   ├─ units.py                  # 読み込む単位（Scenes / Prefabs / Models）の候補と既定値
 │   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
-│   ├─ hierarchy.py              # シーン・prefab の階層の展開と、モデルの配置
+│   ├─ hierarchy.py              # シーン・prefab の 1 アセットの読み取りと、展開した階層のデータ（Node / Hierarchy）
+│   ├─ expander.py               # PrefabInstance を差し込んで階層を展開し、上書きと削除を当てる（Expander）
+│   ├─ placement.py              # 展開した階層からモデルの配置を求める（placements / summarize / ModelCatalog）
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
-│   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）
+│   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
 │   ├─ profiles/
@@ -567,7 +571,13 @@ unitypackage_loader/
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
 ├─ blender/                      # bpy 依存
-│   ├─ importer.py               # 全体の流れ（prepare_package、1 回のインポートの状態と手順 _ImportSession）
+│   ├─ importer.py               # 全体の流れ（run_import、1 回のインポートの手順 _ImportSession）。外から使う名前の窓口
+│   ├─ options.py                # ImportOptions（1 回の読み込みの設定）
+│   ├─ prepare.py                # パッケージの事前解析（prepare_package / PreparedPackage。ダイアログと読み込みで共有）
+│   ├─ model_import.py           # モデルファイルを Blender のインポーターで読む処理と、bpy.data の差分
+│   ├─ session_materials.py      # 1 回の読み込みの中でのマテリアルの組み立て・共有・スロット分割（SessionMaterials）
+│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・デカール・ライト・カメラ）
+│   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
 │   ├─ nodes.py                  # ノードの組み立ての共通関数
@@ -575,9 +585,12 @@ unitypackage_loader/
 │   ├─ outline.py                # Solidify によるアウトライン
 │   └─ textures.py               # 画像読み込み・カラースペース
 └─ tests/
-    ├─ test_unity_yaml.py        # pytest（bpy 不要）
-    ├─ test_mapping.py
-    └─ integration_import.py     # blender -b --python で実行、_local/ のサンプルで検証
+    ├─ test_*.py                 # unittest（bpy 不要）
+    ├─ unity_yaml_writer.py      # テストと合成パッケージの生成で使う、Unity の YAML を組み立てる関数
+    ├─ make_synthetic_*.py       # 合成パッケージの生成（Blender で実行）
+    ├─ integration_import.py     # blender -b --python で実行し、期待値 JSON と照合する
+    ├─ integration_runs.json     # 合成パッケージの生成スクリプトと、どのパッケージをどの期待値で回すかの一覧
+    └─ run_integration.py        # 一覧の生成と全期待値の実行（手元と CI で同じものを使う）
 ```
 
 `core/` を bpy 非依存にするのが要点。パーサーとマッピングは標準ライブラリの unittest で回せる（`python3 -m unittest discover -s tests -t .`。追加依存無し）。
@@ -753,6 +766,13 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 - シェーダーの処理（グラフのノード、独自の名前で色を作る仕組み）は解釈しない。独自の名前でしか色やテクスチャを持たないシェーダーは、generic の別名（上記）に当たればそのテクスチャを使い、
   当たらなければ残りで黒くなる代わりに白（テクスチャ無し）になる（Japanese Street の `Leaves.shader` は `_Base_Color` / `_Normal` で、別名を足すまで AE_Flower などが白かった）。
   表に無いので generic で読み、「unknown shader」の警告が付く（以前は残りのプロパティで Standard の指紋に当たっていた）。
+- `.shader` からは描画の既定も読む（`shader_defaults`、Issue #202）。最初の `SubShader` の自身の `Tags`（`Pass` の中は Unity がキューに使わないので見ない）の
+  `RenderType` と `Queue`（`AlphaTest+0` のような足し引きも）、最初の固定の `Cull Off / Back / Front`（`Cull [_Cull]` はマテリアルのプロパティに任せる）。
+  表に無いシェーダーで、マテリアルからは不透明としか読めず、`m_CustomRenderQueue` が -1（シェーダーの既定のまま）なら、`RenderType` が `TransparentCutout` なら切り抜き、
+  `Transparent` なら半透明、`RenderType` が無ければ `Queue` で決める（2450 以上で切り抜き、3000 以上で半透明）。`RenderType` を優先するのは、`AE/AE_Decal` が
+  `AlphaTest` のキューで `decal:blend`（半透明に重ねる）だから。マテリアルにカリングのプロパティが無く、シェーダーが固定の `Cull Off` なら両面にする。
+  Tokyo Street の `Flowers`（`AE/Leaves`。`clip(_Base_Color.a - _Cutoff)` で切り抜く両面のシェーダー）が、葉の周りの四角い板ごと不透明に出ていた。
+  手元の 17 パッケージで変わるのは同じ作者の 4 つ（Tokyo Street の Flowers・Decals_Wall、Japanese Street の AE_Flower・AE_Grass_01 が両面に）だけ。
 
 **Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
 
@@ -851,6 +871,12 @@ def resolve(model_entry, fbx_material_names, index) -> dict[str, str | None]:
 
 ### 4.7 `blender/importer.py` オーケストレーション
 
+1 回の読み込みは `_ImportSession`（`importer.py`）が手順を並べる: 解析（`analyze`）→ 読み込むモデルの決定 → 展開（`extract`）→
+画像の読み込み → prefab のグループごと（`import_group`）かシーンごと（`SceneImport`。`scene_placement.py`）のモデルの読み込み →
+足りなかったテクスチャの補い（`fill_missed_textures`）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
+モデルファイルの読み込みは `model_import.py` にある。以前は `importer.py` 1 つ（約 1,900 行）だったのを、役割ごとに分けた（#198）。
+下の擬似コードは最初の設計で、流れを示すもの。
+
 ```python
 def run(ctx, filepath, opts) -> Report:
     pkg = UnityPackage(filepath); index = pkg.scan()
@@ -880,12 +906,12 @@ def run(ctx, filepath, opts) -> Report:
   モデル 1 つを選んでも全部を展開していた）。組む `.mat` は読み込む前に決める: モデル自身の割り当て（externalObjects と、走査のときに FBX から読んだ
   マテリアル名を `resolve_materials` の 1・2 に通したもの。`AssetEntry.fbx_materials`）、prefab・シーンの表の `m_Materials`、シーンの組み込みメッシュのマテリアル。
   VRM add-on に任せるモデルと同梱 .blend の KEEP はマテリアルを組まないので数えない。
-  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`_TextureImages`）、
+  FBX 以外のモデルの名前一致など予測から漏れたものは、組み立てで読み込んでいないテクスチャを引いたところで覚え（`session_materials.TextureImages`）、
   そのマテリアルの警告は出さずにおく。全部を読み込んだ後にまとめて展開・読み込みして、そのマテリアルだけを組み直す（tar をもう 1 回走査する）。
 - `.mat` から組み直した後、インポーター由来で未使用になった画像（glTF の埋め込み画像など）は削除する。
 - VRM 0.x の制限付きライセンス（CC-ND、VRoid Hub、UV License 備考あり）では add-on が確認ダイアログを出してその場では読み込まないため、オブジェクトが作られなかったことを警告する。自動承認はしない。
 - 例外の扱い（#69）:
-  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
+  - 解析器（`core/unity_yaml.py` / `unity_binary.py` / `hierarchy.py` / `expander.py` / `material.py` / `meta.py`）は、壊れた入力に対して `ValueError` 系（`UnityYamlError` / `UnityBinaryError` / `HierarchyError` / `MaterialParseError`）だけを送出する。`tests/test_fuzz_parsers.py` がフィクスチャを乱数で壊して確かめる。
   - `.mat` / `.meta` / prefab / シーンは補助的な情報なので、読む側（`prepare_package`）は `Exception` を捕まえ、そのアセットだけを理由付きの警告にして外す（シーンは読めない候補になり、モデルや prefab の読み込みは続ける）。traceback は Verbose Console Log が有効ならコンソールに出す。
   - マテリアルのノードの組み立ては、マテリアル単位で捕捉して警告にする。
   - モデル 1 つ・シーン 1 つの読み込みの失敗（壊れた FBX など）は、レポートの `errors` に記録して残りを読み込む。読めた分は残す。

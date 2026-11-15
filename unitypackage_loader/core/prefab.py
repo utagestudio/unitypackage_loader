@@ -20,16 +20,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
-from .hierarchy import (
-    CLASS_MESH_RENDERER,
-    Hierarchy,
-    ModelNames,
-    ModelPlacement,
-    PartState,
-    built_from_renderers,
-    pending_renderer_id,
-    placements,
-)
+from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, PartState, pending_renderer_id
+from .placement import ModelNames, ModelPlacement, built_from_renderers, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
@@ -114,6 +106,29 @@ def tables_from_hierarchy(
                 renderer.mesh_file_id, renderer.lod_level, visible,
             )
     return result
+
+
+@dataclass
+class PrefabAnalysis:
+    """展開した prefab 1 つから、読み込み側が使うもの（``analyze_prefab``）。
+
+    以前は読み込み側が prefab の pathname をキーにした 4 つの辞書に分けて持っていた（#198）。
+    """
+
+    tables: dict[str, dict[str, RendererMaterials]] = field(default_factory=dict)  # モデルの GUID → GameObject 名 → 行
+    whole_models: set[str] = field(default_factory=set)  # FBX を丸ごと置いているモデル（表に無い部品も隠さない。#151）
+    parts: dict[str, dict[str, PartState]] = field(default_factory=dict)  # モデル → 中のオブジェクトの表示の上書きと削除（#172）
+    inactive_models: set[str] = field(default_factory=set)  # prefab の中の配置がすべて非アクティブなモデル（#177）
+
+
+def analyze_prefab(h: Hierarchy, placed: list[ModelPlacement]) -> PrefabAnalysis:
+    """展開した prefab の階層と、その配置（``hierarchy.placements`` の結果）から、読み込み側が使うものを作る。"""
+    return PrefabAnalysis(
+        tables=tables_from_hierarchy(h, (), placed=placed),
+        whole_models=models_placed_whole(h, placed),
+        parts=parts_from_placements(placed),
+        inactive_models=inactive_models(placed),
+    )
 
 
 def inactive_models(placed: list[ModelPlacement]) -> set[str]:

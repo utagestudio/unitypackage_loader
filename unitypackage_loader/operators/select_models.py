@@ -28,6 +28,8 @@ from ..core.units import (
     available_units,
     default_unit,
 )
+from ..blender import log
+from .common import report_level
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
 if TYPE_CHECKING:
@@ -103,7 +105,7 @@ def _unit_items(self, context):
     return _unit_enum_cache
 
 
-def _add_scene_items(items, prepared) -> None:
+def add_scene_items(items, prepared) -> None:
     """シーンを展開して候補に加える（加え済みなら何もしない）。
 
     既定でチェックを入れるのは、一覧の順で最初の読み込めるシーンだけ（#134）。シーンをまとめて読み込むことはほとんど無く、
@@ -127,7 +129,7 @@ def _add_scene_items(items, prepared) -> None:
         chosen = chosen or s.supported
 
 
-def _add_prefab_and_model_items(items, prepared) -> None:
+def add_prefab_and_model_items(items, prepared) -> None:
     """prefab とモデルを候補に加える。読み込めるものには既定でチェックを入れる。
 
     当たり判定用のメッシュ（prefab の MeshCollider だけが使うモデル）は、候補には残して理由を出し、既定のチェックだけ外す
@@ -168,7 +170,7 @@ def _on_unit_changed(self, context):
     if window is not None:
         window.cursor_set("WAIT")
     try:
-        _add_scene_items(getattr(self, _ITEMS_PROP), _pending.prepared)
+        add_scene_items(getattr(self, _ITEMS_PROP), _pending.prepared)
     finally:
         if window is not None:
             window.cursor_set("DEFAULT")
@@ -224,8 +226,11 @@ _LODS_PROP = "unitypkg_select_hide_lods"
 _UNUSED_PROP = "unitypkg_select_skip_unused"
 
 
-def _items(context):
-    """ダイアログの候補一覧（WindowManager 側。ダイアログ内のボタンからも触れるようにするため）。"""
+def dialog_items(context):
+    """ダイアログの候補一覧（WindowManager 側。ダイアログ内のボタンからも触れるようにするため）。
+
+    統合テストも、これと ``add_prefab_and_model_items`` / ``add_scene_items`` で既定のチェックを確かめる。
+    """
     return getattr(context.window_manager, _ITEMS_PROP)
 
 
@@ -248,9 +253,9 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             self.report({"ERROR"}, "No pending package to import")
             return {"CANCELLED"}
         prepared = _pending.prepared
-        items = _items(context)
+        items = dialog_items(context)
         items.clear()
-        _add_prefab_and_model_items(items, prepared)
+        add_prefab_and_model_items(items, prepared)
 
         wm = context.window_manager
         prefs = get_prefs(context)
@@ -259,7 +264,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         # それ以外は Scenes に切り替えたときに行う（_on_unit_changed。#75）。既定の順では Scenes は最後なので、展開しなくても決まる
         others = any(p.supported for p in prepared.prefabs) or bool(prepared.supported_models)
         if prepared.scene_entries and (last_unit == UNIT_SCENES or not others):
-            _add_scene_items(items, prepared)
+            add_scene_items(items, prepared)
         scenes = prepared.scenes if prepared.scenes_expanded else ()
         setattr(wm, _UNIT_PROP, default_unit(prepared.prefabs, len(prepared.supported_models), last_unit, scenes))
         setattr(wm, _ARRANGE_PROP, prefs.default_arrange if prefs is not None else _pending.opts.arrange)
@@ -274,7 +279,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         layout = self.layout
         wm = context.window_manager
         unit = _current_unit(context)
-        items = _items(context)
+        items = dialog_items(context)
         visible = [it for it in items if it.kind == unit]
 
         layout.label(text=self.package_name, icon="PACKAGE")
@@ -335,7 +340,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         wm = context.window_manager
         unit = _current_unit(context)
         arrange = getattr(wm, _ARRANGE_PROP)
-        chosen = {it.guid for it in _items(context) if it.kind == unit and it.selected and it.supported}
+        chosen = {it.guid for it in dialog_items(context) if it.kind == unit and it.selected and it.supported}
         if not chosen:
             self.report({"WARNING"}, "Nothing selected to import")
             return {"CANCELLED"}
@@ -366,6 +371,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             opts.model_guids = [m.guid for m in prepared.models if m.guid in chosen]
 
         prefs = get_prefs(context)
+        log.set_verbose(prefs is None or prefs.verbose_log)
         if prefs is not None:
             # 次に開いたときの既定にする（並べ方は Preferences の既定値そのものを更新する）
             prefs.last_import_unit = unit
@@ -391,9 +397,9 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         finally:
             wm.progress_end()
 
-        if prefs is None or prefs.verbose_log:
+        if log.verbose():
             print(report.as_text())
-        self.report({"WARNING" if report.warnings or report.errors else "INFO"}, report.summary())
+        self.report({report_level(report)}, report.summary())
         return {"FINISHED"}
 
 
@@ -410,7 +416,7 @@ class UNITYPKG_OT_select_models_all(bpy.types.Operator):
     select: BoolProperty(default=True)
 
     def execute(self, context):
-        items = _items(context)
+        items = dialog_items(context)
         if not items:
             return {"CANCELLED"}
         unit = _current_unit(context)
@@ -428,54 +434,66 @@ _classes = (
 )
 
 
+def _window_manager_props() -> dict:
+    """ダイアログが WindowManager に置くプロパティ（名前 → 定義）。登録と解除をこの表から行う。"""
+    return {
+        _ITEMS_PROP: CollectionProperty(type=UNITYPKG_ImportItem),
+        _INDEX_PROP: IntProperty(default=0),
+        _UNIT_PROP: EnumProperty(name="Import Unit", items=_unit_items, update=_on_unit_changed),
+        _ARRANGE_PROP: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"),
+        _LIGHTS_PROP: BoolProperty(name="Lights", default=True, description="Import the scene's lights"),
+        _CAMERAS_PROP: BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"),
+        _EXPOSURE_PROP: BoolProperty(
+            name="Exposure",
+            default=True,
+            description=(
+                "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
+                "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
+            ),
+        ),
+        _DECALS_PROP: BoolProperty(
+            name="Decals",
+            default=True,
+            description=(
+                "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
+                "placed in the middle of each projector's box. Good for decals on flat walls and roads"
+            ),
+        ),
+        _LODS_PROP: BoolProperty(
+            name="Hide Distant Levels",
+            default=True,
+            description=(
+                "Hide the distant LOD levels of Unity LODGroups, so only the most detailed mesh is visible. "
+                "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
+            ),
+        ),
+        _UNUSED_PROP: BoolProperty(
+            name="Skip Unused Parts",
+            default=True,
+            description=(
+                "Do not import the parts of a model file that the Unity prefabs or scene do not use, "
+                "such as the other pieces of a model file that bundles many props. "
+                "Turn off to import them hidden, as before"
+            ),
+        ),
+    }
+
+
+_registered_props: list[str] = []  # register で WindowManager に足したプロパティの名前（unregister で外す）
+
+
 def register() -> None:
     for cls in _classes:
         bpy.utils.register_class(cls)
-    wm = bpy.types.WindowManager
-    setattr(wm, _ITEMS_PROP, CollectionProperty(type=UNITYPKG_ImportItem))
-    setattr(wm, _INDEX_PROP, IntProperty(default=0))
-    setattr(wm, _UNIT_PROP, EnumProperty(name="Import Unit", items=_unit_items, update=_on_unit_changed))
-    setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
-    setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
-    setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))
-    setattr(wm, _EXPOSURE_PROP, BoolProperty(
-        name="Exposure",
-        default=True,
-        description=(
-            "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
-            "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
-        ),
-    ))
-    setattr(wm, _DECALS_PROP, BoolProperty(
-        name="Decals",
-        default=True,
-        description=(
-            "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
-            "placed in the middle of each projector's box. Good for decals on flat walls and roads"
-        ),
-    ))
-    setattr(wm, _LODS_PROP, BoolProperty(
-        name="Hide Distant Levels",
-        default=True,
-        description=(
-            "Hide the distant LOD levels of Unity LODGroups, so only the most detailed mesh is visible. "
-            "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
-        ),
-    ))
-    setattr(wm, _UNUSED_PROP, BoolProperty(
-        name="Skip Unused Parts",
-        default=True,
-        description=(
-            "Do not import the parts of a model file that the Unity prefabs or scene do not use, "
-            "such as the other pieces of a model file that bundles many props. "
-            "Turn off to import them hidden, as before"
-        ),
-    ))
+    for name, prop in _window_manager_props().items():
+        setattr(bpy.types.WindowManager, name, prop)
+        _registered_props.append(name)
 
 
 def unregister() -> None:
-    for prop in (_UNUSED_PROP, _LODS_PROP, _DECALS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
-        if hasattr(bpy.types.WindowManager, prop):
-            delattr(bpy.types.WindowManager, prop)
+    for name in reversed(_registered_props):
+        if hasattr(bpy.types.WindowManager, name):
+            delattr(bpy.types.WindowManager, name)
+    _registered_props.clear()
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

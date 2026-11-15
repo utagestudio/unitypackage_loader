@@ -18,7 +18,7 @@ from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
 from ..core.prefab import RendererMaterials, find_renderer
-from ..core.decals import SCALE_INVARIANT, Decal, decal_plane
+from ..core.decals import Decal, decal_plane
 from ..core.primitives import PrimitiveMesh, build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
@@ -380,6 +380,27 @@ def _world_matrix(obj: bpy.types.Object | None) -> Matrix | None:
     return matrix if obj is None else None
 
 
+def _depth(obj) -> int:
+    """親をたどった深さ（親から順に動かすために並べる）。"""
+    count = 0
+    while obj.parent is not None and count < 1000:
+        obj, count = obj.parent, count + 1
+    return count
+
+
+def _parent_frame(obj) -> Matrix | None:
+    """置き直せるオブジェクトなら、``matrix_basis`` を掛ける前の親の側の行列。置き直せなければ None。
+
+    アーマチュアで変形するもの（ボーンを親にするもの、Armature モディファイアーを持つもの）とアーマチュア自身は、行列を
+    変えると変形がずれるので置き直さない。親の行列は、親を先に動かしていることがあるのでここで求め直す。
+    """
+    deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
+    parent_world = _world_matrix(obj.parent)
+    if deformed or obj.type == "ARMATURE" or parent_world is None:
+        return None
+    return parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
+
+
 def _same_placement(a: Matrix, b: Matrix) -> bool:
     """2 つの行列が、float の誤差を除いて同じ置き方か（列の長さに対する相対誤差と、位置の誤差）。
 
@@ -425,24 +446,16 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
         if relative is not None and len(found) == 1:
             targets.append((found[0], Matrix(relative)))
 
-    def depth(obj) -> int:
-        count = 0
-        while obj.parent is not None and count < 1000:
-            obj, count = obj.parent, count + 1
-        return count
-
     skipped = 0
-    for obj, relative in sorted(targets, key=lambda item: depth(item[0])):
+    for obj, relative in sorted(targets, key=lambda item: _depth(item[0])):
         current = _world_matrix(obj)
         target = base @ relative @ basis_a
         if current is not None and _same_placement(current, target):
             continue
-        deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
-        parent_world = _world_matrix(obj.parent)  # 親を先に動かしているので、ここで求め直す
-        if deformed or obj.type == "ARMATURE" or current is None or parent_world is None:
+        frame = _parent_frame(obj)
+        if current is None or frame is None:
             skipped += 1
             continue
-        frame = parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
         obj.matrix_basis = frame.inverted_safe() @ target
     return skipped
 
@@ -454,12 +467,6 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
     原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
     行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
     """
-    def depth(obj) -> int:
-        count = 0
-        while obj.parent is not None and count < 1000:
-            obj, count = obj.parent, count + 1
-        return count
-
     targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
     if not targets:
         return 0
@@ -467,13 +474,11 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
     to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
     worlds = {o: _world_matrix(o) for o in targets}  # 動かす前にまとめて求める
     skipped = 0
-    for obj in sorted(targets, key=depth):
-        deformed = obj.parent_type in {"BONE", "ARMATURE"} or any(m.type == "ARMATURE" for m in obj.modifiers)
-        parent_world = _world_matrix(obj.parent)  # 親を先に動かしているので、ここで求め直す
-        if deformed or obj.type == "ARMATURE" or worlds[obj] is None or parent_world is None:
+    for obj in sorted(targets, key=_depth):
+        frame = _parent_frame(obj)
+        if worlds[obj] is None or frame is None:
             skipped += 1
             continue
         world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ to_origin @ worlds[obj]
-        frame = parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
         obj.matrix_basis = frame.inverted_safe() @ world
     return skipped
