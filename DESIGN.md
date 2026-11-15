@@ -100,6 +100,8 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     面ごとに Unity での外向きの法線と比べて頂点の並びを決める。
   - メッシュは読み込みの回ごとに種類ごとに 1 つ作って共有し、マテリアルはオブジェクトのスロット（`link = "OBJECT"`）に付ける。
     `m_Materials[0]` の .mat から組む（組み込みメッシュはサブメッシュが 1 つ）。パッケージに無い .mat（Unity の既定のマテリアル）なら空のスロット。
+    `m_Materials` が空の MeshRenderer は Unity では何も描かれないので作らない（Gothic Lights の Torch-Fire.prefab が、
+    パーティクルの親の GameObject に Cube とマテリアルの無い MeshRenderer を付けていて、白い箱が出ていた）。
   - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
     以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
   - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
