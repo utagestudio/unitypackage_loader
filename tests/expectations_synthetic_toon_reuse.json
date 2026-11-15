@@ -1,0 +1,18 @@
+{
+  "before": { "materials": ["LilHairMat", "ToonStdMat"] },
+  "options": { "material_mode": "UNLIT", "models": "ALL", "reuse_existing": true },
+  "errors": 0,
+  "objects": { "count": 3 },
+  "materials": { "count": 5, "methods": ["external", "none", "reused"], "modes": ["UNLIT"] },
+  "warnings_max": 1,
+  "submesh_materials": { "SyntheticToonBody": ["LilHairMat", "LilBodyMat"], "SyntheticToonProp": ["OrphanMat", "ToonStdMat"] },
+  "material_checks": [
+    { "name": "LilHairMat", "method": "reused", "props": { "test_preexisting": true }, "has_unity_data": false },
+    { "name": "LilHairMat.001", "absent": true },
+    { "name": "ToonStdMat", "method": "reused", "props": { "test_preexisting": true }, "has_unity_data": false },
+    { "name": "ToonStdMat.001", "absent": true },
+    { "name": "LilBodyMat", "mode": "UNLIT", "method": "external", "has_unity_data": true, "props": { "test_preexisting": null },
+      "node_types": ["ShaderNodeEmission"], "node_types_absent": ["ShaderNodeBsdfPrincipled"], "base_image": "ToonColor.png" },
+    { "name": "MToonFaceMat", "mode": "UNLIT", "node_types": ["ShaderNodeEmission"] }
+  ]
+}

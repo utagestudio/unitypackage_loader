@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _paths  # noqa: F401
-from tests.test_hierarchy import HEADER, game_object, instance, mesh_renderer, transform
+from tests.unity_yaml_writer import HEADER, game_object, instance, mesh_renderer, transform
 from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material

@@ -1,0 +1,24 @@
+{
+  "options": {
+    "material_mode": "PRINCIPLED", "models": "ALL", "force_opaque": true, "backface_culling": true,
+    "use_normal_maps": false, "use_emission": false, "store_props": false,
+    "pack_images": true, "import_unreferenced": true, "overwrite_extracted": true, "fbx_importer": "LEGACY"
+  },
+  "errors": 0,
+  "objects": { "count": 3, "mesh_count": 3, "armature_count": 0 },
+  "materials": { "count": 5, "mapped": 4, "methods": ["external", "none"], "modes": ["PRINCIPLED"] },
+  "images": { "count": 5, "packed": true },
+  "warnings_max": 1,
+  "outlines": { "count": 0, "objects": { "SyntheticToonBody": null, "SyntheticToonFace": null } },
+  "submesh_materials": { "SyntheticToonBody": ["LilHairMat", "LilBodyMat"], "SyntheticToonProp": ["OrphanMat", "ToonStdMat"] },
+  "material_checks": [
+    { "name": "LilBodyMat", "mode": "PRINCIPLED", "render_method": "DITHERED", "backface_culling": true, "has_unity_data": false,
+      "base_image": "ToonColor.png", "node_groups": [], "node_types_absent": ["ShaderNodeNormalMap"], "emission_strength": 0.0 },
+    { "name": "LilHairMat", "mode": "PRINCIPLED", "render_method": "DITHERED", "backface_culling": false, "has_unity_data": false,
+      "bsdf_inputs": { "Alpha": 1.0 } },
+    { "name": "MToonFaceMat", "mode": "PRINCIPLED", "backface_culling": true, "has_unity_data": false },
+    { "name": "ToonStdMat", "mode": "PRINCIPLED", "backface_culling": true, "has_unity_data": false, "base_image": "ToonColor.png",
+      "node_types_absent": ["ShaderNodeNormalMap"], "emission_strength": 0.0 },
+    { "name": "OrphanMat", "method": "none", "has_unity_data": false }
+  ]
+}
