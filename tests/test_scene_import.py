@@ -157,7 +157,7 @@ class PartsToRemoveTests(unittest.TestCase):
 
 class SceneWarningsTests(unittest.TestCase):
     def test_messages_in_order(self):
-        contents = SceneContents([], unresolved_overrides=2, missing_sources=1, other_renderers=3)
+        contents = SceneContents([], unresolved_overrides=2, missing_sources=1, other_renderers=3, terrains=8, ui_elements=9)
         messages = scene_warnings(
             "Assets/S.unity", contents, PlacementStats(
                 baked_lights=1, light_notes={"b note", "a note"}, hidden_unused=4, hidden_lods=7, skipped_nodes=5, skipped_offsets=6,
@@ -166,7 +166,7 @@ class SceneWarningsTests(unittest.TestCase):
         self.assertTrue(all(m.startswith("scene Assets/S.unity: ") for m in messages))
         self.assertEqual(
             [m.split(": ", 1)[1].split(" ", 1)[0] for m in messages],
-            ["1", "a", "b", "2", "1", "3", "4", "7", "5", "6"],
+            ["1", "a", "b", "2", "1", "3", "8", "9", "4", "7", "5", "6"],
         )
 
     def test_unreadable_scene_reports_only_lights(self):

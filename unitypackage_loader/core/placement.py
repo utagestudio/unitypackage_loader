@@ -24,6 +24,7 @@ from .hierarchy import (
     CLASS_MESH_RENDERER,
     CLASS_MONO_BEHAVIOUR,
     CLASS_RECT_TRANSFORM,
+    CLASS_TERRAIN,
     CLOSE,
     ROOT_NODE_NAME,
     SOLE_NODE,
@@ -364,7 +365,8 @@ class SceneContents:
     placements: list[ModelPlacement]
     lights: int = 0
     cameras: int = 0
-    ui_elements: int = 0
+    ui_elements: int = 0  # RectTransform（読み込まない。#202）
+    terrains: int = 0  # Terrain（読み込まない。#202）
     other_renderers: int = 0  # パッケージ外のメッシュを指す Renderer（組み込みメッシュの MeshRenderer は ``primitives``）
     decals: int = 0  # DecalProjector（#165）
     primitives: list[PrimitivePlacement] = field(default_factory=list)
@@ -411,6 +413,7 @@ def summarize(
         lights=h.counts[CLASS_LIGHT],
         cameras=h.counts[CLASS_CAMERA],
         ui_elements=h.counts[CLASS_RECT_TRANSFORM],
+        terrains=h.counts[CLASS_TERRAIN],
         other_renderers=other,
         primitives=primitives,
         decals=sum(1 for n in h.nodes.values() for class_id, _ in n.components.values() if class_id == CLASS_MONO_BEHAVIOUR),
