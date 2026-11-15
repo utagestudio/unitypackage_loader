@@ -140,7 +140,7 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
 **古い形式のモデルの中への上書き**（Issue #53）: Unity 2018.2 以前の形式のモデルの .meta の `fileIDToRecycleName` を `ModelImporterInfo.recycle_names` に読み、モデルの PrefabInstance の中への上書きを名前付きで配置に記録する（`core/hierarchy.py`）。fileID は「クラス ID × 100000 + 通し番号」で、ルートは 100000 / 400000（`//RootNode`）。
 
 - マテリアル（`m_Materials.Array.data[N]`、クラス 23 / 137）: 配置の `renderers` に入れ、既存のスロット単位の割り当てで当てる。上書きの無いスロットは None で、.meta・名前一致の結果のまま。1 メッシュの FBX では Renderer が `//RootNode` に載るので、表のメッシュ名（クラス 43 がただ 1 つ）をオブジェクト名にする
-- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`_apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）
+- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`blender/scene_objects.py` の `apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）
 - 当てるのはモデルの最上位のオブジェクトだけ。入れ子のオブジェクトとアーマチュアで変形するものは件数を警告に出す。表に無い fileID は今までどおり数える
 - 室内アセットのシーンでは、FBX 由来の Renderer 120 個すべてで、Unity の外形の中心との差が 1 cm 未満、マテリアルも一致した
 
@@ -191,7 +191,7 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
     元の値はライトの `unity_light`、掛けた倍率は `unity_light_scale` に残す。HDRP の発光（強さ 1 に揃えている）には掛けない。
   - Volume: シーンのグローバルな Volume（`Volume` の MonoBehaviour。`m_IsGlobal: 1`、有効、`weight` > 0）を `priority` の高い順に見て、
     プロファイル（.asset。1 回の再走査でまとめて読む `UnityPackage.read_assets`）に上書きされた Exposure の `mode` がある最初のものを使う。
-    ローカルな Volume（コライダーの中だけで効く）はカメラの位置が決まらないので使わない（UnityJapanOffice のローカルな Volume は WhiteBalance だけ）。
+    ローカルな Volume（コライダーの中だけで有効になる）はカメラの位置が決まらないので使わない（UnityJapanOffice のローカルな Volume は WhiteBalance だけ）。
   - Fixed は `fixedExposure`、Use Physical Camera はシーンのカメラの `m_Aperture` / `m_ShutterSpeed` / `m_Iso` から EV100 = log2(N² / t) − log2(ISO / 100)。
     Automatic / Automatic Histogram / Curve Mapping は画面の明るさで決まるので、`limitMax` で近似して警告に出す（室内の照明や日中の外光では、自動露出はふつう上限で止まる）。
     どれも `compensation` を引く。`mode` が上書きされていなければ（HDRP の既定のプロファイル次第で分からない）倍率は 1。
@@ -204,7 +204,7 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
 
 **スロット単位の分割**: FBX 内では少数のマテリアルを全メッシュが共有し、Unity 側では prefab の Renderer ごとに別の .mat を割り当てているパッケージがある（工業製品系アセットで確認）。この場合「FBX マテリアル 1 つ = .mat 1 つ」では色もテクスチャも失われるため、prefab の (GameObject, スロット) → .mat 表を作り、FBX マテリアルの解決結果と異なるスロットは .mat 名の Blender マテリアルに差し替える。同じ .mat は 1 つの Blender マテリアルを共有し、使われなくなった FBX マテリアルは削除する。すべてのスロットが別の .mat に差し替わると分かっている FBX マテリアルは、組み立てずに差し替えに回す（`core/mapping.py` の `fully_replaced_materials`。Issue #77）。
 
-**マテリアルを持たないモデル**（Issue #102）: FBX 自体がマテリアルを 1 つも持たないと、Blender ではマテリアルスロットが 0 個になり、差し替える相手が無い。Unity ではこのメッシュもサブメッシュ 1 つとして Renderer の `m_Materials[0]` で描かれるので、スロットが 0 個のメッシュには `m_Materials` の先頭をスロット 0 の割り当てとして返し（`core/mapping.py` の `_prefab_slots`）、読み込む側でスロットを作ってから入れる（`blender/importer.py` の `_split_slots_by_prefab`）。街並みの環境アセットの地面が、`.meta` の externalObjects も空でマテリアル無しのまま読み込まれていた。prefab の手掛かりも無いメッシュは、マテリアルを決めようが無いので警告を出して素のままにする。
+**マテリアルを持たないモデル**（Issue #102）: FBX 自体がマテリアルを 1 つも持たないと、Blender ではマテリアルスロットが 0 個になり、差し替える相手が無い。Unity ではこのメッシュもサブメッシュ 1 つとして Renderer の `m_Materials[0]` で描かれるので、スロットが 0 個のメッシュには `m_Materials` の先頭をスロット 0 の割り当てとして返し（`core/mapping.py` の `_prefab_slots`）、読み込む側でスロットを作ってから入れる（`blender/session_materials.py` の `SessionMaterials.split_slots_by_prefab`）。街並みの環境アセットの地面が、`.meta` の externalObjects も空でマテリアル無しのまま読み込まれていた。prefab の手掛かりも無いメッシュは、マテリアルを決めようが無いので警告を出して素のままにする。
 
 **マテリアルの共有**（Issue #77）: 同じ .mat は、1 回の読み込みの中で 1 つの Blender マテリアルを共有する。別々のモデルが同じ .mat を使う場合（Models 単位で複数のモデル、シーンで違うモデル）、1 つのモデルの複数のマテリアルが同じ .mat に解決される場合、同じモデルの読み直し、prefab のスロット分割のどれでも同じ。共有したマテリアルのレポートの method は `shared` で、`replaced` と同じく件数からは除く。共有するマテリアルの名前は、なるべく .mat の名前にする（先に FBX 側の別の名前で組んでいたら、.mat と同じ名前のマテリアルを組み、`ID.user_remap` で使用箇所を付け替えて先のものを消す。読み込む順番で名前が変わらないように）。Reuse Existing Materials が ON なら、.blend に既にある同名のマテリアルを先に使う（こちらは `reused`）。同梱 .blend の KEEP と VRM add-on への委譲では、インポーターが作ったマテリアルをそのまま使うので共有しない。
 
@@ -308,22 +308,24 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 **Model**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
-| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All。All / First は、ラベルに反してオペレーターの `unit` で選んだ単位（Scenes / Prefabs / Models）の候補に効く |
+| Selection dialog（Preferences のみ） | Enum: `Ask` / `All models` / `First model only` = `Ask` | `Ask` は読み込める候補（シーン・prefab・モデル）が合わせて 2 つ以上ある時だけ §3.3 のダイアログを出す。ポップアップには出さない（オペレーターの `models` プロパティはプリセットとスクリプトのため残す）。複数ファイルの一括インポートは常に All。All / First は、ラベルに反してオペレーターの `unit` で選んだ単位（Scenes / Prefabs / Models）の候補に当てはまる |
 | Arrange prefabs（Preferences のみ） | Enum: `Side by Side` / `Stack at Origin` = `Side by Side` | §3.3 の並べ方の既定。ダイアログで選んだ値がここに保存される |
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
-| Use FBX file scale / axis | FBX インポーターのパススルー | 既定は Blender FBX インポーターと同じ |
-| Import armature / shape keys / animation | Bool = ON / ON / OFF | FBX インポーターへ渡す |
+| FBX Importer | Enum: `Auto` / `New (C++)` / `Legacy (Python)` = `Auto` | `Auto` と New は `wm.fbx_import`、Legacy だけ `import_scene.fbx`。Scale（常に表示）はモデルのインポーターに渡す |
+| Import Animation / Ignore Leaf Bones | Bool = OFF / ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
 
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
 |---|---|---|
 | Material mode | Enum: `Auto` / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names only` = `Auto` | `Auto`: トゥーン系（lilToon, Poiyomi, MToon, UTS, VRChat Toon Standard）→ Toon、PBR 系（Standard, URP Lit, HDRP Lit, VRChat Standard Lite）→ Principled、Unlit 系（Unlit/*, VRChat Toon Lit）→ Unlit |
-| Transparency | Enum: `Auto` / `Force opaque` = `Auto` | Unity 側の Cutout/Fade/Transparent 判定を `surface_render_method` に反映 |
+| Force Opaque | Bool = OFF | OFF なら Unity 側の Cutout/Fade/Transparent 判定を `surface_render_method` に反映し、ON なら無視してすべて不透明にする |
 | Backface culling | Bool = OFF | ON なら `_Cull` / `_CullMode` / `_Culling` に従って背面を隠す。既定は OFF で、すべてのマテリアルを両面で描く（Unity は軽さのために背面を描かないことが多いが、Blender では裏側が欠けて見えるだけのことが多い。Issue #169）。Preferences の既定値で変えられ、読み込み後はサイドバーの Tools の「Backface Culling On / Off」で選択メッシュのマテリアルを一括で切り替えられる（`materials.set_backface_culling`。On でも両面描画のマテリアルは ON にしない。`unity_build_options` も書き換えて、再構築の初期値をそろえる） |
 | Normal maps | Bool = ON | |
 | Emission | Bool = ON | |
 | Reuse existing materials by name | Bool = OFF | 同名マテリアルが .blend に既にある場合、置き換えず再利用 |
+| Outlines (Solidify) / Outline Width Scale | Bool = OFF / Float = 0.01 | Unity 側のアウトライン色・幅から Solidify のアウトラインを付ける。幅は Width Scale で換算 |
+| Bundled .blend Materials | Enum: `Keep` / `Rebuild` = `Keep` | 同梱 .blend を読むときだけ表示。Keep は .blend のマテリアルを残し、Rebuild は .mat から組み直す |
 | Store Unity properties | Bool = ON | 生値をカスタムプロパティに保存 |
 
 **Textures**
@@ -536,7 +538,10 @@ unitypackage_loader/
 ├─ __init__.py                   # register / unregister、メニュー登録
 ├─ operators/
 │   ├─ import_package.py         # IMPORT_SCENE_OT_unitypackage（ImportHelper）
-│   └─ select_models.py          # IMPORT_SCENE_OT_unitypackage_select（読み込む単位と候補を選ぶ invoke_props_dialog）
+│   ├─ select_models.py          # IMPORT_SCENE_OT_unitypackage_select（読み込む単位と候補を選ぶ invoke_props_dialog）
+│   ├─ common.py                 # 上の 2 つで共通の処理（プロパティ → ImportOptions など）
+│   ├─ rebuild_material.py       # 保存した Unity の情報から別モードで組み直す / Backface Culling の一括切り替え
+│   └─ outline_ops.py            # 選択オブジェクトへのアウトラインの追加・削除
 ├─ ui/
 │   ├─ panel_report.py           # N パネル
 │   └─ preferences.py
@@ -549,6 +554,8 @@ unitypackage_loader/
 │   ├─ mapping.py                # FBX マテリアル名 → .mat 解決
 │   ├─ prefab.py                 # 展開した prefab の配置 → モデルごとのマテリアル表（展開は expander.py）
 │   ├─ model_ids.py              # 読み込んだオブジェクト → モデルの中の fileID（表の無いモデルの中への上書きの対象を決める）
+│   ├─ unity_ids.py              # 新しい形式のモデルの中のアセットの fileID（名前と階層パスのハッシュ）
+│   ├─ fbx_units.py              # FBX の UnitScaleFactor（モデルの中のノードへの位置の上書きに使う）
 │   ├─ units.py                  # 読み込む単位（Scenes / Prefabs / Models）の候補と既定値
 │   ├─ arrange.py                # 複数の prefab を重ならないように並べる位置の計算
 │   ├─ hierarchy.py              # シーン・prefab の 1 アセットの読み取りと、展開した階層のデータ（Node / Hierarchy）
@@ -559,14 +566,17 @@ unitypackage_loader/
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
+│   ├─ primitives.py             # Unity の組み込みメッシュ（Cube / Sphere / Capsule / Cylinder / Plane / Quad）の形（#190）
+│   ├─ lights.py                 # シーンのライト・カメラを Blender の値に換算する（#49）
+│   ├─ exposure.py               # HDRP の Volume の露出からライトの強さの倍率を決める（#130）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
 │   │   ├─ standard.py           # Built-in Standard / HDRP Lit
-│   │   ├─ urp.py                # URP Lit / Simple Lit / Unlit / Baked Lit（#116 / #117）
+│   │   ├─ urp.py                # URP Lit / Complex Lit / Simple Lit / Unlit / Baked Lit（#116 / #117）
 │   │   ├─ hdrp.py               # HDRP Lit / LayeredLit / Unlit（#119）
-│   │   ├─ mtoon.py              # VRM MToon（Phase 2）
-│   │   ├─ poiyomi.py            # Phase 2
+│   │   ├─ mtoon.py              # VRM MToon
+│   │   ├─ poiyomi.py            # Poiyomi Toon
 │   │   ├─ vrchat_mobile.py      # VRChat SDK Mobile（Quest 向け）シェーダー
 │   │   └─ shader_guids.json     # GUID → family 表（ユーザー拡張可）
 │   └─ report.py
@@ -981,7 +991,7 @@ def run(ctx, filepath, opts) -> Report:
 
 - **VRM は再実装しない**。VRM add-on が MToon・Humanoid・スプリングボーンを再現するので、入っていればそちらに委譲する。add-on 無しの環境向けの glTF フォールバックは、既存の glTF 経路と `.mat` 再構築の組み合わせに留める。
 - **Unity のライティング再現はしない**。影色・MatCap・リムは Toon ノードグループで近い見た目にするだけで、ramp などシェーダー固有の計算は再現しない。
-- FBX の座標系・スケールは Blender 標準インポーターに委ねる。Unity の `globalScale` / `useFileScale` は参考値としてレポートに出すのみ。
+- FBX の座標系・スケールは Blender 標準インポーターに委ねる。Unity の `globalScale` は、シーン・prefab の配置でモデルのルートに掛ける（`blender/scene_objects.py` の `attach_to_empty`）。`useFileScale` は `.meta` から読むだけで使っていない。
 - テクスチャの `maxTextureSize`（Unity 側の縮小設定）は無視し、元解像度で読み込む。
 - 同一テクスチャが複数マテリアルから参照される場合は 1 つの Image を共有する。
-- パッケージ内の `.blend` を直接 append する機能は Phase 2。マテリアルが既に付いている可能性が高く、その場合は本アドオンのマテリアル生成をスキップする選択肢を出す。
+- パッケージ内の `.blend` は、Python を含められるため既定では読まない（Import Bundled .blend Files でオプトイン）。読む場合、マテリアルは既に付いていることが多いので、既定では .blend のものを残す（Bundled .blend Materials = Keep。Rebuild で組み直す）。

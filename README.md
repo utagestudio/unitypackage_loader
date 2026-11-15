@@ -77,6 +77,7 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | (always shown) | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Scale | Scale passed to the model importer |
 | Model | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
+| | Import Animation / Ignore Leaf Bones | Passed to the FBX importer (OFF / ON by default) |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |

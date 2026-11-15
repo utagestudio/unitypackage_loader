@@ -75,6 +75,7 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 | （常に表示） | Material Mode | `Auto`（トゥーン系は Toon、PBR 系は Principled）/ `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Scale | モデルのインポーターに渡すスケール |
 | Model | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
+| | Import Animation / Ignore Leaf Bones | FBX インポーターに渡す（既定はそれぞれ OFF / ON） |
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
 | Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
