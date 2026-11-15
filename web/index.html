@@ -296,22 +296,29 @@
         <div class="section-head" style="margin-bottom:0">
           <span class="eyebrow">Install</span>
           <h2>Two steps and you are ready</h2>
-          <p>Works with Blender 4.5 and later. Either way of installing gives you the same add-on. Installing it both ways makes the two copies conflict, so pick one.</p>
+          <p>Works with Blender 4.5 and later. All three ways of installing give you the same add-on. Installing it more than one way makes the copies conflict, so pick one.</p>
         </div>
         <div class="install-step">
           <h3><span class="num">1</span>Install the add-on</h3>
           <div class="routes">
             <div class="route route-easy">
-              <span class="route-tag">Easiest</span>
+              <span class="route-tag">Recommended</span>
+              <h4>Install from the official platform</h4>
+              <p>In Blender, open Edit &gt; Preferences &gt; Get Extensions, search for <b>Unitypackage</b> and click Install. New versions show up as updates in the same place.</p>
+              <a class="btn btn-primary" href="https://extensions.blender.org/add-ons/unitypackage-loader/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Open the listing</a>
+              <p>The first time, Blender asks whether to allow online access. Allow it so the official listing can load.</p>
+            </div>
+            <div class="route">
+              <span class="route-tag route-tag-alt">From a file</span>
               <h4>Download the zip and install it</h4>
-              <a class="btn btn-primary" href="{{ZIP_URL}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>Download zip ({{VERSION}})</a>
+              <a class="btn btn-secondary" href="{{ZIP_URL}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></svg>Download zip ({{VERSION}})</a>
               <p>Drag the downloaded zip onto the Blender window and confirm the install. You can also use Install from Disk in the menu at the top right of Preferences &gt; Get Extensions.</p>
-              <p>The same zip is also available for free on <a href="https://utagestudio.booth.pm/items/8910607">BOOTH</a>, with optional support versions that contain the same file.</p>
+              <p>The same zip is also available for free on <a href="https://utagestudio.booth.pm/items/8910607">BOOTH</a>, with optional support versions that contain the same file. Installed this way, it is not updated automatically.</p>
             </div>
             <div class="route">
               <span class="route-tag route-tag-alt">Automatic updates</span>
               <h4>Add the repository, then install</h4>
-              <p>In Blender, open Edit &gt; Preferences &gt; Get Extensions &gt; Repositories, click <b>+</b>, choose <b>Add Remote Repository</b> and paste this URL.</p>
+              <p>This GitHub Pages site can also deliver updates to Blender. In Blender, open Edit &gt; Preferences &gt; Get Extensions &gt; Repositories, click <b>+</b>, choose <b>Add Remote Repository</b> and paste this URL.</p>
               <div class="repo-url">
                 <code id="repo-url">{{BASE_URL}}/index.json</code>
                 <button class="btn btn-primary copy-btn" type="button" data-copy="{{BASE_URL}}/index.json" data-copied-label="Copied">Copy</button>
@@ -426,6 +433,7 @@
       <a href="https://github.com/utagestudio/unitypackage_loader/issues">Issues</a>
       <a href="https://github.com/utagestudio/unitypackage_loader/blob/main/README.md">README</a>
       <a href="{{ZIP_URL}}">Download zip ({{VERSION}})</a>
+      <a href="https://extensions.blender.org/add-ons/unitypackage-loader/">extensions.blender.org</a>
       <a href="https://utagestudio.booth.pm/items/8910607">BOOTH</a>
       <!-- gtm-only --><a href="#privacy">Cookies and analytics</a><!-- /gtm-only -->
       <a href="ja/" hreflang="ja" lang="ja">日本語</a>
