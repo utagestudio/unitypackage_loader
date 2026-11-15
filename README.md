@@ -14,9 +14,16 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 
 There are three sources and they all ship the same extension. **Install from only one of them** (see "Switching sources" below).
 
-**Register as an Extension Repository (recommended)**
+**extensions.blender.org (recommended)**
 
-The extension is distributed via GitHub Pages. In Blender, open Preferences > Get Extensions > Repositories,
+The extension is listed on Blender's official extensions platform:
+[Unitypackage Importer](https://extensions.blender.org/add-ons/unitypackage-loader/).
+In Blender, open Preferences > Get Extensions, search for "Unitypackage" and click Install.
+New versions show up as updates in Blender.
+
+**Register the GitHub Pages Extension Repository**
+
+The same extension is also distributed via GitHub Pages. In Blender, open Preferences > Get Extensions > Repositories,
 click "+", choose "Add Remote Repository", and register the following URL. You can then install and update
 the extension from the list, and new versions show up as updates in Blender.
 
@@ -25,11 +32,6 @@ https://utagestudio.github.io/unitypackage_loader/index.json
 ```
 
 The [same page](https://utagestudio.github.io/unitypackage_loader/) (the URL without `index.json`) shows the registration URL and a link to the zip.
-
-**extensions.blender.org (under review)**
-
-The extension has been submitted to Blender's official extensions platform. Once it is listed, you will be able to
-search for "Unitypackage" in Preferences > Get Extensions and install it from there.
 
 **Install from a zip**
 

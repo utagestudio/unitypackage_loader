@@ -14,9 +14,15 @@ Unity 側のマテリアル設定とテクスチャを反映した状態で配�
 
 入手先は次の 3 つで、中身は同じです。**どれか 1 つから入れてください**（理由は下の「入手先を変えるとき」）。
 
-**Extension Repository として登録（推奨）**
+**extensions.blender.org（推奨）**
 
-GitHub Pages で配布しています。Blender の Preferences > Get Extensions > Repositories の「+」から
+Blender 公式の拡張機能サイトに [Unitypackage Importer](https://extensions.blender.org/add-ons/unitypackage-loader/) として掲載しています。
+Blender の Preferences > Get Extensions で「Unitypackage」と検索してインストールします。
+新しい版が出ると、Blender の拡張機能の画面から更新できます。
+
+**GitHub Pages の Extension Repository を登録**
+
+同じものを GitHub Pages でも配布しています。Blender の Preferences > Get Extensions > Repositories の「+」から
 "Add Remote Repository" を選び、次の URL を登録すると、一覧からインストール・更新できます。
 新しい版が出ると、Blender の拡張機能の画面から更新できます。
 
@@ -25,11 +31,6 @@ https://utagestudio.github.io/unitypackage_loader/index.json
 ```
 
 [同じページ](https://utagestudio.github.io/unitypackage_loader/ja/)（`index.json` を除いた URL。日本語版は `ja/`）に登録用 URL と zip のリンクを載せています。
-
-**extensions.blender.org（掲載の審査中）**
-
-Blender 公式の拡張機能サイトへの掲載を申請しています。掲載されたら、Preferences > Get Extensions で
-「Unitypackage」と検索してインストールできるようになります。
 
 **zip から入れる**
 
