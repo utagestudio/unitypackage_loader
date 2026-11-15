@@ -14,9 +14,16 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 
 There are three sources and they all ship the same extension. **Install from only one of them** (see "Switching sources" below).
 
-**Register as an Extension Repository (recommended)**
+**extensions.blender.org (recommended)**
 
-The extension is distributed via GitHub Pages. In Blender, open Preferences > Get Extensions > Repositories,
+The extension is listed on Blender's official extensions platform:
+[Unitypackage Importer](https://extensions.blender.org/add-ons/unitypackage-loader/).
+In Blender, open Preferences > Get Extensions, search for "Unitypackage" and click Install.
+New versions show up as updates in Blender.
+
+**Register the GitHub Pages Extension Repository**
+
+The same extension is also distributed via GitHub Pages. In Blender, open Preferences > Get Extensions > Repositories,
 click "+", choose "Add Remote Repository", and register the following URL. You can then install and update
 the extension from the list, and new versions show up as updates in Blender.
 
@@ -25,11 +32,6 @@ https://utagestudio.github.io/unitypackage_loader/index.json
 ```
 
 The [same page](https://utagestudio.github.io/unitypackage_loader/) (the URL without `index.json`) shows the registration URL and a link to the zip.
-
-**extensions.blender.org (under review)**
-
-The extension has been submitted to Blender's official extensions platform. Once it is listed, you will be able to
-search for "Unitypackage" in Preferences > Get Extensions and install it from there.
 
 **Install from a zip**
 
@@ -75,6 +77,7 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | (always shown) | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Scale | Scale passed to the model importer |
 | Model | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
+| | Import Animation / Ignore Leaf Bones | Passed to the FBX importer (OFF / ON by default) |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |
@@ -233,8 +236,14 @@ settings used at import (or the last rebuild). Outlines can be added and removed
 # Unit tests (no bpy required)
 python3 -m unittest discover -s tests -t .
 
-# Generate a synthetic package (no real assets required) and run the integration test with it
-blender -b --factory-startup --python tests/make_synthetic_package.py
+# Integration tests with the synthetic packages (no real assets required). tests/integration_runs.json lists
+# which generator builds each package and which expectations run against it (CI uses the same list).
+# Missing packages are generated first, and a pass/fail summary is printed at the end.
+python3 tests/run_integration.py                  # every expectation file (packages go to _local/unitypackages/)
+python3 tests/run_integration.py --generate       # rebuild the synthetic packages first (after changing a generator)
+python3 tests/run_integration.py --only scene     # only expectation files whose name contains "scene"
+
+# A single package with a single expectation file
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
 
 # Integration test with a real package on your machine (package in _local/unitypackages/, expectations.json in _local/)
@@ -255,11 +264,16 @@ See [DESIGN.md](DESIGN.md) for design details.
 ```
 unitypackage_loader/         The Extension itself
   blender_manifest.toml
-  core/                      bpy-independent (YAML parser, tar index, .meta, material normalization, GUID tables)
-  blender/                   bpy-dependent (import execution, node building, image loading)
-  operators/                 File > Import operator and the model selection dialog
-  ui/                        Preferences and the sidebar report panel
+  core/                      bpy-independent: package index, Unity YAML / binary readers, .meta, material normalization
+                             and shader profiles, mesh-to-material mapping, prefab / scene expansion and placement,
+                             lights, exposure, decals, built-in meshes
+  blender/                   bpy-dependent: import flow, model import, materials and nodes, textures, scene objects
+                             and placement, toon node group, outlines
+  operators/                 File > Import, the selection dialog, rebuilding materials, outlines
+  ui/                        Preferences and the "UPI" sidebar panel
 tests/                       Unit tests, integration tests, synthetic package generation
+tools/                       Website build, screenshots and image sources for the listings
+web/                         Website source (English index.html, Japanese ja/, assets/)
 ```
 
 ## Feedback and bug reports
