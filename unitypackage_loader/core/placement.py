@@ -399,6 +399,10 @@ def summarize(
             continue
         kind = builtin_mesh_kind(renderer.mesh_guid, renderer.mesh_file_id)
         if kind is not None and renderer.renderer_class == CLASS_MESH_RENDERER:
+            if not renderer.materials:
+                # マテリアルが 1 つも無い MeshRenderer は Unity では何も描かれない（スクリプトの目印に Cube を付けた
+                # GameObject など）ので作らない。読み込まない Renderer の警告にも数えない
+                continue
             primitives.append(PrimitivePlacement(key, kind, list(renderer.materials), active[key] and renderer.enabled))
         else:
             other += 1
