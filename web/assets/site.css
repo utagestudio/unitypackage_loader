@@ -184,6 +184,8 @@ html[lang="ja"] .vs-after li span { word-break: keep-all; overflow-wrap: anywher
 .inc span:not(.icon) { color: var(--muted); font-size: .93rem; }
 @media (max-width: 860px) { .included { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .included { grid-template-columns: 1fr; } }
+.scene-extras { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 20px 0 0; }
+@media (max-width: 560px) { .scene-extras { grid-template-columns: 1fr; } }
 .support-shaders { display: grid; gap: 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 10px; }
 .chip { padding: 8px 18px; border-radius: 999px; background: var(--peach); color: var(--ink-strong); font-weight: 800; font-size: 1.05rem; line-height: 1.3; }

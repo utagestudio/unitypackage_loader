@@ -212,8 +212,14 @@
       </figure>
       <div class="modes units">
         <div class="mode default"><span class="name">Scenes</span><span>Everything placed in the scene, layout included, plus lights and cameras</span></div>
-        <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and they are laid out side by side</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>One Unity prefab at a time. Pick several and lay them out side by side or stack them at the origin</span></div>
         <div class="mode"><span class="name">Models</span><span>Model files such as FBX, as they are</span></div>
+      </div>
+      <div class="included scene-extras">
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Unity's built-in shapes and decals</b><span>Ground and walls made from a Cube or Plane come in with the same shape, and graffiti or poster decals are laid on as flat cards.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>LODs and unused parts</b><span>Distant LOD levels are imported but hidden, and parts of a model that the scene or prefab does not use are left out.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Hidden parts stay hidden</b><span>Parts under an inactive GameObject or with a disabled Renderer in Unity are imported and hidden.</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Prefab overrides applied</b><span>Material swaps from Prefab Variants, nested prefabs and parts inside a model follow the assignments made in Unity.</span></div></div>
       </div>
       <p class="modes-note">Light brightness is converted to look close in EEVEE, following how Built-in, URP and HDRP each define it (and, for HDRP, the scene's exposure). It still will not match Unity exactly, so finish the look in Blender.</p>
     </div>
@@ -252,10 +258,10 @@
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>MToon</b><span>VRM's toon shader, including shade color and MatCap</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>Poiyomi</b><span>Toon lighting with shadow strength, gated emission, reflection-aware metallic, outlines</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>Standard</b><span>Built-in PBR: albedo, metallic, smoothness, normal, emission</span></div></div>
-          <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP</b><span>Lit, Simple Lit, Unlit and Baked Lit. Both the metallic and specular setups, transparency and alpha clip, ignoring old settings left over from Standard</span></div></div>
+          <div class="shader"><span class="tag tag-full">Profile</span><div><b>URP</b><span>Lit, Complex Lit, Simple Lit, Unlit and Baked Lit. Both the metallic and specular setups, transparency and alpha clip, ignoring old settings left over from Standard</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>HDRP</b><span>Lit, LayeredLit (first layer) and Unlit. Metallic and smoothness from the mask map, specular color, transparency and alpha clip, emission</span></div></div>
           <div class="shader"><span class="tag tag-full">Profile</span><div><b>VRChat Mobile</b><span>Quest shaders: Toon Lit, Standard Lite, Toon Standard, Bumped Specular, MatCap Lit</span></div></div>
-          <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. When the shader (such as a Shader Graph) is in the package, old settings it does not use are ignored. Add your own GUID table for custom shaders.</span></div></div>
+          <div class="shader"><span class="tag tag-generic">Generic</span><div><b>Anything else</b><span>Best effort from common property names. When the shader (such as a Shader Graph) is in the package, old settings it does not use are ignored, a custom <code>.shader</code>'s render queue and culling decide cutout, transparency and double-sided, and texture tiling set inside a Shader Graph carries over. Add your own GUID table for custom shaders.</span></div></div>
         </div>
         <div class="legend">
           <span><span class="tag tag-full">Profile</span>Dedicated mapping made for that shader</span>

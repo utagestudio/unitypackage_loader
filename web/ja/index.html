@@ -212,8 +212,14 @@
       </figure>
       <div class="modes units">
         <div class="mode default"><span class="name">Scenes</span><span>シーンに置かれたものを、配置ごと読み込みます。ライトとカメラも一緒に</span></div>
-        <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと重ならないように並べます</span></div>
+        <div class="mode"><span class="name">Prefabs</span><span>Unity で組み立てた prefab を 1 つずつ読み込みます。複数選ぶと、重ならないように並べるか原点に重ねるかを選べます</span></div>
         <div class="mode"><span class="name">Models</span><span>FBX などのモデルファイルを、そのまま読み込みます</span></div>
+      </div>
+      <div class="included scene-extras">
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>Unity の組み込みの形とデカール</b><span>Cube や Plane で作った地面や壁も同じ形で作り、落書きや張り紙のデカールは板にして貼ります。</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>LOD と使われていない部品</b><span>遠景用の LOD は読み込んだうえで非表示にし、シーンや prefab が使っていないモデルの部品は読み込みません。</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>隠した部品は非表示のまま</b><span>Unity で非アクティブにした GameObject や、無効にした Renderer の部品は、読み込んだうえで非表示にします。</span></div></div>
+        <div class="inc"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><div><b>prefab の上書きも反映</b><span>Prefab Variant やネストした prefab、モデルの中の部品へのマテリアルの差し替えも、Unity での割り当てどおりに当てます。</span></div></div>
       </div>
       <p class="modes-note">ライトの明るさは、Built-in・URP・HDRP それぞれの明るさの決まり（HDRP はシーンの露出も）に合わせて、EEVEE で近い見た目になるように換算します。それでも Unity とまったく同じにはならないので、仕上げは Blender で調整してください。</p>
     </div>
@@ -252,14 +258,14 @@
           <div class="shader"><span class="tag tag-full">専用</span><div><b>MToon</b><span>VRM のトゥーンシェーダー。シェード色と MatCap を含む</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>Poiyomi</b><span>影の強さを含むトゥーン設定、エミッションの有効判定、反射設定に応じたメタリック、アウトライン</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>Standard</b><span>ビルトインの PBR。アルベド、メタリック、スムースネス、ノーマル、エミッション</span></div></div>
-          <div class="shader"><span class="tag tag-full">専用</span><div><b>URP</b><span>Lit・Simple Lit・Unlit・Baked Lit。Metallic と Specular の両方の設定、透過と切り抜き、Standard から移したときに残った古い設定は読まない</span></div></div>
+          <div class="shader"><span class="tag tag-full">専用</span><div><b>URP</b><span>Lit・Complex Lit・Simple Lit・Unlit・Baked Lit。Metallic と Specular の両方の設定、透過と切り抜き、Standard から移したときに残った古い設定は読まない</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>HDRP</b><span>Lit・LayeredLit（1 層目）・Unlit。マスクマップのメタリックとスムースネス、Specular Color、透過と切り抜き、エミッション</span></div></div>
           <div class="shader"><span class="tag tag-full">専用</span><div><b>VRChat Mobile</b><span>Quest 向け: Toon Lit、Standard Lite、Toon Standard、Bumped Specular、MatCap Lit</span></div></div>
-          <div class="shader"><span class="tag tag-generic">汎用</span><div><b>その他のシェーダー</b><span>一般的なプロパティ名から可能な範囲で変換。Shader Graph などのシェーダーがパッケージに入っていれば、そのシェーダーが使わない古い設定は読みません。独自シェーダー用の GUID 表も登録できます。</span></div></div>
+          <div class="shader"><span class="tag tag-generic">汎用</span><div><b>その他のシェーダー</b><span>一般的なプロパティ名から可能な範囲で変換。Shader Graph などのシェーダーがパッケージに入っていれば、そのシェーダーが使わない古い設定は読まず、自作の <code>.shader</code> の描画順や両面の指定から切り抜き・半透明・両面を決め、Shader Graph の中のテクスチャの繰り返し（Tiling）も引き継ぎます。独自シェーダー用の GUID 表も登録できます。</span></div></div>
         </div>
         <div class="legend">
           <span><span class="tag tag-full">専用</span>シェーダーごとに作った専用の対応付け</span>
-          <span><span class="tag tag-generic">汎用</span>どのシェーダーにも効く規則。結果はシェーダー次第</span>
+          <span><span class="tag tag-generic">汎用</span>どのシェーダーにも当てはめる規則。結果はシェーダー次第</span>
         </div>
       </details>
     </div>
