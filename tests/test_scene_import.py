@@ -1,8 +1,10 @@
 import unittest
 
 from tests import _paths  # noqa: F401
-from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, ModelPlacement, Node, PlacedRenderer, SceneContents
+from unitypackage_loader.core.hierarchy import CLASS_MESH_RENDERER, Hierarchy, Node
+from unitypackage_loader.core.placement import ModelPlacement, PlacedRenderer, SceneContents
 from unitypackage_loader.core.scene_import import (
+    PlacementStats,
     parts_to_hide,
     parts_to_remove,
     prefab_warnings,
@@ -157,8 +159,9 @@ class SceneWarningsTests(unittest.TestCase):
     def test_messages_in_order(self):
         contents = SceneContents([], unresolved_overrides=2, missing_sources=1, other_renderers=3)
         messages = scene_warnings(
-            "Assets/S.unity", contents, baked_lights=1, light_notes={"b note", "a note"},
-            hidden_unused=4, hidden_lods=7, skipped_nodes=5, skipped_offsets=6,
+            "Assets/S.unity", contents, PlacementStats(
+                baked_lights=1, light_notes={"b note", "a note"}, hidden_unused=4, hidden_lods=7, skipped_nodes=5, skipped_offsets=6,
+            ),
         )
         self.assertTrue(all(m.startswith("scene Assets/S.unity: ") for m in messages))
         self.assertEqual(
@@ -167,24 +170,24 @@ class SceneWarningsTests(unittest.TestCase):
         )
 
     def test_unreadable_scene_reports_only_lights(self):
-        self.assertEqual(scene_warnings("S", None, hidden_unused=3), [])
-        self.assertEqual(len(scene_warnings("S", None, baked_lights=1)), 1)
-        self.assertEqual(scene_warnings("S", SceneContents([])), [])
+        self.assertEqual(scene_warnings("S", None, PlacementStats(hidden_unused=3)), [])
+        self.assertEqual(len(scene_warnings("S", None, PlacementStats(baked_lights=1))), 1)
+        self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats()), [])
 
 
 class PrefabWarningsTests(unittest.TestCase):
     def test_same_wording_as_scenes(self):
-        self.assertEqual(prefab_warnings(), [])
-        messages = prefab_warnings(hidden_unused=53, hidden_lods=2)
+        self.assertEqual(prefab_warnings(PlacementStats()), [])
+        messages = prefab_warnings(PlacementStats(hidden_unused=53, hidden_lods=2))
         self.assertEqual(messages[0], unused_warning(53))
         self.assertTrue(messages[0].startswith("53 object(s) from model files are not used"))
         self.assertTrue(messages[1].startswith("2 object(s) are lower LOD levels"))
 
     def test_removed_parts(self):
-        messages = prefab_warnings(removed_unused=53, hidden_unused=1)
+        messages = prefab_warnings(PlacementStats(removed_unused=53, hidden_unused=1))
         self.assertEqual(messages, [removed_warning(53), unused_warning(1)])
         self.assertIn("were not imported", messages[0])
-        self.assertEqual(scene_warnings("S", SceneContents([]), removed_unused=4), ["scene S: " + removed_warning(4)])
+        self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats(removed_unused=4)), ["scene S: " + removed_warning(4)])
 
 
 if __name__ == "__main__":

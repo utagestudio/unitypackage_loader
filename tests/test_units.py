@@ -1,7 +1,8 @@
 import unittest
 
 from tests import _paths  # noqa: F401
-from unitypackage_loader.core.hierarchy import IDENTITY, ModelPlacement, SceneContents
+from unitypackage_loader.core.hierarchy import IDENTITY
+from unitypackage_loader.core.placement import ModelPlacement, SceneContents
 from unitypackage_loader.core.prefab import RendererMaterials
 from unitypackage_loader.core.units import (
     NO_MESH_REASON,

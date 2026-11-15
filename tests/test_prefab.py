@@ -6,21 +6,20 @@ from tests.test_material import LILTOON_OPAQUE, LILTOON_TRANS
 from unitypackage_loader.core.mapping import resolve_materials
 from unitypackage_loader.core.material import parse_material
 from unitypackage_loader.core.meta import ModelImporterInfo
+from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import (
     NAMED_MODEL_ROOT_GAME_OBJECT,
     NAMED_MODEL_ROOT_TRANSFORM,
-    Expander,
-    ModelPlacement,
     PartState,
-    PlacedRenderer,
     parse_asset,
     pending_object,
     pending_renderer,
-    placements,
 )
+from unitypackage_loader.core.placement import ModelPlacement, PlacedRenderer, placements
 from unitypackage_loader.core.transform import IDENTITY
 from unitypackage_loader.core.prefab import (
     RendererMaterials,
+    analyze_prefab,
     merge_prefab_tables,
     inactive_models,
     models_placed_whole,
@@ -503,6 +502,14 @@ class PrefabVisibilityTests(unittest.TestCase):
 
     def test_models_placed_only_under_inactive_objects(self):
         self.assertEqual(inactive_models(self.placed), {MODEL_B})
+
+    def test_analysis_collects_the_same_results(self):
+        """読み込み側がまとめて受け取る PrefabAnalysis は、個々の関数の結果と同じ（#198）。"""
+        analysis = analyze_prefab(self.h, self.placed)
+        self.assertEqual(analysis.tables, tables_from_hierarchy(self.h, MODELS, placed=self.placed))
+        self.assertEqual(analysis.whole_models, models_placed_whole(self.h, self.placed))
+        self.assertEqual(analysis.parts, parts_from_placements(self.placed))
+        self.assertEqual(analysis.inactive_models, {MODEL_B})
 
     def test_a_row_shown_in_any_placement_is_shown(self):
         # 同じモデルを 2 か所に置き、片方だけ非アクティブ（Prefabs 単位ではモデルを 1 回だけ読み込む）

@@ -28,6 +28,8 @@ from ..core.units import (
     available_units,
     default_unit,
 )
+from ..blender import log
+from .common import report_level
 from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
 
 if TYPE_CHECKING:
@@ -369,6 +371,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             opts.model_guids = [m.guid for m in prepared.models if m.guid in chosen]
 
         prefs = get_prefs(context)
+        log.set_verbose(prefs is None or prefs.verbose_log)
         if prefs is not None:
             # 次に開いたときの既定にする（並べ方は Preferences の既定値そのものを更新する）
             prefs.last_import_unit = unit
@@ -394,9 +397,9 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         finally:
             wm.progress_end()
 
-        if prefs is None or prefs.verbose_log:
+        if log.verbose():
             print(report.as_text())
-        self.report({"WARNING" if report.warnings or report.errors else "INFO"}, report.summary())
+        self.report({report_level(report)}, report.summary())
         return {"FINISHED"}
 
 
@@ -431,54 +434,66 @@ _classes = (
 )
 
 
+def _window_manager_props() -> dict:
+    """ダイアログが WindowManager に置くプロパティ（名前 → 定義）。登録と解除をこの表から行う。"""
+    return {
+        _ITEMS_PROP: CollectionProperty(type=UNITYPKG_ImportItem),
+        _INDEX_PROP: IntProperty(default=0),
+        _UNIT_PROP: EnumProperty(name="Import Unit", items=_unit_items, update=_on_unit_changed),
+        _ARRANGE_PROP: EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"),
+        _LIGHTS_PROP: BoolProperty(name="Lights", default=True, description="Import the scene's lights"),
+        _CAMERAS_PROP: BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"),
+        _EXPOSURE_PROP: BoolProperty(
+            name="Exposure",
+            default=True,
+            description=(
+                "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
+                "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
+            ),
+        ),
+        _DECALS_PROP: BoolProperty(
+            name="Decals",
+            default=True,
+            description=(
+                "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
+                "placed in the middle of each projector's box. Good for decals on flat walls and roads"
+            ),
+        ),
+        _LODS_PROP: BoolProperty(
+            name="Hide Distant Levels",
+            default=True,
+            description=(
+                "Hide the distant LOD levels of Unity LODGroups, so only the most detailed mesh is visible. "
+                "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
+            ),
+        ),
+        _UNUSED_PROP: BoolProperty(
+            name="Skip Unused Parts",
+            default=True,
+            description=(
+                "Do not import the parts of a model file that the Unity prefabs or scene do not use, "
+                "such as the other pieces of a model file that bundles many props. "
+                "Turn off to import them hidden, as before"
+            ),
+        ),
+    }
+
+
+_registered_props: list[str] = []  # register で WindowManager に足したプロパティの名前（unregister で外す）
+
+
 def register() -> None:
     for cls in _classes:
         bpy.utils.register_class(cls)
-    wm = bpy.types.WindowManager
-    setattr(wm, _ITEMS_PROP, CollectionProperty(type=UNITYPKG_ImportItem))
-    setattr(wm, _INDEX_PROP, IntProperty(default=0))
-    setattr(wm, _UNIT_PROP, EnumProperty(name="Import Unit", items=_unit_items, update=_on_unit_changed))
-    setattr(wm, _ARRANGE_PROP, EnumProperty(name="Arrange", items=ARRANGE_ITEMS, default="SIDE_BY_SIDE"))
-    setattr(wm, _LIGHTS_PROP, BoolProperty(name="Lights", default=True, description="Import the scene's lights"))
-    setattr(wm, _CAMERAS_PROP, BoolProperty(name="Cameras", default=True, description="Import the scene's cameras"))
-    setattr(wm, _EXPOSURE_PROP, BoolProperty(
-        name="Exposure",
-        default=True,
-        description=(
-            "Scale the HDRP scene's lights by its Volume exposure, so the physical light units look as bright as in Unity. "
-            "The Blender scene's exposure is left unchanged. Automatic exposure is approximated with its upper limit"
-        ),
-    ))
-    setattr(wm, _DECALS_PROP, BoolProperty(
-        name="Decals",
-        default=True,
-        description=(
-            "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
-            "placed in the middle of each projector's box. Good for decals on flat walls and roads"
-        ),
-    ))
-    setattr(wm, _LODS_PROP, BoolProperty(
-        name="Hide Distant Levels",
-        default=True,
-        description=(
-            "Hide the distant LOD levels of Unity LODGroups, so only the most detailed mesh is visible. "
-            "The hidden objects stay in the file and keep their level in the 'unity_lod' custom property"
-        ),
-    ))
-    setattr(wm, _UNUSED_PROP, BoolProperty(
-        name="Skip Unused Parts",
-        default=True,
-        description=(
-            "Do not import the parts of a model file that the Unity prefabs or scene do not use, "
-            "such as the other pieces of a model file that bundles many props. "
-            "Turn off to import them hidden, as before"
-        ),
-    ))
+    for name, prop in _window_manager_props().items():
+        setattr(bpy.types.WindowManager, name, prop)
+        _registered_props.append(name)
 
 
 def unregister() -> None:
-    for prop in (_UNUSED_PROP, _LODS_PROP, _DECALS_PROP, _EXPOSURE_PROP, _CAMERAS_PROP, _LIGHTS_PROP, _ARRANGE_PROP, _UNIT_PROP, _INDEX_PROP, _ITEMS_PROP):
-        if hasattr(bpy.types.WindowManager, prop):
-            delattr(bpy.types.WindowManager, prop)
+    for name in reversed(_registered_props):
+        if hasattr(bpy.types.WindowManager, name):
+            delattr(bpy.types.WindowManager, name)
+    _registered_props.clear()
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

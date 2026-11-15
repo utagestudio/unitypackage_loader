@@ -9,9 +9,9 @@ Blender の FBX インポーターで原点に読んだときの頂点の座標�
 import unittest
 
 from tests import _paths  # noqa: F401
+from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import (
     SOLE_NODE,
-    Expander,
     components,
     Hierarchy,
     Node,
@@ -21,10 +21,9 @@ from unitypackage_loader.core.hierarchy import (
     parse_asset,
     pending_object,
     pending_renderer,
-    placements,
-    summarize,
     world_matrices,
 )
+from unitypackage_loader.core.placement import ModelCatalog, placements, summarize
 from unitypackage_loader.core.transform import multiply, transform_point, unity_to_blender
 from unitypackage_loader.core import unity_ids
 from tests.unity_yaml_writer import (
@@ -242,6 +241,21 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual([(p.kind, p.materials, p.visible) for p in contents.primitives], [("Cube", [MAT_A], True)])
         self.assertEqual(self.hierarchy.nodes[contents.primitives[0].key].name, "Cube")
         self.assertEqual(contents.missing_sources, 1)
+
+
+class ModelCatalogTest(unittest.TestCase):
+    """読み込み側が 4 つの表をまとめて渡すための ModelCatalog（#198）。"""
+
+    def test_same_result_as_passing_the_tables(self):
+        assets = {NESTED: NESTED_PREFAB, UNPACKED: UNPACKED_PREFAB, LOOP: LOOP_PREFAB}
+        catalog = ModelCatalog(names={MODEL: "Probe"})
+        h = catalog.expander(lambda guid: parse_asset(assets[guid]) if guid in assets else None).expand_raw(parse_asset(SCENE))
+        expected = placements(expander().expand_raw(parse_asset(SCENE)), {MODEL: "Probe"})
+        self.assertEqual(
+            [(p.model_guid, p.world, sorted(p.renderers)) for p in catalog.placements(h)],
+            [(p.model_guid, p.world, sorted(p.renderers)) for p in expected],
+        )
+        self.assertEqual(catalog.summarize(h).model_guids, [MODEL])
 
 
 class DuplicateNameTest(unittest.TestCase):
