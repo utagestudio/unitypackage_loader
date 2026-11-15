@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..material import AlphaMode, Lighting, NormalizedMaterial, TexRef, UnityMaterial
-from ..shader_source import restrict_to_declared
+from ..shader_source import ShaderDefaults, restrict_to_declared
 
 __all__ = ["ShaderInfo", "ShaderTable", "ShaderProfile", "select_profile", "normalize_material"]
 
@@ -106,7 +106,7 @@ def alpha_mode_from_blend_state(mat: UnityMaterial, default: AlphaMode = "opaque
     return default
 
 
-def cull_backface(mat: UnityMaterial, default: bool = True) -> bool:
+def cull_backface(mat: UnityMaterial, default: bool | None = True) -> bool | None:
     """_Cull / _CullMode / _Culling（VRChat Toon Standard）のいずれかから背面カリングを決める。"""
     for name in ("_Cull", "_CullMode", "_Culling"):
         cull = mat.f(name, -1)
@@ -197,19 +197,32 @@ def select_profile(mat: UnityMaterial, table: ShaderTable | None = None) -> tupl
 
 
 def normalize_material(
-    mat: UnityMaterial, table: ShaderTable | None = None, declared: frozenset[str] | None = None
+    mat: UnityMaterial,
+    table: ShaderTable | None = None,
+    declared: frozenset[str] | None = None,
+    defaults: ShaderDefaults | None = None,
 ) -> NormalizedMaterial:
-    """``declared`` はパッケージに入っているシェーダーの定義が宣言するプロパティ名（``core/shader_source.py``）。
+    """``declared`` はパッケージに入っているシェーダーの定義が宣言するプロパティ名、``defaults`` はその描画の既定（``core/shader_source.py``）。
 
     シェーダー表に無いシェーダーで宣言が分かるときは、宣言されていない（前のシェーダーの残りの）プロパティを読まない（#118）。
     外した名前は ``extras["undeclared_properties"]`` に残す。表で分かるシェーダーは各プロファイルの読み方に任せる。
+    同じく表に無いシェーダーで、マテリアルからは不透明としか読めず、m_CustomRenderQueue も -1（シェーダーの既定のまま）なら、
+    シェーダーの RenderType / Queue タグから切り抜き・半透明を決める。マテリアルにカリングのプロパティが無く、
+    シェーダーが固定の ``Cull Off`` なら両面にする（#202）。
     """
     table = table or default_table()
     dropped: list[str] = []
-    if declared and table.lookup(mat) is None:
+    custom = table.lookup(mat) is None
+    if declared and custom:
         mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
     norm = profile.normalize(mat, info)
+    if defaults is not None and custom:
+        if norm.alpha_mode == "opaque" and mat.render_queue < 0 and defaults.alpha_mode is not None:
+            norm.alpha_mode = defaults.alpha_mode
+            norm.alpha_from_texture = True
+        if defaults.cull_off and cull_backface(mat, default=None) is None:
+            norm.cull_backface = False
     if info is None:
         # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
         from .standard import fill_emission_from_aliases, fill_textures_from_aliases

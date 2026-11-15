@@ -188,6 +188,10 @@ def scene_warnings(pathname: str, contents: SceneContents | None, stats: Placeme
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
             )
+        if contents.terrains:
+            messages.append(f"{contents.terrains} Unity Terrain(s) were not imported (terrains are not supported)")
+        if contents.ui_elements:
+            messages.append(f"{contents.ui_elements} UI element(s) (RectTransform) were not imported")
         if stats.skipped_decals:
             messages.append(
                 f"{stats.skipped_decals} decal projector(s) were skipped (their material is not in the package "

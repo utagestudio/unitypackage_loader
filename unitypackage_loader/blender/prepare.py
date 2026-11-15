@@ -23,7 +23,7 @@ from ..core.prefab import PrefabAnalysis, RendererMaterials, analyze_prefab, mer
 from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
-from ..core.shader_source import SHADER_SOURCE_EXTS, declared_properties
+from ..core.shader_source import SHADER_SOURCE_EXTS, ShaderDefaults, declared_properties, shader_defaults
 from ..core.units import PrefabSummary, SceneSummary, choice_count, summarize_prefabs, summarize_scene
 from .log import log_exception, warn_skipped
 from .model_import import operator_available
@@ -171,7 +171,7 @@ def texture_info(entry: AssetEntry, warn: Callable[[str], None]) -> TextureImpor
 
 
 class _ShaderDeclarations:
-    """パッケージに入っているシェーダーの定義が宣言するプロパティ名（GUID ごとに 1 度だけ読む。#118）。
+    """パッケージに入っているシェーダーの定義が宣言するプロパティ名と描画の既定（GUID ごとに 1 度だけ読む。#118 / #202）。
 
     Shader Graph なら、テクスチャを読む UV の Tiling & Offset も読む（``uv_transforms``。#193）。
     """
@@ -179,7 +179,7 @@ class _ShaderDeclarations:
     def __init__(self, pkg: UnityPackage, warn: Callable[[str], None]):
         self._pkg = pkg
         self._warn = warn
-        self._cache: dict[str, frozenset[str] | None] = {}
+        self._cache: dict[str, tuple[frozenset[str] | None, ShaderDefaults | None]] = {}
         self._transforms: dict[str, dict[str, UVTransform]] = {}
 
     def uv_transforms(self, guid: str | None) -> dict[str, UVTransform]:
@@ -207,21 +207,28 @@ class _ShaderDeclarations:
             return {}
 
     def get(self, guid: str | None) -> frozenset[str] | None:
+        return self._source(guid)[0]
+
+    def defaults(self, guid: str | None) -> ShaderDefaults | None:
+        return self._source(guid)[1]
+
+    def _source(self, guid: str | None) -> tuple[frozenset[str] | None, ShaderDefaults | None]:
         if not guid:
-            return None
+            return None, None
         if guid not in self._cache:
             self._cache[guid] = self._read(guid)
         return self._cache[guid]
 
-    def _read(self, guid: str) -> frozenset[str] | None:
+    def _read(self, guid: str) -> tuple[frozenset[str] | None, ShaderDefaults | None]:
         entry = self._pkg.get(guid)
         if entry is None or not entry.has_asset or entry.ext not in SHADER_SOURCE_EXTS:
-            return None
+            return None, None
         try:
-            return declared_properties(self._pkg.read_asset(guid), entry.ext) or None
+            data = self._pkg.read_asset(guid)
+            return declared_properties(data, entry.ext) or None, shader_defaults(data, entry.ext)
         except Exception as exc:  # noqa: BLE001 - 補助データなので、宣言を使わずに続ける（#69）
             warn_skipped(self._warn, f"could not read the properties of {entry.pathname}", exc)
-            return None
+            return None, None
 
 
 def prepare_package(
@@ -242,7 +249,7 @@ def prepare_package(
             umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
             # Shader Graph がグラフの中で UV を変えるテクスチャは、その値を Tiling / Offset として読む（#193）
             umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
-            norm = normalize_material(umat, table, declared.get(umat.shader_guid))
+            norm = normalize_material(umat, table, declared.get(umat.shader_guid), declared.defaults(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
             warn_skipped(warnings.append, f"could not parse {entry.pathname}", exc)
             continue

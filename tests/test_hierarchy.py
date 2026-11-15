@@ -136,6 +136,10 @@ SCENE = HEADER + "".join([
     game_object(9000, "Cube"),
     transform(9001, 9000),
     mesh_renderer(9002, 9003, 9000, "0000000000000000e000000000000000", MAT_A, mesh_file_id=10202),
+    # Terrain（読み込まず、件数を警告に出す。#202）
+    game_object(9200, "Terrain"),
+    transform(9201, 9200),
+    "--- !u!218 &9202\nTerrain:\n  m_GameObject: {fileID: 9200}\n  m_Enabled: 1\n",
     # マテリアルが 1 つも無い MeshRenderer は Unity では何も描かれない（Gothic Lights の Torch-Fire の Cube）
     game_object(9100, "Unpainted"),
     transform(9101, 9100),
@@ -241,7 +245,7 @@ class PlacementTest(unittest.TestCase):
         contents = summarize(self.hierarchy, [MODEL])
         self.assertEqual(len(contents.placements), 4)
         self.assertEqual(contents.model_guids, [MODEL])
-        self.assertEqual((contents.lights, contents.cameras, contents.ui_elements), (1, 1, 1))
+        self.assertEqual((contents.lights, contents.cameras, contents.ui_elements, contents.terrains), (1, 1, 1, 1))
         # Unity 組み込みの Cube の MeshRenderer は、組み込みメッシュとして作る（#190）。マテリアルが無いものは描かれないので作らない
         self.assertEqual(contents.other_renderers, 0)
         self.assertEqual([(p.kind, p.materials, p.visible) for p in contents.primitives], [("Cube", [MAT_A], True)])
