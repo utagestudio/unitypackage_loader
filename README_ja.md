@@ -110,7 +110,7 @@ Scenes は、シーンをまとめて読み込むと建物やライトが重な�
   パイプラインは、ライト・カメラに付いた URP / HDRP の追加データと、マテリアルのシェーダーから判定します。
   HDRP のシーンは、Volume の露出（Exposure）の分をライトの強さに掛けます（ダイアログの **Exposure** で切り替え。自動露出は上限の値で近似します）。
   Blender のシーンの露出（カラーマネジメント）は変えないので、パイプラインの違うシーンを 1 つの Blender のシーンに混ぜても、それぞれの明るさが崩れません。
-  Unity でライトマップにだけ効くライト（ベイク、面光源）はリアルタイムのライトになるので、警告に出します。
+  Unity でライトマップにだけ使われるライト（ベイク、面光源）はリアルタイムのライトになるので、警告に出します。
   Unity 組み込みのメッシュ（Cube・Sphere・Capsule・Cylinder・Plane・Quad。地面に敷いた板など）は同じ形・寸法・UV で作り、割り当てられたマテリアルを付けます。
   URP / HDRP の DecalProjector（落書き・染み・張り紙など）は、投影の箱の中心に置いた板にして、デカールのマテリアルを半透明で貼ります
   （ダイアログの **Decals** で切り替えられます）。平らな壁や道路へのデカールは Unity に近い見た目になりますが、でこぼこした地面や角をまたぐもの、
@@ -213,8 +213,13 @@ Shader Graph がグラフの中でテクスチャの繰り返し（Tiling And Of
 # bpy 非依存の単体テスト
 python3 -m unittest discover -s tests -t .
 
-# 合成パッケージの生成（実在アセット不要）と、それを使った統合テスト
-blender -b --factory-startup --python tests/make_synthetic_package.py
+# 合成パッケージ（実在アセット不要）での統合テスト。どの生成スクリプトでパッケージを作り、どの期待値で回すかの一覧は
+# tests/integration_runs.json（CI も同じ一覧を使う）。無いパッケージは生成してから回し、最後に合否をまとめて出す
+python3 tests/run_integration.py                  # 全期待値（合成パッケージは _local/unitypackages/ に出る）
+python3 tests/run_integration.py --generate       # 合成パッケージを作り直してから回す（生成スクリプトを変えたとき）
+python3 tests/run_integration.py --only scene     # 期待値のファイル名に "scene" を含むものだけ
+
+# 1 つのパッケージを 1 つの期待値で回す
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
 
 # 手元の実パッケージでの統合テスト（_local/unitypackages/ にパッケージ、_local/ に expectations.json）
@@ -235,11 +240,16 @@ PR と main / release ブランチへの push では、`.github/workflows/tests.
 ```
 unitypackage_loader/         Extension 本体
   blender_manifest.toml
-  core/                      bpy 非依存（YAML パーサー、tar 索引、.meta、マテリアル正規化、GUID 表）
-  blender/                   bpy 依存（インポート実行、ノード生成、画像読み込み）
-  operators/                 File > Import のオペレーターとモデル選択ダイアログ
-  ui/                        Preferences とサイドバーのレポートパネル
+  core/                      bpy 非依存: パッケージの索引、Unity YAML・バイナリの読み取り、.meta、マテリアルの正規化と
+                             シェーダーごとのプロファイル、メッシュとマテリアルの対応付け、prefab・シーンの展開と配置、
+                             ライト、露出、デカール、組み込みメッシュ
+  blender/                   bpy 依存: 読み込みの流れ、モデルの読み込み、マテリアルとノード、テクスチャ、シーンのオブジェクトと配置、
+                             トゥーンのノードグループ、アウトライン
+  operators/                 File > Import、選択ダイアログ、マテリアルの組み直し、アウトライン
+  ui/                        Preferences とサイドバーの "UPI" パネル
 tests/                       単体テスト、統合テスト、合成パッケージ生成
+tools/                       紹介ページの組み立て、スクリーンショット、掲載用画像の元
+web/                         紹介ページのソース（英語 index.html、日本語 ja/、assets/）
 ```
 
 ## お問い合わせ・不具合の報告

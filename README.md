@@ -235,8 +235,14 @@ settings used at import (or the last rebuild). Outlines can be added and removed
 # Unit tests (no bpy required)
 python3 -m unittest discover -s tests -t .
 
-# Generate a synthetic package (no real assets required) and run the integration test with it
-blender -b --factory-startup --python tests/make_synthetic_package.py
+# Integration tests with the synthetic packages (no real assets required). tests/integration_runs.json lists
+# which generator builds each package and which expectations run against it (CI uses the same list).
+# Missing packages are generated first, and a pass/fail summary is printed at the end.
+python3 tests/run_integration.py                  # every expectation file (packages go to _local/unitypackages/)
+python3 tests/run_integration.py --generate       # rebuild the synthetic packages first (after changing a generator)
+python3 tests/run_integration.py --only scene     # only expectation files whose name contains "scene"
+
+# A single package with a single expectation file
 blender -b --factory-startup --python tests/integration_import.py -- _local/unitypackages/synthetic_multi.unitypackage tests/expectations_synthetic.json
 
 # Integration test with a real package on your machine (package in _local/unitypackages/, expectations.json in _local/)
@@ -257,11 +263,16 @@ See [DESIGN.md](DESIGN.md) for design details.
 ```
 unitypackage_loader/         The Extension itself
   blender_manifest.toml
-  core/                      bpy-independent (YAML parser, tar index, .meta, material normalization, GUID tables)
-  blender/                   bpy-dependent (import execution, node building, image loading)
-  operators/                 File > Import operator and the model selection dialog
-  ui/                        Preferences and the sidebar report panel
+  core/                      bpy-independent: package index, Unity YAML / binary readers, .meta, material normalization
+                             and shader profiles, mesh-to-material mapping, prefab / scene expansion and placement,
+                             lights, exposure, decals, built-in meshes
+  blender/                   bpy-dependent: import flow, model import, materials and nodes, textures, scene objects
+                             and placement, toon node group, outlines
+  operators/                 File > Import, the selection dialog, rebuilding materials, outlines
+  ui/                        Preferences and the "UPI" sidebar panel
 tests/                       Unit tests, integration tests, synthetic package generation
+tools/                       Website build, screenshots and image sources for the listings
+web/                         Website source (English index.html, Japanese ja/, assets/)
 ```
 
 ## Feedback and bug reports
