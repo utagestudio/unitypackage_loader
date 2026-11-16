@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 
 import bpy
 
+from ..core.fbx_units import read_unit_scale
 from ..core.mapping import submesh_slot_order
+from ..core.meta import ModelImporterInfo
 from ..core.model_ids import ModelObject
 from ..core.package import AssetEntry, UnityPackage
 from ..core.report import ImportReport
@@ -135,14 +137,14 @@ def sidecar_guids(pkg: UnityPackage, model: AssetEntry) -> list[str]:
     ]
 
 
-def _import_fbx(path: Path, opts: ImportOptions) -> None:
+def _import_fbx(path: Path, opts: ImportOptions, scale: float = 1.0) -> None:
     """FBX を読み込む。既定は新しいインポーター（wm.fbx_import。Blender 4.5 で追加）で、Legacy を選んだときだけ Python 製のもの。
 
     bpy.ops の hasattr は常に True なので、インポーターの有無の判定には使えない（最小版の 4.5 にはどちらもある）。
     """
     kwargs = dict(
         filepath=str(path),
-        global_scale=opts.global_scale,
+        global_scale=opts.global_scale * scale,
         use_anim=opts.use_anim,
         ignore_leaf_bones=opts.ignore_leaf_bones,
         use_custom_normals=True,
@@ -171,11 +173,22 @@ def delegate_to_vrm_addon(model: AssetEntry, opts: ImportOptions) -> bool:
     return model.ext == ".vrm" and opts.use_vrm_addon and vrm_addon_available()
 
 
+def _legacy_import_scale(path: Path, model: AssetEntry) -> float:
+    """Unity 4 以前（metaData）のモデルを Unity と同じ大きさで読むための倍率（``ModelImporterInfo.import_scale``。#233）。"""
+    if model.legacy_meta is None:
+        return 1.0
+    try:
+        info = ModelImporterInfo.from_meta(model.legacy_meta)
+    except ValueError:
+        return 1.0
+    return info.import_scale(read_unit_scale(path))
+
+
 def import_model_file(path: Path, model: AssetEntry, opts: ImportOptions, collection, report: ImportReport) -> bool:
     """モデルを読み込む。マテリアルを外部インポーターに任せた（こちらで組み直さない）場合は True。"""
     ext = model.ext
     if ext == ".fbx":
-        _import_fbx(path, opts)
+        _import_fbx(path, opts, _legacy_import_scale(path, model))
         return False
     if ext == ".obj":
         # Unity と同じくグループ（g）ごとに分ける。o の名前は Unity が使わないので分けない（#214）
