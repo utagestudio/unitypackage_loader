@@ -123,7 +123,11 @@ ticked):
   Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
   the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
   close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are
-  approximations. UI, terrain and other
+  approximations. Unity Terrains become meshes built from the heightmap, with a material that blends the layers'
+  textures (diffuse, normal and mask) by the alphamaps. A fine heightmap is thinned out to the number of vertices per
+  side chosen with Terrain under "Also Import" in the dialog (129, 257, 513, 1025 or full; 513 by default), and holes
+  are left open. Scenes that hold only a Terrain and no models can be imported too. Terrain trees and grass are not
+  imported and are counted in the warnings. UI and other
   meshes that are not in the package are not imported and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
   objects inside it (materials, positions of parts such as open doors) are applied when the model's `.meta` is in the
   format of Unity 2018.2 and earlier, which has a name table; otherwise they are counted in the warnings.
@@ -266,9 +270,9 @@ unitypackage_loader/         The Extension itself
   blender_manifest.toml
   core/                      bpy-independent: package index, Unity YAML / binary readers, .meta, material normalization
                              and shader profiles, mesh-to-material mapping, prefab / scene expansion and placement,
-                             lights, exposure, decals, built-in meshes
+                             lights, exposure, decals, built-in meshes, terrains
   blender/                   bpy-dependent: import flow, model import, materials and nodes, textures, scene objects
-                             and placement, toon node group, outlines
+                             and placement, terrains, toon node group, outlines
   operators/                 File > Import, the selection dialog, rebuilding materials, outlines
   ui/                        Preferences and the "UPI" sidebar panel
 tests/                       Unit tests, integration tests, synthetic package generation

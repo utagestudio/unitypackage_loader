@@ -123,7 +123,34 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
   - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
     オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
   - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。
-- 読み込まないもの: UI、Terrain、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
+- Unity の Terrain（Issue #205）: シーンの Terrain（クラス 218）は中身ごと Node のコンポーネントに持ち（prefab の上書きも当たる）、
+  `m_TerrainData` が指す TerrainData（クラス 156。ほぼ必ずバイナリの .asset）を読む（`core/terrain.py`）。
+  - 高さマップは `m_Resolution`（2019.3 より前は `m_Width` / `m_Height`）× 同じ数の 16 ビットの値で、`m_Heights[z * 幅 + x]` の 32766 が
+    `m_Scale.y` の高さ、点の間隔は `m_Scale.x` / `m_Scale.z`。原点は角で +X・+Z に広がる。Tokyo Street は 4097² の 1,680 万点・230 MB あり、
+    要素ごとに Python のオブジェクトにすると数百 MB になるので、`unity_binary` の compact モード（数値の配列は `array`、TypelessData は `bytes`）で読む。
+  - メッシュは 1 辺の点の数の上限（ダイアログの Terrain。`scene_terrain` = NONE / 129 / 257 / 513 / 1025 / FULL、既定 513）まで等間隔に間引く
+    （両端の点は必ず残す）。穴（`m_Holes`、マス単位で 0 が穴）は、間引いた面が覆う元のマスの半分より多くが穴なら面を作らない。
+    Unity の (x, y, z) を Blender の (-x, -z, y) にし、面の法線が上を向く順に頂点を並べる。UV は Terrain 全体で 0〜1（アルファマップと同じ向き）。
+  - Terrain は Transform の回転・拡大縮小を受けず、ワールドの位置に軸に沿って置かれる（親の回転も受けない）。オブジェクトは親の GameObject の
+    Empty の下に、ワールドでは位置だけの行列になるように置く。オブジェクト名は GameObject の名前、中身は `unity_terrain` に残す。
+    `m_DrawHeightmap` が 0 か、非アクティブ・無効なら隠す。同じ TerrainData を使う Terrain・シーンは、1 回の読み込みの中でメッシュとマテリアルを共有する。
+  - 塗り分け: レイヤーは `m_TerrainLayers` の .terrainlayer（2018.3 より前は `m_Splats` の SplatPrototype）。k 番目のレイヤーの重みは
+    `m_AlphaTextures` の k // 4 枚目の k % 4 チャンネル（RGBA32 か ARGB32。展開先に PNG で書き、Non-Color・Channel Packed で読む）。
+    レイヤーのテクスチャは Terrain の UV × (Terrain の大きさ / `m_TileSize`) + `m_TileOffset` / `m_TileSize` で読み、重みを掛けて足す
+    （色は × `m_DiffuseRemapMax`）。金属感・つやは、URP / HDRP でマスクマップがあれば R / A を `m_MaskMapRemapMin`〜`Max` に写した値、無ければ
+    `m_Metallic` と `m_Smoothness` × ディフューズの A（Built-in と URP の Terrain のシェーダーと同じ）。法線は法線マップの色を重みで足して
+    1 つの Normal Map ノードに通す（強さは `m_NormalScale` の重み付きの和）。Auto / Principled / Toon は Principled BSDF、Unlit は色だけ、
+    Names Only はノードを組まない。`m_MaterialTemplate`（カスタムの Terrain シェーダー）は読まない。マテリアルには `unity_terrain_layers` を残す
+    （`unity_normalized` は無いので、マテリアルの再構築の対象外）。
+  - レイヤーのテクスチャは TerrainData を読むまで分からないので、走査時にキャッシュした .terrainlayer のテクスチャを先に展開する。
+    SplatPrototype のテクスチャなど漏れたものは、組み立ての前に展開して読む。
+  - モデルの無いシーンも、パッケージにある TerrainData を指す Terrain があれば読み込める（`summarize_scene`）。モデルファイルが 1 つも無いパッケージも、
+    シーンと TerrainData（.meta の `mainObjectFileID: 15600000`）があれば解析を続ける。
+  - 木（`m_TreeInstances`）と草（`m_DetailPrototypes`）は読まず、数を警告に出す（手元では Impostors のサンプルが木 10,000 本、Dreamscape Meadows が
+    木と草、Advanced Terrain Grass が草を使う）。SerializedFile 版 9 の古い TerrainData（Global Illumination Proxy）は読めないので警告して外す。
+  - 読み込む単位 Scenes だけ（手元で prefab の中に Terrain があるのは Simple Water Shader HDRP の例と Magic Pig のデモ用 prefab で、
+    Prefabs 単位は prefab の中の Transform を再現しない）。
+- 読み込まないもの: UI、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
 
@@ -566,6 +593,7 @@ unitypackage_loader/
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
+│   ├─ terrain.py                # Terrain の TerrainData・TerrainLayer の読み取り、間引いたメッシュ、アルファマップの PNG（#205）
 │   ├─ primitives.py             # Unity の組み込みメッシュ（Cube / Sphere / Capsule / Cylinder / Plane / Quad）の形（#190）
 │   ├─ lights.py                 # シーンのライト・カメラを Blender の値に換算する（#49）
 │   ├─ exposure.py               # HDRP の Volume の露出からライトの強さの倍率を決める（#130）
@@ -586,7 +614,8 @@ unitypackage_loader/
 │   ├─ prepare.py                # パッケージの事前解析（prepare_package / PreparedPackage。ダイアログと読み込みで共有）
 │   ├─ model_import.py           # モデルファイルを Blender のインポーターで読む処理と、bpy.data の差分
 │   ├─ session_materials.py      # 1 回の読み込みの中でのマテリアルの組み立て・共有・スロット分割（SessionMaterials）
-│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・デカール・ライト・カメラ）
+│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・Terrain・デカール・ライト・カメラ）
+│   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
