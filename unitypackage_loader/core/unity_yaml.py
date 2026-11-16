@@ -456,10 +456,13 @@ class _BlockParser:
         Unity は長い値（``m_ShaderKeywords`` など）を次の行に折り返して書く。YAML と同じく行の区切りは空白 1 つにし、
         ダブルクォート内で行末が ``\\`` のときは空白を入れない。クォート付きは閉じるまで読む。
         空行は ``_split_lines`` で落ちるので、値の中の改行は保持しない（読み込みで使うキーには出てこない）。
+
+        クォートが閉じていない間は、インデントによらず続きの行とみなす。Unity は改行を含む文字列（UI の ``m_Text`` など）を
+        複数行のクォート付きの値で書き、閉じのクォートを行頭に置くことがある（#212）。
         """
         n = len(self.lines)
         quoted = text[0] in "'\""
-        while i + 1 < n and self.lines[i + 1].indent > indent:
+        while i + 1 < n and (self.lines[i + 1].indent > indent or (quoted and not _flow_balanced(text))):
             if quoted and _flow_balanced(text):
                 break
             line = self.lines[i + 1]
@@ -467,9 +470,13 @@ class _BlockParser:
                 raise UnityYamlError(f"line {line.number}: unexpected indentation: {line.content!r}")
             if quoted and text[0] == '"' and _escaped_line_end(text):
                 text = text[:-1] + line.content
+            elif quoted and line.content[0] == text[0] and _flow_balanced(text + line.content[0]):
+                text += line.content  # 閉じのクォートだけの行（前の行との間に空白を入れない）
             else:
                 text = f"{text} {line.content}"
             i += 1
+        if quoted and not _flow_balanced(text):
+            raise UnityYamlError(f"line {self.lines[i].number}: unterminated quoted string: {text[:80]!r}")
         return text, i
 
 
