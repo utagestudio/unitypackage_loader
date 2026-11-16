@@ -64,6 +64,46 @@
         "BrokenPsdMat.mat",
         "PsdMat.mat"
       ]
+    },
+    {
+      "top": "Strip",
+      "object": "Strip.001",
+      "hidden": false,
+      "bbox": [
+        -8.005,
+        -0.0,
+        -0.005,
+        -7.995,
+        0.0,
+        0.005
+      ],
+      "node_only": true
+    },
+    {
+      "top": "Strip",
+      "object": "Strip",
+      "absent": true,
+      "node_only": true
+    },
+    {
+      "top": "Strip",
+      "object": "Strip.002",
+      "absent": true,
+      "node_only": true
+    },
+    {
+      "top": "Other",
+      "object": "Strip.001",
+      "hidden": false,
+      "bbox": [
+        7.5,
+        -0.5,
+        0.0,
+        8.5,
+        0.5,
+        0.0
+      ],
+      "node_only": true
     }
   ],
   "shared_meshes": [

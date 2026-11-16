@@ -818,6 +818,23 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
 
 
+class TopLevelNodeTest(unittest.TestCase):
+    """表の無い、最上位のノードが複数ある FBX を展開した GameObject を、そのノードとして置く（#237）。"""
+
+    def test_root_game_object_is_a_top_level_node(self):
+        # MeshDecals.fbx の RoadDecals.002 だけを使う prefab を置いた。ルートの GameObject がそのノードなので単位行列にする
+        prefab = HEADER + game_object(10, "RoadDecals.002") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A)
+        scene = HEADER + instance(3000, NESTED, 0, [mod(10, NESTED, "m_Name", "RoadDecals.002 (27)")])
+        h = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "MeshDecals"}).expand_raw(parse_asset(scene))
+        tops = {MODEL: frozenset({"RoadDecals", "RoadDecals.001", "RoadDecals.002", "RoadDecals.003"})}
+        # 読み込み側は表の無いモデルにも空の表を渡す
+        placement = placements(h, {MODEL: "MeshDecals"}, {MODEL: {}}, top_level_nodes=tops)[0]
+        self.assertEqual(list(placement.node_transforms), ["RoadDecals.002"])
+        # 最上位のノードの名前でなければ触らない
+        placement = placements(h, {MODEL: "MeshDecals"}, top_level_nodes={MODEL: frozenset({"Other", "Another"})})[0]
+        self.assertEqual(placement.node_transforms, {})
+
+
 class MeshSwapTest(unittest.TestCase):
     """MeshFilter のメッシュの差し替え（m_Mesh の上書き。Destroyed Building Kit。#242）。"""
 

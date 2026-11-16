@@ -46,15 +46,19 @@ def unused_in_placement(h: Hierarchy, placement: ModelPlacement, objects: Iterab
     """
     if not built_from_renderers(h, placement):
         return set()
-    used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
+    objects = list(objects)
+    rows = set(placement.renderers)
+    # 連番を外して比べるのは、名前がそのまま一致するオブジェクトの無い行だけ。FBX のノード名がもともと連番の形
+    # （MeshDecals.fbx の RoadDecals / .001 / .002 / .003）だと、外すと全部が同じ名前になり、どれも使われていることになる（#237）
+    loose = rows - {name for name, _ in objects}
+    fallback = loose | {strip_numeric_suffix(n) for n in loose}
     mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
     result: set[str] = set()
     for obj_name, is_mesh in objects:
+        if not is_mesh or obj_name in rows or mesh_file_id(obj_name) in mesh_ids:
+            continue
         name = strip_numeric_suffix(obj_name)
-        if (
-            is_mesh and obj_name not in used and name not in used
-            and mesh_file_id(obj_name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
-        ):
+        if name not in fallback and not (loose and mesh_file_id(name) in mesh_ids):
             result.add(obj_name)
     return result
 

@@ -21,6 +21,7 @@ from ..core.transform import inverse_affine, multiply, unity_to_blender
 from ..core.unity_yaml import to_float
 from ..core.units import SceneSummary
 from .log import record_failure
+from .model_import import node_name
 from .unity_meshes import make_mesh_object
 from .prepare import ModelSummary
 from .scene_objects import (
@@ -183,7 +184,7 @@ class SceneImport:
         if self.opts.skip_unused_parts:
             # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）。
             # シーン・prefab がモデルの中から消したオブジェクトも Unity に無いので、同じく消す（#172）
-            unused = unused_in_placement(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
+            unused = unused_in_placement(self.hierarchy, placement, [(node_name(o), o.type == "MESH") for o in objects])
             if parts and session.last_matcher is not None:
                 unused |= session.last_matcher.match(parts).removed
             objects, self.removed_by_key[key] = session.remove_unused(objects, unused)
@@ -201,8 +202,8 @@ class SceneImport:
                 # そうでなければルートの Transform は単位行列が基準なので、展開した行列のままでよい
                 overrides = {k: v for k, v in overrides.items() if k != SOLE_NODE}
                 if len(objects) == 1 and not objects[0].children:
-                    overrides[objects[0].name] = placement.node_transforms[SOLE_NODE]
-                    root_node = objects[0].name
+                    overrides[node_name(objects[0])] = placement.node_transforms[SOLE_NODE]
+                    root_node = node_name(objects[0])
                 else:
                     root_node = ""
             if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
@@ -220,23 +221,24 @@ class SceneImport:
     def hide_parts(self, placement, key: tuple, template: SceneTemplate, objects) -> None:
         """配置に合わせて、使われていない部品・表示されていない部品・遠景用の LOD を隠し、数える。"""
         stats = self.stats
-        hidden = parts_to_hide(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods)
-        # モデルの中への表示の上書きと削除（#172）。fileID はテンプレートのオブジェクトの名前で計算してあるので、
-        # 複製した配置では並び順で対応させる
+        # 照合はオブジェクトの FBX のノードとしての名前で行う。複製した配置のオブジェクトも、テンプレートと同じ名前を持つ（#237）
+        hidden = parts_to_hide(self.hierarchy, placement, [(node_name(o), o.type == "MESH") for o in objects], self.opts.hide_lods)
+        # モデルの中への表示の上書きと削除（#172）
         parts = placement.parts
         matcher = self.matchers.get(key)
         match = matcher.match(parts) if parts and matcher is not None else PartMatch()
         stats.unmatched_parts += match.unmatched
-        own = {t.name: o.name for t, o in zip(template.objects, objects)}
-        removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
-        hide_here = {own[n] for n in match.hidden if n in own} | removed_here
-        shadows_here = (set(hidden.shadows_only) | {own[n] for n in match.shadows_only if n in own}) - hide_here
+        present = {node_name(o) for o in objects}
+        removed_here = match.removed & present  # 読み込まない設定でも、子孫を残すため残ったもの
+        hide_here = (match.hidden & present) | removed_here
+        shadows_here = (set(hidden.shadows_only) | match.shadows_only) - hide_here
         for obj in objects:
-            if obj.name in hidden.lods:
-                obj["unity_lod"] = hidden.lods[obj.name]
-            if obj.name in hidden.names or obj.name in hide_here:
+            name = node_name(obj)
+            if name in hidden.lods:
+                obj["unity_lod"] = hidden.lods[name]
+            if name in hidden.names or name in hide_here:
                 defer_hide(obj, self.session.hidden_objects)
-            elif obj.name in shadows_here and obj.type == "MESH":
+            elif name in shadows_here and obj.type == "MESH":
                 make_shadows_only(obj)  # Unity の Shadows Only（#232）
                 stats.shadows_only += 1
         stats.hidden_unused += hidden.unused

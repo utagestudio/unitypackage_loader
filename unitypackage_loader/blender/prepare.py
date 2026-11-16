@@ -380,6 +380,7 @@ def _catalog(models: list[ModelSummary], mesh_assets: frozenset[str] = frozenset
         recycle_names={m.guid: m.info.recycle_names for m in models},
         sole_nodes={m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node},
         top_nodes={m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node},
+        top_level_nodes={m.guid: frozenset(m.entry.fbx_top_nodes) for m in models if m.entry.fbx_top_nodes},
         mesh_assets=mesh_assets,
     )
 

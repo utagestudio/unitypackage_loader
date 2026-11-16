@@ -17,6 +17,7 @@ from ..core.material import NormalizedMaterial, UnityMaterial
 from ..core.meta import TextureImporterInfo, strip_numeric_suffix
 from ..core.package import UnityPackage
 from ..core.prefab import RendererMaterials
+from .model_import import node_name
 from ..core.report import ImportReport, MaterialReport
 from . import materials as mat_builder
 from .log import log_exception
@@ -171,7 +172,7 @@ class SessionMaterials:
         モデルがマテリアルを持たないとスロットは 0 個になるが、Unity では Renderer の ``m_Materials[0]`` で描かれる。
         このときはスロット 0 を作ってから割り当てる（#102）。
         """
-        by_name = {o.name: o for o in objects if o.type == "MESH"}
+        by_name = {node_name(o): o for o in objects if o.type == "MESH"}
         count = 0
         for (obj_name, index), guid in assignments.items():
             obj = by_name.get(obj_name)
@@ -237,16 +238,17 @@ class SessionMaterials:
         model = summary.entry
         objects = new["objects"]
         mesh_objects = [o for o in objects if o.type == "MESH"]
-        object_slots = {o.name: [slot.material.name if slot.material else "" for slot in o.material_slots] for o in mesh_objects}
+        # キーは FBX のノードとしての名前（prefab の表の名前と照合する。#237）
+        object_slots = {node_name(o): [slot.material.name if slot.material else "" for slot in o.material_slots] for o in mesh_objects}
         # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
-        submesh_order = {o.name: submesh_order_of(o) for o in mesh_objects}
+        submesh_order = {node_name(o): submesh_order_of(o) for o in mesh_objects}
         resolution = resolve_materials(
             [m.name for m in new["materials"]], summary.info, self.unity_mats, model.pathname, prefab_table, object_slots, submesh_order
         )
         assignments = slot_assignments(object_slots, prefab_table, self.unity_mats, submesh_order)
         # マテリアルを 1 つも持たないモデルは、prefab の割り当てしか手掛かりが無い（#102）
         for obj in mesh_objects:
-            if not object_slots[obj.name] and (obj.name, 0) not in assignments:
+            if not object_slots[node_name(obj)] and (node_name(obj), 0) not in assignments:
                 self.slotless.append((model.name, obj))
         # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
         replaced = fully_replaced_materials(object_slots, assignments, resolution)

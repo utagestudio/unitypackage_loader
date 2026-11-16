@@ -84,6 +84,8 @@ class AssetEntry:
     fbx_sole_node: str = ""
     # FBX の最上位のノードが 1 つだけなら、その名前（子があってもよい。Unity はこのノードをルートに畳む。#185）
     fbx_top_node: str = ""
+    # FBX の最上位のノードが複数あるなら、その名前（scan で中身を読めた .fbx だけ。#237）
+    fbx_top_nodes: tuple[str, ...] = ()
     # FBX のマテリアルの名前（出てくる順）。scan で中身を読めた .fbx だけ（それ以外は None。#164）
     fbx_materials: list[str] | None = None
     # OBJ のグループ（``g``）の名前（出てくる順・重複なし）。scan で中身を読めた .obj だけ（それ以外は None。#214）
@@ -343,6 +345,8 @@ def _note_fbx(entry: AssetEntry, data: bytes) -> None:
         entry.fbx_sole_node = next(iter(names))
     if tops is not None and len(tops) == 1:
         entry.fbx_top_node = tops[0]
+    elif tops:
+        entry.fbx_top_nodes = tuple(tops)
 
 
 def _drop_cache(entry: AssetEntry) -> None:

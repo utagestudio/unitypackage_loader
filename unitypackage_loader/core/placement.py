@@ -225,6 +225,7 @@ def placements(
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
     top_nodes: Mapping[str, str] | None = None,
+    top_level_nodes: Mapping[str, frozenset[str]] | None = None,
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
@@ -252,6 +253,9 @@ def placements(
     表のある 1 メッシュの FBX と同じに扱う（メッシュはこのノードのものしか無いので、メッシュ参照の名前もこのノード名）。
     モデルの PrefabInstance の配置は今までどおり（読み込み側がオブジェクトの数で決める。#111）。Issue #181。
 
+    ``top_level_nodes``（モデルの GUID → FBX の最上位のノードの名前。複数あるものだけ）: 表の無いモデルで、Renderer のある
+    GameObject がそのまま配置のルートになり、その名前が最上位のノードの 1 つなら、そのノードを単位行列にする（#237）。
+
     ``top_nodes``（モデルの GUID → FBX のただ 1 つの最上位のノードの名前）: Unity は最上位のノードが 1 つだけの FBX で、
     子があってもそのノードをモデルのルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
     Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer のメッシュ参照で判定）なら、
@@ -260,6 +264,7 @@ def placements(
     root_names = _model_names(model_guids)
     models = set(root_names)
     tops = {g.lower(): name for g, name in (top_nodes or {}).items() if name}
+    top_levels = {g.lower(): names for g, names in (top_level_nodes or {}).items() if names}
     tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := node_names_in_table(table)) is not None}
     # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
@@ -357,6 +362,12 @@ def placements(
                 # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
                 if label is not None:
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            elif guid in top_levels and not tables.get(guid) and root == key:
+                # 表の無い、最上位のノードが複数ある FBX を展開した GameObject（MeshDecals.fbx の RoadDecals.002 だけを置いた
+                # prefab）。ルートの GameObject がその最上位のノードなら、Unity の行列がノードの変換を含むので単位行列にする（#237）
+                base = unity_base_name(h.nodes[root].name)
+                if base in top_levels[guid]:
+                    placement.node_transforms[base] = copy.deepcopy(_IDENTITY_NODE)
             # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
             top = tops.get(guid)
             if top and not placement.node_transforms and _is_top_node(h.nodes[root], guid, top, renderer_tables.get(guid, {})):
@@ -433,11 +444,12 @@ def summarize(
     sole_nodes: Mapping[str, str] | None = None,
     top_nodes: Mapping[str, str] | None = None,
     mesh_assets: Container[str] = (),
+    top_level_nodes: Mapping[str, frozenset[str]] | None = None,
 ) -> SceneContents:
     """シーンの概要。引数は ``placements`` と同じ。``mesh_assets`` は Unity の Mesh を持つアセットの GUID（#216）。"""
     names = _model_names(model_guids)
     models = set(names)
-    found = placements(h, names, name_tables, sole_nodes, top_nodes)
+    found = placements(h, names, name_tables, sole_nodes, top_nodes, top_level_nodes)
     active = effective_active(h)
     primitives: list[PrimitivePlacement] = []
     other = 0
@@ -493,13 +505,15 @@ class ModelCatalog:
     recycle_names: Mapping[str, dict[int, str]] = field(default_factory=dict)  # 古い形式の .meta の fileIDToRecycleName（#53）
     sole_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX のノードが 1 つだけのモデル → そのノード名（#181）
     top_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX の最上位のノードが 1 つだけのモデル → そのノード名（#185）
+    # FBX の最上位のノードが複数あるモデル → その名前（表の無いモデルで、展開したノードをルートにした配置の判定に使う。#237）
+    top_level_nodes: Mapping[str, frozenset[str]] = field(default_factory=dict)
     mesh_assets: frozenset[str] = frozenset()  # Unity の Mesh を持つアセット（.asset と、Mesh を埋め込んだ prefab・シーン。#216）
 
     def expander(self, read_asset: Callable[[str], RawAsset | None]) -> Expander:
         return Expander(read_asset, dict(self.names), dict(self.recycle_names))
 
     def placements(self, h: Hierarchy) -> list[ModelPlacement]:
-        return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
+        return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.top_level_nodes)
 
     def summarize(self, h: Hierarchy) -> SceneContents:
-        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.mesh_assets)
+        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.mesh_assets, self.top_level_nodes)

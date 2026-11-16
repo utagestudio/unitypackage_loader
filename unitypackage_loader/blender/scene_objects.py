@@ -22,6 +22,7 @@ from ..core.decals import Decal, decal_plane
 from ..core.primitives import PrimitiveMesh, build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
+from .model_import import node_name
 
 
 def find_layer_collection(layer_coll, target):
@@ -285,7 +286,7 @@ def apply_node_transforms(template: SceneTemplate, objects, overrides, unit_scal
     members = set(objects)
     skipped = 0
     for original, obj in zip(template.objects, objects):
-        spec = _by_object_name(overrides, obj.name)
+        spec = _by_object_name(overrides, node_name(obj))
         if spec is None:
             continue
         if not _movable(obj, members):
@@ -309,7 +310,7 @@ def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec
     neutral = Matrix(UNITY_TO_BLENDER) @ Matrix.Diagonal((-f, f, f, 1.0))  # ノードを単位行列にしたオブジェクトの行列
     members = set(objects)
     for original, obj in zip(template.objects, objects):
-        if _by_object_name({name: spec}, obj.name) is None:
+        if _by_object_name({name: spec}, node_name(obj)) is None:
             continue
         if not _movable(obj, members):
             return False
@@ -327,8 +328,8 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     それを見て消すと、データと一緒に共有していたほかのオブジェクトまで消える。オブジェクトを先にすべて消し、
     残したオブジェクトが使っていないデータだけを消す。
     """
-    kept = [obj for obj in objects if obj.name not in names]
-    gone = [obj for obj in objects if obj.name in names]
+    kept = [obj for obj in objects if node_name(obj) not in names]
+    gone = [obj for obj in objects if node_name(obj) in names]
     used = {obj.data for obj in kept if obj.data is not None}
     orphans = {obj.data for obj in gone if obj.data is not None} - used
     # 1 つずつ remove すると、そのたびに全データを調べて参照を外すので、シーンでは何万回も呼んで重い。まとめて消す（#219）
@@ -521,7 +522,7 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
     table = {name: RendererMaterials(name, mesh_file_id=r.mesh_file_id) for name, r in renderers.items()}
     claimed: dict[str, list] = {}
     for original, obj in zip(template.objects, objects):
-        found = find_renderer(table, original.name)
+        found = find_renderer(table, node_name(original))
         if found is not None:
             claimed.setdefault(found.game_object, []).append(obj)
     targets = []
@@ -551,7 +552,7 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
     原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
     行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
     """
-    targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
+    targets = [o for o in objects if _by_object_name(offsets, node_name(o)) is not None]
     if not targets:
         return 0
     scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
@@ -563,6 +564,6 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
         if worlds[obj] is None or frame is None:
             skipped += 1
             continue
-        world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ to_origin @ worlds[obj]
+        world = Matrix(unity_to_blender(_by_object_name(offsets, node_name(obj)))) @ scale_matrix @ to_origin @ worlds[obj]
         obj.matrix_basis = frame.inverted_safe() @ world
     return skipped
