@@ -61,7 +61,8 @@
         1.0
       ],
       "mat_files": [
-        "MeshMat.mat"
+        "BrokenPsdMat.mat",
+        "PsdMat.mat"
       ]
     }
   ],
@@ -85,6 +86,17 @@
       "name": "AssetMat",
       "mode": "PRINCIPLED",
       "shader_name": "Standard"
+    },
+    {
+      "name": "PsdMat",
+      "base_image": "PsdColor.psd"
+    },
+    {
+      "name": "BrokenPsdMat",
+      "base_image": null
     }
+  ],
+  "warnings_contain": [
+    "could not load texture Assets/Synthetic/Textures/Broken.psd"
   ]
 }
