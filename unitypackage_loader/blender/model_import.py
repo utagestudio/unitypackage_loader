@@ -178,7 +178,10 @@ def import_model_file(path: Path, model: AssetEntry, opts: ImportOptions, collec
         _import_fbx(path, opts)
         return False
     if ext == ".obj":
-        result = bpy.ops.wm.obj_import(filepath=str(path), global_scale=opts.global_scale)
+        # Unity と同じくグループ（g）ごとに分ける。o の名前は Unity が使わないので分けない（#214）
+        result = bpy.ops.wm.obj_import(
+            filepath=str(path), global_scale=opts.global_scale, use_split_objects=False, use_split_groups=True
+        )
     elif ext == ".vrm" and delegate_to_vrm_addon(model, opts):
         # VRM add-on が MToon・Humanoid・スプリングボーンまで再現するので、マテリアルも add-on のものを使う。
         # use_addon_preferences=True で利用者の add-on 設定（テクスチャ展開先など）に従う
