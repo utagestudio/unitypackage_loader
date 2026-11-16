@@ -150,6 +150,18 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     木と草、Advanced Terrain Grass が草を使う）。SerializedFile 版 9 の古い TerrainData（Global Illumination Proxy）は読めないので警告して外す。
   - 読み込む単位 Scenes だけ（手元で prefab の中に Terrain があるのは Simple Water Shader HDRP の例と Magic Pig のデモ用 prefab で、
     Prefabs 単位は prefab の中の Transform を再現しない）。
+- Unity の Mesh アセット（Issue #216）: メッシュを FBX ではなく Unity の Mesh（クラス 43）として持つもの。`.asset`（.meta の
+  mainObjectFileID 4300000。Conifers BOTD・Terrain Asset Pack）と、prefab・シーンに埋め込んだもの（UModeler X の Basilica の 149 個の prefab）。
+  - 読み取りは `core/unity_mesh.py`。Unity 2018 以降の `m_VertexData`（14 チャンネルがストリーム・位置・形式・次元を持ち、ストリームは 0 から順に、
+    次のストリームは 16 バイト境界から）と `m_IndexBuffer`（`m_IndexFormat` 0 が 16 ビット）、三角形のサブメッシュを読む。圧縮メッシュ・
+    外部の .resS・2017 より前の形（`m_Streams`）は警告して外す。Unity の (x, y, z) を (-x, -z, y) にし、鏡映なので面の頂点の並びを逆にする
+    （実データの頂点の法線と照合した）。YAML の `m_IndexBuffer` / `_typelessdata` は数字だけの並びでも文字列として読む。
+  - GUID の無い `m_Mesh` 参照は同じアセットに埋め込んだ Mesh なので、展開するときにアセット自身の GUID にする（`Expander._build`）。
+  - `ModelCatalog.mesh_assets`（Mesh を持つ .asset と、Mesh のドキュメントを持つ prefab・シーン）のメッシュを使う MeshRenderer を、
+    組み込みメッシュと同じ `PrimitivePlacement`（`kind` が空で `mesh_guid` / `mesh_file_id` を持つ）にし、同じ置き方で置く。
+    サブメッシュ i のスロットに `m_Materials[i]` を付ける。同じ Mesh は 1 回の読み込みの中で 1 つのメッシュを共有する（`blender/unity_meshes.py`）。
+  - Prefabs 単位でも、Mesh を使う Renderer を prefab のルートを原点にしたワールド行列で置く（`PrefabAnalysis.meshes`）。Mesh だけの prefab・シーンも
+    読み込める候補にする。マテリアルを `.asset`（mainObjectFileID 2100000）に入れたものも .mat と同じに読む。
 - 読み込まないもの: UI、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
@@ -596,6 +608,7 @@ unitypackage_loader/
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
 │   ├─ terrain.py                # Terrain の TerrainData・TerrainLayer の読み取り、間引いたメッシュ、アルファマップの PNG（#205）
 │   ├─ primitives.py             # Unity の組み込みメッシュ（Cube / Sphere / Capsule / Cylinder / Plane / Quad）の形（#190）
+│   ├─ unity_mesh.py             # Unity の Mesh アセットの頂点と面（#216）
 │   ├─ lights.py                 # シーンのライト・カメラを Blender の値に換算する（#49）
 │   ├─ exposure.py               # HDRP の Volume の露出からライトの強さの倍率を決める（#130）
 │   ├─ profiles/
@@ -617,6 +630,7 @@ unitypackage_loader/
 │   ├─ session_materials.py      # 1 回の読み込みの中でのマテリアルの組み立て・共有・スロット分割（SessionMaterials）
 │   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・Terrain・デカール・ライト・カメラ）
 │   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
+│   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成

@@ -35,6 +35,8 @@ from unitypackage_loader.core.shader_source import declared_properties, shader_d
 from unitypackage_loader.core.terrain import read_terrain_data, read_terrain_layer, terrain_mesh
 from unitypackage_loader.core.unity_binary import load_documents
 from tests.terrain_writer import terrain_data_asset, terrain_layer_yaml
+from tests.unity_mesh_writer import mesh_document
+from unitypackage_loader.core.unity_mesh import read_mesh
 
 SEED = 20260915
 ROUNDS = 80  # フィクスチャ 1 つあたりの壊し方の数
@@ -251,6 +253,19 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
+
+    def test_mesh(self):
+        # Unity の Mesh（#216）
+        def run_mesh(text: str) -> None:
+            for doc in load_documents(text):
+                if doc.class_id == 43 and isinstance(doc.body, dict):
+                    read_mesh(doc.body)
+
+        quad = [(-0.5, -0.5, 0.0), (0.5, -0.5, 0.0), (-0.5, 0.5, 0.0), (0.5, 0.5, 0.0)]
+        text = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" + mesh_document(
+            1, "Quad", quad, [[0, 3, 1], [3, 0, 2]], normals=[(0.0, 0.0, -1.0)] * 4, uvs=[(0.0, 0.0)] * 4
+        )
+        self.fuzz("mesh", run_mesh, text, mutate_text)
 
     def test_terrain(self):
         # Terrain の TerrainData と TerrainLayer（#205）。読めた TerrainData はメッシュまで作る

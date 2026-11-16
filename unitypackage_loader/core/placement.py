@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Container, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
@@ -348,15 +348,19 @@ def placements(
 
 @dataclass
 class PrimitivePlacement:
-    """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う MeshRenderer（Issue #190）。
+    """モデルファイルではないメッシュを使う Renderer。Unity の組み込みメッシュ（Quad・Plane・Cube など。Issue #190）か、
+    パッケージの Unity の Mesh（``.asset`` か、prefab に埋め込んだもの。Issue #216）。
 
-    メッシュはパッケージに無いので、読み込み側が ``core/primitives.py`` で同じ形を作り、``key`` の Node の Empty の下に置く。
+    組み込みメッシュはパッケージに無いので、読み込み側が ``core/primitives.py`` で同じ形を作る。Mesh は ``core/unity_mesh.py`` で読む。
+    どちらも ``key`` の Node の Empty の下に置く。
     """
 
     key: int  # Renderer の Node
-    kind: str  # 組み込みメッシュの名前（``primitives.BUILTIN_MESHES`` の値）
+    kind: str  # 組み込みメッシュの名前（``primitives.BUILTIN_MESHES`` の値）。Mesh なら空
     materials: list[str | None]
     visible: bool  # GameObject が祖先も含めてアクティブで、Renderer が有効
+    mesh_guid: str = ""  # Mesh を持つアセットの GUID（組み込みメッシュなら空）
+    mesh_file_id: int = 0  # そのアセットの中の Mesh の fileID
 
 
 @dataclass
@@ -389,8 +393,9 @@ def summarize(
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
     top_nodes: Mapping[str, str] | None = None,
+    mesh_assets: Container[str] = (),
 ) -> SceneContents:
-    """シーンの概要。引数は ``placements`` と同じ。"""
+    """シーンの概要。引数は ``placements`` と同じ。``mesh_assets`` は Unity の Mesh を持つアセットの GUID（#216）。"""
     names = _model_names(model_guids)
     models = set(names)
     found = placements(h, names, name_tables, sole_nodes, top_nodes)
@@ -402,6 +407,12 @@ def summarize(
         if renderer is None or n.model_guid is not None or renderer.mesh_guid in models:
             continue
         kind = builtin_mesh_kind(renderer.mesh_guid, renderer.mesh_file_id)
+        if kind is None and renderer.mesh_guid in mesh_assets and renderer.renderer_class == CLASS_MESH_RENDERER:
+            if renderer.materials:  # マテリアルの無い MeshRenderer は描かれない（組み込みメッシュと同じ）
+                primitives.append(PrimitivePlacement(
+                    key, "", list(renderer.materials), active[key] and renderer.enabled, renderer.mesh_guid, renderer.mesh_file_id,
+                ))
+            continue
         if kind is not None and renderer.renderer_class == CLASS_MESH_RENDERER:
             if not renderer.materials:
                 # マテリアルが 1 つも無い MeshRenderer は Unity では何も描かれない（スクリプトの目印に Cube を付けた
@@ -440,6 +451,7 @@ class ModelCatalog:
     recycle_names: Mapping[str, dict[int, str]] = field(default_factory=dict)  # 古い形式の .meta の fileIDToRecycleName（#53）
     sole_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX のノードが 1 つだけのモデル → そのノード名（#181）
     top_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX の最上位のノードが 1 つだけのモデル → そのノード名（#185）
+    mesh_assets: frozenset[str] = frozenset()  # Unity の Mesh を持つアセット（.asset と、Mesh を埋め込んだ prefab・シーン。#216）
 
     def expander(self, read_asset: Callable[[str], RawAsset | None]) -> Expander:
         return Expander(read_asset, dict(self.names), dict(self.recycle_names))
@@ -448,4 +460,4 @@ class ModelCatalog:
         return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
 
     def summarize(self, h: Hierarchy) -> SceneContents:
-        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
+        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.mesh_assets)

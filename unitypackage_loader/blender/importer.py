@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 from ..core.decals import Decal, decal_from_body
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
@@ -28,6 +29,7 @@ from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import PrefabAnalysis, RendererMaterials, find_renderer, has_pending_renderers, resolve_model_renderers, unused_parts
 from ..core.report import ImportReport
 from ..core.scene_import import PlacementStats, parts_to_remove, prefab_warnings
+from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
 from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
@@ -59,6 +61,7 @@ from .scene_objects import arrange_collections, defer_hide, find_layer_collectio
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
 from .terrain import SessionTerrains, layer_textures
+from .unity_meshes import SessionMeshes, make_mesh_object
 
 __all__ = [
     "BLEND_DISABLED_REASON",
@@ -145,7 +148,7 @@ def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_Import
         analysis = prepared.prefab_analyses.get(prefab.pathname, PrefabAnalysis())
         tables = analysis.tables
         models = [(supported[g], tables[g]) for g in prefab.model_guids if g in supported and g in tables]
-        if models:
+        if models or analysis.meshes:
             groups.append(_ImportGroup(prefab, models, analysis))
     return groups
 
@@ -238,6 +241,7 @@ class _ImportSession:
         self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
         self._scene_frames: dict[str, tuple[dict, dict]] = {}  # シーンの GUID → (ワールド行列, アクティブか)。scene_frames
+        self.meshes = SessionMeshes(self)  # パッケージの Unity の Mesh から作ったメッシュ（#216）
         self.terrains = SessionTerrains(self)  # TerrainData ごとに作った Terrain のメッシュとマテリアル（#205）
         self.terrain_written: set[str] = set()  # この回で展開し直した TerrainData（アルファマップの PNG も書き直す）
 
@@ -303,7 +307,10 @@ class _ImportSession:
             for placement in scene_summary.placements:
                 if placement.model_guid in self.supported_models:
                     selected.setdefault(placement.model_guid, self.supported_models[placement.model_guid])
-        if selected or any(self.scene_terrain_data(scenes)):
+        has_meshes = any(p.mesh_guid for s in scenes if s.contents is not None for p in s.contents.primitives) or any(
+            group.analysis.meshes for group in groups
+        )
+        if selected or has_meshes or any(self.scene_terrain_data(scenes)):
             return list(selected.values())
         reasons = {m.skip_reason for m in self.prepared.models if not m.supported}
         what = "models"
@@ -420,9 +427,26 @@ class _ImportSession:
                 continue
             if prefab is not None:
                 self.apply_prefab_visibility(summary, prefab_table, group.analysis, parts, objects, stats)
+        if prefab is not None and group.analysis.meshes:
+            self.place_prefab_meshes(group.analysis.meshes, target)
         if prefab is not None:
             for message in prefab_warnings(stats):
                 self.report.warn(f"prefab {prefab.pathname}: {message}")
+
+    def place_prefab_meshes(self, meshes, target: bpy.types.Collection) -> None:
+        """prefab の中の Unity の Mesh を使う Renderer を、prefab のルートを原点にした位置に置く（#216）。"""
+        self.meshes.prefetch({p.mesh_guid for p, _ in meshes})
+        for primitive, world in meshes:
+            mesh = self.meshes.mesh(primitive.mesh_guid, primitive.mesh_file_id)
+            if mesh is None:
+                continue
+            materials = [self.materials.material_for([g]) for g in primitive.materials]
+            obj = make_mesh_object(mesh.name, mesh, materials)
+            target.objects.link(obj)
+            obj.matrix_world = Matrix(unity_to_blender(world))
+            self.report.objects.append(obj.name)
+            if not primitive.visible:
+                defer_hide(obj, self.hidden_objects)
 
     def apply_prefab_visibility(
         self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], analysis: PrefabAnalysis,
@@ -466,13 +490,14 @@ class _ImportSession:
             for summary, table in group.models:
                 if builds(summary):
                     found.update(g for row in (table or {}).values() for g in row.materials if g)
+            found.update(g for p, _ in group.analysis.meshes for g in p.materials if g)
         for scene_summary in scenes:
             for placement in scene_summary.placements:
                 summary = self.supported_models.get(placement.model_guid)
                 if summary is not None and builds(summary):
                     found.update(g for r in placement.renderers.values() for g in r.materials if g)
             if scene_summary.contents is not None:
-                found.update(p.materials[0] for p in scene_summary.contents.primitives if p.materials and p.materials[0])
+                found.update(g for p in scene_summary.contents.primitives for g in p.materials if g)
             if self.opts.scene_decals:
                 found.update(decal.material for _, decal in self.scene_decals(scene_summary))
         return found & self.prepared.unity_mats.keys()

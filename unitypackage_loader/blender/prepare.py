@@ -12,7 +12,7 @@ from pathlib import Path
 import bpy
 
 from ..core.expander import Expander
-from ..core.hierarchy import Hierarchy, RawAsset, parse_asset
+from ..core.hierarchy import Hierarchy, RawAsset, parse_asset, world_matrices
 from ..core.placement import ModelCatalog
 from ..core.lights import decide_pipeline, pipelines_in_assets
 from ..core.mapping import material_textures, resolve_materials
@@ -25,6 +25,9 @@ from ..core.profiles.base import default_table
 from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
 from ..core.shader_source import SHADER_SOURCE_EXTS, ShaderDefaults, declared_properties, shader_defaults
 from ..core.terrain import CLASS_TERRAIN_DATA
+from ..core.unity_mesh import CLASS_MESH
+
+CLASS_MATERIAL = 21
 from ..core.units import PrefabSummary, SceneSummary, choice_count, summarize_prefabs, summarize_scene
 from .log import log_exception, warn_skipped
 from .model_import import operator_available
@@ -247,9 +250,19 @@ def prepare_package(
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}
     declared = _ShaderDeclarations(pkg, warnings.append)
-    for entry in pkg.materials():
+    # マテリアルを .asset に入れたもの（Terrain Asset Pack の Materials/*.asset。#216）も .mat と同じに読む。
+    # .asset は走査でキャッシュしないので、まとめて 1 回で読む
+    asset_materials = [
+        e for e in pkg.entries.values()
+        if e.ext == ".asset" and e.has_asset and f"mainObjectFileID: {CLASS_MATERIAL * 100000}\n" in (e.meta_text or "")
+    ]
+    material_data = pkg.read_assets(e.guid for e in asset_materials) if asset_materials else {}
+    for entry in pkg.materials() + sorted(asset_materials, key=lambda e: e.pathname):
         try:
-            umat = parse_material(pkg.read_asset(entry.guid), entry.guid, entry.pathname)
+            data = material_data.get(entry.guid) if entry.ext == ".asset" else pkg.read_asset(entry.guid)
+            if data is None:
+                continue
+            umat = parse_material(data, entry.guid, entry.pathname)
             # Shader Graph がグラフの中で UV を変えるテクスチャは、その値を Tiling / Offset として読む（#193）
             umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
             norm = normalize_material(umat, table, declared.get(umat.shader_guid), declared.defaults(umat.shader_guid))
@@ -276,7 +289,8 @@ def prepare_package(
         elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
             skip_reason = COLLADA_UNAVAILABLE_REASON
         models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason, info))
-    if not models and not (pkg.scenes() and _has_terrain_data(pkg)):
+    mesh_assets = _mesh_assets(pkg)
+    if not models and not ((pkg.scenes() or pkg.prefabs()) and (mesh_assets or _has_terrain_data(pkg))):
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
     referenced = material_textures(normalized, normalized)
@@ -285,7 +299,7 @@ def prepare_package(
     # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
     # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
     model_guids = [m.guid for m in models]
-    catalog = _catalog(models)
+    catalog = _catalog(models, mesh_assets)
     collider_meshes: set[str] = set()
     expander = catalog.expander(_prefab_reader(pkg, warnings.append, collider_meshes))
     used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
@@ -297,6 +311,11 @@ def prepare_package(
                 continue
             placed = catalog.placements(hierarchy)
             analysis = analyze_prefab(hierarchy, placed)
+            if catalog.mesh_assets:  # Unity の Mesh を使う Renderer（#216）
+                meshes = [p for p in catalog.summarize(hierarchy).primitives if p.mesh_guid]
+                if meshes:
+                    worlds = world_matrices(hierarchy)
+                    analysis.meshes = [(p, worlds[p.key]) for p in meshes]
             used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warn_skipped(warnings.append, f"could not resolve prefab {entry.pathname}", exc)
@@ -306,7 +325,7 @@ def prepare_package(
                 f"prefab {entry.pathname}: {hierarchy.unresolved_material_overrides} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
-        if analysis.tables:
+        if analysis.tables or analysis.meshes:
             prefab_analyses[entry.pathname] = analysis
     for m in models:
         m.collider_only = m.guid in collider_meshes and m.guid not in used_by_prefabs
@@ -320,7 +339,13 @@ def prepare_package(
     if pipeline.warning:
         warnings.append(pipeline.warning)
     prefab_tables = {pathname: analysis.tables for pathname, analysis in prefab_analyses.items()}
-    prefabs = summarize_prefabs(((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported)
+    prefab_meshes = {
+        pathname: [g for p, _ in analysis.meshes for g in p.materials if g]
+        for pathname, analysis in prefab_analyses.items() if analysis.meshes
+    }
+    prefabs = summarize_prefabs(
+        ((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported, prefab_meshes
+    )
     return PreparedPackage(
         path, pkg, unity_mats, normalized, models, referenced, missing,
         prefab_analyses=prefab_analyses, warnings=warnings, prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
@@ -338,7 +363,7 @@ def _asset_bytes(pkg: UnityPackage, entries: list[AssetEntry]):
             yield data
 
 
-def _catalog(models: list[ModelSummary]) -> ModelCatalog:
+def _catalog(models: list[ModelSummary], mesh_assets: frozenset[str] = frozenset()) -> ModelCatalog:
     """展開と配置に使うモデルの表。
 
     ルートの名前はファイル名から拡張子を除いたもの。古い形式の .meta の fileIDToRecycleName は中への上書きを名前に
@@ -350,6 +375,7 @@ def _catalog(models: list[ModelSummary]) -> ModelCatalog:
         recycle_names={m.guid: m.info.recycle_names for m in models},
         sole_nodes={m.guid: m.entry.fbx_sole_node for m in models if m.entry.fbx_sole_node},
         top_nodes={m.guid: m.entry.fbx_top_node for m in models if m.entry.fbx_top_node},
+        mesh_assets=mesh_assets,
     )
 
 
@@ -377,6 +403,21 @@ def _prefab_reader(
     return read
 
 
+_MESH_DOCUMENT = b"--- !u!43 &"
+
+
+def _mesh_assets(pkg: UnityPackage) -> frozenset[str]:
+    """Unity の Mesh を持つアセットの GUID（#216）。.meta の mainObjectFileID が Mesh の .asset と、Mesh を埋め込んだ
+    prefab・シーン（YAML に Mesh のドキュメントがあるもの）。"""
+    found = set()
+    for e in pkg.entries.values():
+        if e.ext == ".asset" and f"mainObjectFileID: {CLASS_MESH * 100000}" in (e.meta_text or ""):
+            found.add(e.guid)
+        elif e.ext in (".prefab", ".unity") and e._cache is not None and _MESH_DOCUMENT in e._cache:
+            found.add(e.guid)
+    return frozenset(found)
+
+
 def _has_terrain_data(pkg: UnityPackage) -> bool:
     """TerrainData の .asset があるか（.meta の mainObjectFileID が TerrainData のもの）。モデルが無くても、シーンの Terrain は
     読み込めるので、解析を止めない（#205）。"""
@@ -398,7 +439,7 @@ def _prepare_scenes(
     for entry in entries:
         contents = None
         try:
-            hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)))
+            hierarchy = expander.expand_raw(parse_asset(pkg.read_asset(entry.guid)), entry.guid)
             contents = catalog.summarize(hierarchy)
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
