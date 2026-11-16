@@ -57,7 +57,9 @@ from .prepare import (
     build_shader_table,
     prepare_package,
 )
-from .scene_objects import arrange_collections, defer_hide, hide_objects, find_layer_collection, move_collection_contents, remove_parts
+from .scene_objects import (
+    arrange_collections, defer_hide, find_layer_collection, hide_objects, make_shadows_only, move_collection_contents, remove_parts,
+)
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
 from .terrain import SessionTerrains, layer_textures
@@ -465,6 +467,8 @@ class _ImportSession:
             self.report.objects.append(obj.name)
             if not primitive.visible:
                 defer_hide(obj, self.hidden_objects)
+            elif primitive.shadows_only:
+                make_shadows_only(obj)  # Unity の Shadows Only（#232）
 
     def apply_prefab_visibility(
         self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], analysis: PrefabAnalysis,
@@ -485,6 +489,14 @@ class _ImportSession:
         if summary.guid in analysis.inactive_models:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
             self.hide_named(objects, {o.name for o in objects})
         stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
+        # Shadows Only の Renderer（prefab の行と、モデルの中への上書き。#232）
+        for obj in objects:
+            if obj.type != "MESH" or obj.hide_render or obj.name in match.hidden:
+                continue
+            row = find_renderer(prefab_table, obj.name)
+            if (row is not None and row.shadows_only) or obj.name in match.shadows_only:
+                make_shadows_only(obj)
+                stats.shadows_only += 1
 
     def expected_materials(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> set[str]:
         """読み込む前に分かる、この回で組む .mat の GUID（#164）。

@@ -56,6 +56,7 @@ class PlacedRenderer:
     # 展開した Renderer の配置で、ルートより下の Renderer だけが持つ。同じ配置に同名の Renderer があれば、どれのものか
     # 決められないので None（#186）
     relative: Mat4 | None = None
+    shadows_only: bool = False  # Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）
 
 
 @dataclass
@@ -336,6 +337,7 @@ def placements(
             name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
             renderer.mesh_file_id, renderer.lod_level,
             multiply(root_inverse, worlds[key]) if root_inverse is not None else None,
+            renderer.shadows_only,
         )
         # ルートからこの Node までの、上書き前の行列の積で逆算する
         inverse = inverse_affine(node.scope_matrix)
@@ -361,6 +363,7 @@ class PrimitivePlacement:
     visible: bool  # GameObject が祖先も含めてアクティブで、Renderer が有効
     mesh_guid: str = ""  # Mesh を持つアセットの GUID（組み込みメッシュなら空）
     mesh_file_id: int = 0  # そのアセットの中の Mesh の fileID
+    shadows_only: bool = False  # Shadows Only の Renderer（#232）
 
 
 @dataclass
@@ -411,6 +414,7 @@ def summarize(
             if renderer.materials:  # マテリアルの無い MeshRenderer は描かれない（組み込みメッシュと同じ）
                 primitives.append(PrimitivePlacement(
                     key, "", list(renderer.materials), active[key] and renderer.enabled, renderer.mesh_guid, renderer.mesh_file_id,
+                    renderer.shadows_only,
                 ))
             continue
         if kind is not None and renderer.renderer_class == CLASS_MESH_RENDERER:
@@ -418,7 +422,9 @@ def summarize(
                 # マテリアルが 1 つも無い MeshRenderer は Unity では何も描かれない（スクリプトの目印に Cube を付けた
                 # GameObject など）ので作らない。読み込まない Renderer の警告にも数えない
                 continue
-            primitives.append(PrimitivePlacement(key, kind, list(renderer.materials), active[key] and renderer.enabled))
+            primitives.append(PrimitivePlacement(
+                key, kind, list(renderer.materials), active[key] and renderer.enabled, shadows_only=renderer.shadows_only,
+            ))
         else:
             other += 1
     return SceneContents(

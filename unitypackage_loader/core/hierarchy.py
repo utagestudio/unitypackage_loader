@@ -110,6 +110,7 @@ class PartState:
     enabled: bool | None = None  # Renderer の m_Enabled
     removed_object: bool = False  # m_RemovedGameObjects で消した GameObject（子孫も含めて Unity に無い）
     removed_renderer: bool = False  # m_RemovedComponents で消した Renderer
+    shadows_only: bool | None = None  # Renderer の m_CastShadows が Shadows Only（3）か（影だけを落とし、本体は描かない。#232）
 
     @property
     def removed(self) -> bool:
@@ -178,6 +179,14 @@ class RendererInfo:
     enabled: bool = True
     mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
     lod_level: int = 0  # LODGroup の段（0 = もっとも細かい LOD0、または LODGroup が無い）
+    shadows_only: bool = False  # m_CastShadows が Shadows Only（3）。影だけを落とし、本体は描かない（#232）
+
+
+SHADOWS_ONLY = 3  # Renderer の m_CastShadows の値（Off 0 / On 1 / TwoSided 2 / ShadowsOnly 3）
+
+
+def is_shadows_only(value: object) -> bool:
+    return to_float(value, 1.0) == SHADOWS_ONLY
 
 
 @dataclass
@@ -358,7 +367,8 @@ def parse_asset(data: str | bytes) -> RawAsset:
         else:
             mesh, mesh_id = meshes.get(go, (None, 0))
         enabled = to_float(body.get("m_Enabled"), 1.0) != 0
-        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
+        info = RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id, shadows_only=is_shadows_only(body.get("m_CastShadows")))
+        raw.renderers[doc.file_id] = (go, info)
     return raw
 
 

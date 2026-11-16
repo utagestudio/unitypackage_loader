@@ -65,6 +65,7 @@ from .hierarchy import (
     pending_renderer,
     remap,
     file_uid,
+    is_shadows_only,
     legacy_root_ids,
     ID_MASK,
 )
@@ -509,6 +510,8 @@ def _visibility_change(path: str, value: object) -> tuple[str, dict[str, bool]] 
         return "object", {"active": to_float(value, 1.0) != 0}
     if path == "m_Enabled":
         return "renderer", {"enabled": to_float(value, 1.0) != 0}
+    if path == "m_CastShadows":
+        return "renderer", {"shadows_only": is_shadows_only(value)}
     return None
 
 
@@ -602,7 +605,7 @@ def _is_tracked(path: str) -> bool:
     return bool(
         TRS_PATH.fullmatch(path)
         or MATERIAL_PATH.fullmatch(path)
-        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled")
+        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled", "m_CastShadows")
     )
 
 
@@ -644,6 +647,11 @@ def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, val
         if renderer is None:
             return False
         renderer.enabled = to_float(value, 1.0) != 0
+        return True
+    if path == "m_CastShadows":
+        if renderer is None:
+            return False
+        renderer.shadows_only = is_shadows_only(value)
         return True
     if path == "m_Materials.Array.size":
         if renderer is None:

@@ -37,6 +37,7 @@ from .scene_objects import (
     make_camera,
     make_light,
     make_primitive,
+    make_shadows_only,
     primitive_mesh,
     scene_empty,
 )
@@ -229,11 +230,15 @@ class SceneImport:
         own = {t.name: o.name for t, o in zip(template.objects, objects)}
         removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
         hide_here = {own[n] for n in match.hidden if n in own} | removed_here
+        shadows_here = (set(hidden.shadows_only) | {own[n] for n in match.shadows_only if n in own}) - hide_here
         for obj in objects:
             if obj.name in hidden.lods:
                 obj["unity_lod"] = hidden.lods[obj.name]
             if obj.name in hidden.names or obj.name in hide_here:
                 defer_hide(obj, self.session.hidden_objects)
+            elif obj.name in shadows_here and obj.type == "MESH":
+                make_shadows_only(obj)  # Unity の Shadows Only（#232）
+                stats.shadows_only += 1
         stats.hidden_unused += hidden.unused
         if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
             stats.hidden_unused += len(removed_here - hidden.names)
@@ -255,13 +260,13 @@ class SceneImport:
                 if mesh is None:
                     continue
                 obj = make_mesh_object(node.name, mesh, [session.materials.material_for([g]) for g in primitive.materials])
-                obj["unity_game_object"] = node.name
-                self.link(obj, parent, local, primitive.visible)
-                self.empties.setdefault(primitive.key, obj)
-                continue
-            obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.materials.material_for(primitive.materials))
+            else:
+                obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.materials.material_for(primitive.materials))
             obj["unity_game_object"] = node.name
             self.link(obj, parent, local, primitive.visible)
+            if primitive.visible and primitive.shadows_only:
+                make_shadows_only(obj)  # Unity の Shadows Only（Japanese Hotel Room の Quad_shadow。#232）
+                self.stats.shadows_only += 1
             self.empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
 
     def place_terrains(self) -> None:

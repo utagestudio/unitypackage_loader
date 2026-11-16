@@ -108,5 +108,8 @@
   ],
   "warnings_contain": [
     "could not load texture Assets/Synthetic/Textures/Broken.psd"
+  ],
+  "shadows_only": [
+    "ShadowPlane"
   ]
 }

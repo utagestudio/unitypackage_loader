@@ -214,6 +214,16 @@ class PartMatcherTests(unittest.TestCase):
         })
         self.assertEqual(match.unmatched, 3)
 
+    def test_shadows_only_renderers(self):
+        # Shadows Only にした Renderer（#232）。隠すもの・消すものには付けない。見つからなければ数える
+        match = self.matcher.match({
+            renderer_key("Group", "Body"): PartState(shadows_only=True),
+            renderer_key("Collider"): PartState(shadows_only=True, enabled=False),
+            renderer_key("Missing"): PartState(shadows_only=True),
+            renderer_key("Group", "Body", "Badge"): PartState(shadows_only=False),
+        })
+        self.assertEqual((match.shadows_only, match.hidden, match.unmatched), ({"Body"}, {"Collider"}, 1))
+
     def test_named_parts_from_recycle_tables(self):
         matcher = PartMatcher([part("Lid.001"), part("Pot")])
         match = matcher.match({"Lid": PartState(active=False), "Pot": PartState(removed_renderer=True)})
