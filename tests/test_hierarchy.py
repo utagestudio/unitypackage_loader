@@ -737,6 +737,58 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(placement.renderers["Lid"].materials, [None, MAT_A])
         self.assertEqual(h.unresolved_overrides, 1)
 
+    # Unity 4 のモデル: //RootNode が後ろの番号で、100000 / 400000 は中のノード Frame（Japanese School Cafeteria）
+    UNITY4_TABLE = {
+        100000: "Frame", 100006: "//RootNode", 400000: "Frame", 400006: "//RootNode",
+        2300000: "Frame", 3300000: "Frame", 4300000: "Frame",
+    }
+
+    def test_root_is_found_by_the_recycle_table(self):
+        scene = HEADER + self.legacy_instance(2000, MODEL, 0, [
+            mod(400006, MODEL, "m_LocalPosition.x", 2),
+            mod(400000, MODEL, "m_LocalPosition.y", 0.3),
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Window"}, {MODEL: self.UNITY4_TABLE})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (2.0, 0.0, 0.0))
+        self.assertEqual(placement.node_transforms, {"Frame": {"position": [None, 0.3, None]}})
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    @staticmethod
+    def linked(doc: str, instance_id: int, source_id: int = 0) -> str:
+        """ドキュメントに Unity 4 の展開済みの PrefabInstance とのつながり（m_PrefabParentObject / m_PrefabInternal）を足す。"""
+        header, kind, rest = doc.split("\n", 2)
+        source = f"{{fileID: {source_id}, guid: {MODEL}, type: 3}}" if source_id else "{fileID: 0}"
+        return f"{header}\n{kind}\n  m_PrefabParentObject: {source}\n  m_PrefabInternal: {{fileID: {instance_id}}}\n{rest}"
+
+    def test_exploded_instance_is_not_duplicated(self):
+        # Unity 4 のシーンは PrefabInstance の中身を stripped にせず丸ごと保存する（m_IsExploded: 1）
+        scene = HEADER + "".join([
+            game_object(1000, "Room"),
+            transform(1001, 1000, pos=(0, 0, 5)),
+            self.legacy_instance(2000, MODEL, 1001, [
+                mod(400006, MODEL, "m_LocalPosition.x", 2),
+                mod(400000, MODEL, "m_LocalPosition.y", 0.3),
+            ]) + "  m_IsExploded: 1\n",
+            self.linked(game_object(2100, "Window"), 2000, 100006),
+            self.linked(transform(2101, 2100, father=1001, pos=(2, 0, 0)), 2000, 400006),
+            self.linked(game_object(2200, "Frame"), 2000, 100000),
+            self.linked(transform(2201, 2200, father=2101, pos=(0, 0.3, 0)), 2000, 400000),
+            # この PrefabInstance で足した GameObject（元を持たない）はシーンのものとして残る
+            self.linked(game_object(3000, "Flower"), 2000),
+            self.linked(transform(3001, 3000, father=2101, pos=(0, 1, 0)), 2000),
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Window"}, {MODEL: self.UNITY4_TABLE})
+        h = exp.expand_raw(parse_asset(scene))
+        self.assertEqual(sorted(n.name for n in h.nodes.values()), ["Flower", "Room", "Window"])
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (2.0, 0.0, 5.0))
+        self.assertEqual(placement.node_transforms, {"Frame": {"position": [None, 0.3, None]}})
+        flower = next(n for n in h.nodes.values() if n.name == "Flower")
+        self.assertEqual(h.nodes[flower.parent].name, "Window")
+        self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
     def test_child_of_legacy_model_instance_uses_stripped_alias(self):
         exp = Expander(lambda g: None, {MODEL: "Probe"})
         h = exp.expand_raw(parse_asset(self.scene()))
