@@ -184,6 +184,41 @@ class _RendererRow(NamedTuple):
     own: int  # 候補を使わないときのルート
 
 
+def _single_mesh_name(guid: str, tables: dict[str, dict[int, str]], sole_nodes: Mapping[str, str]) -> str | None:
+    """1 メッシュのモデルなら、そのノード（Blender のオブジェクト）の名前。表があれば畳んだノード、無ければ FBX のただ 1 つのノード。"""
+    table = tables.get(guid)
+    if table:
+        return collapsed_root_name(table)
+    return next((name for g, name in sole_nodes.items() if g.lower() == guid and name), None)
+
+
+def _swap_model_mesh(
+    placement: ModelPlacement, node: Node, tables: dict[str, dict[int, str]], sole_nodes: Mapping[str, str], models: set[str]
+) -> None:
+    """モデルの PrefabInstance で MeshFilter のメッシュを別のモデルのものに差し替えていれば、配置するモデルを入れ替える（#242）。
+
+    Destroyed Building Kit は、瓦礫の FBX（DBK_Brick_Rubble_A.fbx）を置いてメッシュだけを別の FBX（DBK_Brick_Rubble_C）に
+    差し替えている。どちらも 1 メッシュのモデルのときだけ扱う（ルートの Transform はどちらでも畳んだノードの変換なので、
+    位置の上書きはそのまま使える）。上書きの記録の名前（畳んだノードの名前）は、差し替え先の名前に付け替える。
+    """
+    if len(node.model_meshes) != 1:
+        return
+    guid, _ = next(iter(node.model_meshes.values()))
+    guid = guid.lower() if guid else None
+    if not guid or guid == placement.model_guid or guid not in models:
+        return
+    old_name = _single_mesh_name(placement.model_guid, tables, sole_nodes)
+    new_name = _single_mesh_name(guid, tables, sole_nodes)
+    if old_name is None or new_name is None:
+        return
+    placement.model_guid = guid
+    for records in (placement.node_transforms, placement.renderers, placement.parts):
+        if old_name in records and old_name != new_name:
+            records[new_name] = records.pop(old_name)
+    if new_name in placement.renderers:
+        placement.renderers[new_name].name = new_name
+
+
 def placements(
     h: Hierarchy,
     model_guids: ModelNames,
@@ -262,8 +297,9 @@ def placements(
                 placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
             placement.node_transforms = copy.deepcopy(node.model_transforms)
             placement.parts = {k: replace(v) for k, v in node.model_parts.items()}
+            _swap_model_mesh(placement, node, tables, sole_nodes or {}, models)
             # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
-            collapsed = collapsed_root_name(tables.get(node.model_guid, {}))
+            collapsed = collapsed_root_name(tables.get(placement.model_guid, {}))
             if collapsed is not None:
                 placement.root_node = collapsed
                 placement.node_transforms.setdefault(collapsed, {})

@@ -222,6 +222,7 @@ class RawAsset:
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
     # コンポーネント（ライト・カメラ・デカール・Terrain）の fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
+    mesh_filters: dict[int, int] = field(default_factory=dict)  # MeshFilter の fileID → GameObject（m_Mesh の上書きの対象。#242）
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
     collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
@@ -314,6 +315,7 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 doc.class_id == CLASS_RECT_TRANSFORM,
             )
         elif doc.class_id == CLASS_MESH_FILTER:
+            raw.mesh_filters[doc.file_id] = _file_id(body.get("m_GameObject"))
             mesh, mesh_id = ref_guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
             if mesh or mesh_id:  # GUID の無い参照は同じアセットに埋め込んだ Mesh（展開するときにアセットの GUID にする。#216）
                 meshes[_file_id(body.get("m_GameObject"))] = (mesh, mesh_id)
@@ -408,6 +410,8 @@ class Node:
     # 1 メッシュの FBX（表で分かる畳まれたノードの名前）か表の無いモデル（``SOLE_NODE``）のモデルの PrefabInstance のルート。
     # このルートへの位置・回転・スケールの上書きは、どの階層のものも成分付きで ``model_transforms`` に記録する（#99 / #111）
     collapsed_key: str | None = None
+    # モデルの PrefabInstance のルートで、モデルの中の MeshFilter のメッシュを差し替える上書き（対象の fileID → (GUID, fileID)。#242）
+    model_meshes: dict[int, tuple[str | None, int]] = field(default_factory=dict)
     # モデルの PrefabInstance のルートで、モデルの中の fileID から今のアセットでの fileID への XOR（差し込んだ PrefabInstance の
     # fileID を重ねたもの）。prefab を挟んだ外側からの上書きの対象を、モデルの中の fileID に戻すのに使う（#31）
     id_mask: int = 0
@@ -427,6 +431,7 @@ class Node:
             model_materials={k: list(v) for k, v in self.model_materials.items()},
             model_transforms=copy.deepcopy(self.model_transforms),
             model_parts={k: replace(v) for k, v in self.model_parts.items()},
+            model_meshes=dict(self.model_meshes),
             **changes,
         )
 
@@ -439,6 +444,7 @@ class Hierarchy:
     renderers: dict[int, int] = field(default_factory=dict)
     components: dict[int, int] = field(default_factory=dict)  # コンポーネント（ライト・カメラ・デカール）
     transforms: dict[int, int] = field(default_factory=dict)  # 消した Node を指したままのことがある
+    mesh_filters: dict[int, int] = field(default_factory=dict)  # MeshFilter（m_Mesh の上書きの対象。#242）
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
     unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）
