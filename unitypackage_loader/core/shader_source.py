@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from .material import UnityMaterial
 
 __all__ = [
-    "SHADER_SOURCE_EXTS", "ShaderDefaults", "ShaderSourceError", "declared_properties", "restrict_to_declared", "shader_defaults",
+    "SHADER_SOURCE_EXTS", "ShaderDefaults", "ShaderSourceError", "declared_properties", "graph_display_names",
+    "restrict_to_declared", "shader_defaults",
 ]
 
 SHADER_SOURCE_EXTS = frozenset({".shader", ".shadergraph"})
@@ -74,6 +75,8 @@ class ShaderDefaults:
     cull_off: bool = False  # 最初の Cull が固定の Off（両面）。"Cull [_Cull]" のようにプロパティで決めるものは含めない
     alpha_test: bool = False  # パスが常に切り抜く（#235 / #241）
     hidden: frozenset[str] = frozenset()  # [HideInInspector] で宣言されたプロパティ
+    # Shader Graph のプロパティの参照名 → 表示名（#236）。.shader では空
+    display_names: dict[str, str] = field(default_factory=dict)
 
     @property
     def alpha_mode(self) -> str | None:
@@ -91,10 +94,18 @@ class ShaderDefaults:
 
 
 def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
-    """.shader の描画の既定。.shadergraph（描画の設定はマテリアルのプロパティに出る）や、読めないものは空。"""
+    """.shader の描画の既定。.shadergraph は描画の設定がマテリアルのプロパティに出るので、プロパティの表示名だけ。
+
+    読めないものは空。
+    """
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+    if ext.lower() == ".shadergraph":
+        try:
+            return ShaderDefaults(display_names=graph_display_names(text.lstrip("\ufeff")))
+        except ShaderSourceError:
+            return ShaderDefaults()
     if ext.lower() != ".shader":
         return ShaderDefaults()
-    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
     text = _COMMENT.sub("", text)
     sub = _SUBSHADER.search(text)
     if sub is None:
@@ -182,7 +193,24 @@ def _properties_block(text: str) -> str | None:
 
 
 def _graph_properties(text: str) -> frozenset[str]:
-    """Shader Graph のプロパティとキーワードの参照名（上書きがあればそれ、無ければ既定の名前）。
+    """Shader Graph のプロパティとキーワードの参照名（上書きがあればそれ、無ければ既定の名前）。"""
+    return frozenset(name for name, _ in _graph_references(text))
+
+
+def graph_display_names(text: str) -> dict[str, str]:
+    """Shader Graph のプロパティの参照名 → 表示名（Inspector に出る名前）。空白と "_" の違いだけのものは入れない。
+
+    参照名は自動で ``Texture2D_E1B0D043`` のように付くことがあり、役割は表示名（「Base Map」）でしか分からない（#236）。
+    """
+    def key(value: str) -> str:
+        return value.replace("_", "").replace(" ", "").lower()
+
+    # 「Wind Speed」と Wind_Speed のように、表示名から分かることが参照名と同じものは入れない
+    return {name: display for name, display in _graph_references(text) if display and key(display) != key(name)}
+
+
+def _graph_references(text: str) -> list[tuple[str, str]]:
+    """Shader Graph のプロパティとキーワードの（参照名, 表示名）。
 
     古い形式は 1 つの JSON（``m_SerializedProperties`` の各要素の ``JSONnodeData`` が JSON の文字列）、
     新しい形式は JSON のオブジェクトを並べたもの。
@@ -210,12 +238,13 @@ def _graph_properties(text: str) -> frozenset[str]:
                             objects.append(parsed)
     except (json.JSONDecodeError, RecursionError) as exc:
         raise ShaderSourceError(f"not a shader graph: {exc}") from exc
-    names = set()
+    result = []
     for obj in objects:
         name = obj.get("m_OverrideReferenceName") or obj.get("m_DefaultReferenceName")
         if isinstance(name, str) and name:
-            names.add(name)
-    return frozenset(names)
+            display = obj.get("m_Name")
+            result.append((name, display if isinstance(display, str) else ""))
+    return result
 
 
 def restrict_to_declared(mat: UnityMaterial, declared: frozenset[str]) -> tuple[UnityMaterial, list[str]]:
