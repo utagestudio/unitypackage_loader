@@ -1,0 +1,25 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "AUTO"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "terrain_count": 2,
+  "placed_objects": [
+    {
+      "top": "Ground",
+      "object": "Ground",
+      "bbox": [
+        -138.0,
+        -84.0,
+        1.0,
+        -10.0,
+        -20.0,
+        20.845
+      ]
+    }
+  ],
+  "package_collection": "synthetic_nested (BuiltIn_Terrain)"
+}

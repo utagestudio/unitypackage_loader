@@ -238,11 +238,15 @@ class _ShaderDeclarations:
 
 
 def prepare_package(
-    filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False
+    filepath: str, shader_table: ShaderTable | None = None, *, import_blend: bool = False, pkg: UnityPackage | None = None
 ) -> PreparedPackage:
-    """パッケージを走査して解析する。``import_blend`` が False なら同梱 .blend は「読み込まない」扱いにする。"""
+    """パッケージを走査して解析する。``import_blend`` が False なら同梱 .blend は「読み込まない」扱いにする。
+
+    ``pkg`` に走査済みのパッケージを渡すと、走査し直さない（入れ子のパッケージの判定で先に走査したとき。#217）。
+    """
     path = Path(filepath)
-    pkg = UnityPackage(path)
+    if pkg is None:
+        pkg = UnityPackage(path)
     pkg.scan()
     table = shader_table or default_table()
     warnings: list[str] = list(pkg.warnings) + list(table.warnings)
