@@ -697,7 +697,10 @@ class UnityPackage:
 - パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる
   コロン（ドライブ文字・NTFS 代替データストリーム）、制御文字、`<>"|?*`、予約デバイス名（`CON` `NUL` `COM1` 等。拡張子付きも）、
   末尾のドット / 空白を拒否する。規則は展開する OS に依らず同じ（Linux で展開した結果を Windows で開くケースがあるため）。
-- メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB。tar ヘッダーのサイズで判定）。
+- メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB、シーン・prefab だけは 512 MiB。tar ヘッダーのサイズで判定）。
+  シーン・prefab は配置やライトマップのデータで 64 MiB を超えることがある（Destroyed Building Kit の DBK_Big_Scene.unity は 134 MB。#218）。
+  tar では `asset` が `pathname` より先に来るので、走査の時点では拡張子が分からず小さいほうの上限になる。そのため走査の最後に、読まなかった大きなシーン・prefab を
+  1 回の再走査でまとめて読む。
   超えた `pathname` / `asset.meta` は警告して無視し、`read_asset` は `PackageError`（呼び出し側はそのアセットだけスキップ）。
 - 展開前に書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せても実際に書く量）を求め、
   Preferences の上限（`Max Extract Size`、既定 8 GiB、0 で無制限）と展開先の空き容量（`shutil.disk_usage`）を超えるなら何も書かずに `PackageError`。
