@@ -57,7 +57,7 @@ from .prepare import (
     build_shader_table,
     prepare_package,
 )
-from .scene_objects import arrange_collections, defer_hide, find_layer_collection, move_collection_contents, remove_parts
+from .scene_objects import arrange_collections, defer_hide, hide_objects, find_layer_collection, move_collection_contents, remove_parts
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
 from .terrain import SessionTerrains, layer_textures
@@ -293,9 +293,7 @@ class _ImportSession:
                 done += 1
         self.fill_missed_textures()
         self.materials.warn_slotless()
-        for obj in self.hidden_objects:
-            if not is_removed(obj):
-                obj.hide_set(True)
+        hide_objects(self.context, [obj for obj in self.hidden_objects if not is_removed(obj)])
         if self.opts.arrange == "SIDE_BY_SIDE" and len(self.prefab_collections) > 1:
             arrange_collections(self.context, self.prefab_collections)
 

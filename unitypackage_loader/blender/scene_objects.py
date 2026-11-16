@@ -336,6 +336,75 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     return kept
 
 
+_BATCH_HIDE_MIN = 200  # これより多く隠すときだけ、まとめて隠す
+
+
+def _view3d(context):
+    """まとめて隠すオペレーターに渡す 3D ビュー（ウィンドウ・エリア・リージョン）。無ければ None（ヘッドレスなど）。"""
+    for window in getattr(context.window_manager, "windows", []):
+        screen = window.screen
+        for area in screen.areas if screen is not None else []:
+            if area.type == "VIEW_3D":
+                region = next((r for r in area.regions if r.type == "WINDOW"), None)
+                if region is not None:
+                    return window, area, region
+    return None
+
+
+def _hidden(obj: bpy.types.Object) -> bool:
+    try:
+        return obj.hide_get()
+    except RuntimeError:  # ビューレイヤーに無い（隠せない）
+        return True
+
+
+def hide_objects(context, objects: list[bpy.types.Object]) -> None:
+    """オブジェクトをビューレイヤーで隠す（``hide_set(True)`` と同じ）。
+
+    ``hide_set`` は 1 回ごとにビューレイヤーを同期し直すので、オブジェクトの多いシーンで何万回も呼ぶと 2 乗のオーダーで遅い
+    （Shibuya では 4 万個を隠すのに約 220 秒）。3D ビューがあれば、選択してから ``object.hide_view_set`` で 1 回で隠す
+    （GUI で 6 万個のうち 2 万個を 3 秒）。選択は元に戻す。3D ビューが無いとき（ヘッドレス）と、まとめて隠せなかったものは
+    1 つずつ隠す（#219）。
+    """
+    remaining = objects
+    view = _view3d(context) if len(objects) >= _BATCH_HIDE_MIN and context.mode == "OBJECT" else None
+    if view is not None:
+        view_layer = context.view_layer
+        selected = list(view_layer.objects.selected)
+        active = view_layer.objects.active
+        try:
+            for obj in selected:
+                obj.select_set(False)
+            for obj in objects:
+                try:
+                    obj.select_set(True)
+                except RuntimeError:  # ビューレイヤーに無い（除外したコレクションの中など）
+                    pass
+            window, area, region = view
+            with context.temp_override(window=window, area=area, region=region):
+                bpy.ops.object.hide_view_set(unselected=False)
+        except RuntimeError:
+            pass
+        finally:
+            for obj in view_layer.objects.selected:
+                obj.select_set(False)
+            for obj in selected:
+                try:
+                    obj.select_set(True)
+                except (RuntimeError, ReferenceError):
+                    pass
+            try:
+                view_layer.objects.active = active
+            except (RuntimeError, ReferenceError):
+                pass
+        remaining = [obj for obj in objects if not _hidden(obj)]
+    for obj in remaining:
+        try:
+            obj.hide_set(True)
+        except RuntimeError:  # ビューレイヤーに無い
+            pass
+
+
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
     """レンダリングからはすぐ外し、ビューポートの非表示は ``hidden`` に積んで読み込みの後で当てる。
 
