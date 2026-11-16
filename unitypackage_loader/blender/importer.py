@@ -268,6 +268,7 @@ class _ImportSession:
                     record_failure(self.report, f"could not import scene {scene_summary.pathname}: {exc}")
                 done += 1
         self.fill_missed_textures()
+        self.materials.warn_slotless()
         for obj in self.hidden_objects:
             if not is_removed(obj):
                 obj.hide_set(True)
