@@ -94,6 +94,16 @@ class BinaryMaterialTest(unittest.TestCase):
             with self.subTest(**kwargs):
                 self.assertEqual(parse_material(legacy_material(**kwargs)), expected)
 
+    def test_unity4_layouts(self):
+        # Unity 4 以前の SerializedFile（#215）。9 / 11 は入れ子の TypeTree、10 / 12 は平らな TypeTree、13 から型ハッシュ
+        expected = parse_material(LEGACY_YAML)
+        for version in (9, 10, 11, 12, 13, 15):
+            for big_endian in (False, True):
+                with self.subTest(version=version, big_endian=big_endian):
+                    data = legacy_material(version=version, big_endian=big_endian)
+                    self.assertTrue(is_serialized_file(data))
+                    self.assertEqual(parse_material(data), expected)
+
     def test_values(self):
         mat = parse_material(legacy_material())
         self.assertEqual(mat.name, "BinaryExample")
@@ -142,7 +152,7 @@ class BinaryPrefabTest(unittest.TestCase):
 class RobustnessTest(unittest.TestCase):
     def test_unsupported_version(self):
         data = bytearray(legacy_material())
-        for version in (13, 23):
+        for version in (8, 23):  # 9〜22 は読める（#215）
             data[8:12] = struct.pack(">I", version)
             with self.assertRaisesRegex(UnityBinaryError, "unsupported"):
                 parse_serialized_file(bytes(data))
