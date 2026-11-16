@@ -353,19 +353,26 @@ class SessionMaterials:
         self.built_by_guid[guid] = bmat
 
     def drop_unused_materials(self, materials) -> None:
-        """使われていない部品を消して誰も使わなくなった、この回に組んだマテリアルを消し、レポートの行を "unused" にする（#221）。"""
-        names = {mrep.blender_name for mrep in self.report.materials}
+        """使われていない部品を消して誰も使わなくなった、この回に組んだマテリアルを消し、レポートの行を "unused" にする（#221）。
+
+        シーンでは何千回も呼ぶので、消す候補が無ければすぐに戻り、削除はまとめて行う（#219）。
+        """
+        candidates = {b.name: b for b in materials if not is_removed(b) and b.users == 0}
+        if not candidates:
+            return
+        rows = [mrep for mrep in self.report.materials if mrep.blender_name in candidates]
         # 同名の既存のマテリアルを使ったもの（reuse_existing）は、この回より前からあるので消さない
-        names -= {mrep.blender_name for mrep in self.report.materials if mrep.method in ("reused", "kept", "delegated")}
-        for bmat in materials:
-            if is_removed(bmat) or bmat.users != 0 or bmat.name not in names:
-                continue  # ほかのオブジェクトが使うもの・この回より前からあるもの（同名の再利用など）は残す
-            for mrep in self.report.materials:
-                if mrep.blender_name == bmat.name and mrep.method not in ("replaced", "shared", "unused"):
-                    mrep.method = "unused"
-            for guid in [g for g, m in self.built_by_guid.items() if m == bmat]:
-                del self.built_by_guid[guid]
-            bpy.data.materials.remove(bmat)
+        protected = {mrep.blender_name for mrep in rows if mrep.method in ("reused", "kept", "delegated")}
+        names = {mrep.blender_name for mrep in rows} - protected
+        if not names:
+            return
+        for mrep in rows:
+            if mrep.blender_name in names and mrep.method not in ("replaced", "shared", "unused"):
+                mrep.method = "unused"
+        gone = [candidates[name] for name in names]
+        for guid in [g for g, m in self.built_by_guid.items() if m.name in names and any(m == b for b in gone)]:
+            del self.built_by_guid[guid]
+        bpy.data.batch_remove(gone)
 
     def drop_replaced_materials(self, remaining: list) -> None:
         """prefab のスロットの差し替えで使われなくなった、インポーターが作ったマテリアルを消し、レポートの行を "replaced" にする。"""
