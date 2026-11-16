@@ -789,6 +789,27 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(h.nodes[flower.parent].name, "Window")
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
 
+    def test_outer_override_reaches_nested_legacy_model_root(self):
+        # prefab の中に古い形式のモデルを置き（PrefabInstance 2000）、シーンが prefab の上から「2000 XOR 100000 / 400000」で
+        # そのルートを隠し、動かす（Destroyed Building Kit の DBK_Cinderblock_Building の rubble。#244）
+        prefab = HEADER + game_object(10, "Building") + transform(11, 10) + self.legacy_instance(2000, MODEL, 11, [
+            mod(100000, MODEL, "m_Name", "rubble"),
+        ])
+        scene = HEADER + instance(3000, NESTED, 0, [
+            mod(2000 ^ 100000, NESTED, "m_IsActive", 0),
+            mod(2000 ^ 400000, NESTED, "m_LocalPosition.y", 3),
+        ])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Tile"})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(h.nodes[placement.root].name, "rubble")
+        self.assertFalse(placement.active)
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (0.0, 3.0, 0.0))
+        # Unity 4 の表で //RootNode が後ろの番号なら、その番号で指す
+        scene4 = HEADER + instance(3000, NESTED, 0, [mod(2000 ^ 100006, NESTED, "m_IsActive", 0)])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Tile"}, {MODEL: self.UNITY4_TABLE})
+        self.assertFalse(placements(exp.expand_raw(parse_asset(scene4)), [MODEL])[0].active)
+
     def test_child_of_legacy_model_instance_uses_stripped_alias(self):
         exp = Expander(lambda g: None, {MODEL: "Probe"})
         h = exp.expand_raw(parse_asset(self.scene()))
