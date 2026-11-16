@@ -37,8 +37,8 @@ CLASS_PREFAB_INSTANCE = 1001
 
 _TRANSFORM_CLASSES = (CLASS_TRANSFORM, CLASS_RECT_TRANSFORM)
 RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
-# 中身をそのまま持ち、上書きを当ててから読むコンポーネント。ほかに、DecalProjector の形をした MonoBehaviour も持つ
-# （``parse_asset``。#165）。``components()`` の既定はライト・カメラだけ
+# 中身をそのまま持ち、上書きを当ててから読むコンポーネント。ほかに、DecalProjector の形をした MonoBehaviour（#165）と
+# Terrain（#205）も持つ（``parse_asset``）。``components()`` の既定はライト・カメラだけ
 COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)
 
 # モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）。
@@ -197,7 +197,7 @@ class RawAsset:
     renderers: dict[int, tuple[int, RendererInfo]] = field(default_factory=dict)  # Renderer の fileID → (GameObject, 情報)
     instances: list[_RawInstance] = field(default_factory=list)
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
-    # コンポーネント（ライト・カメラ・デカール）の fileID → (GameObject, クラス ID, ドキュメントの中身)
+    # コンポーネント（ライト・カメラ・デカール・Terrain）の fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
     collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
@@ -269,7 +269,10 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
         elif doc.class_id in RENDERER_CLASSES:
             renderer_docs.append(doc)
-        elif doc.class_id in COMPONENT_CLASSES or (doc.class_id == CLASS_MONO_BEHAVIOUR and is_decal_projector(body)):
+        elif (
+            doc.class_id in COMPONENT_CLASSES or doc.class_id == CLASS_TERRAIN
+            or (doc.class_id == CLASS_MONO_BEHAVIOUR and is_decal_projector(body))
+        ):
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_MESH_COLLIDER:
             mesh = ref_guid(body.get("m_Mesh"))

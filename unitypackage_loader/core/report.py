@@ -57,6 +57,7 @@ class ImportReport:
     lights: int = 0  # シーンから作ったライト
     cameras: int = 0  # シーンから作ったカメラ
     decals: int = 0  # シーンの DecalProjector から作った板（#165）
+    terrains: int = 0  # シーンの Terrain から作ったメッシュ（#205）
     exposures: list[str] = field(default_factory=list)  # HDRP の Volume の露出をライトに反映したシーンごとの内容（#130）
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -91,6 +92,8 @@ class ImportReport:
             parts.append(f"{self.lights} lights, {self.cameras} cameras")
         if self.decals:
             parts.append(f"{self.decals} decals")
+        if self.terrains:
+            parts.append(f"{self.terrains} terrains")
         text = ", ".join(parts)
         problems = [f"{len(self.errors)} error(s)"] if self.errors else []
         if self.warnings:
@@ -126,6 +129,8 @@ class ImportReport:
             lines.append(f"  lights: {self.lights}, cameras: {self.cameras}")
         if self.decals:
             lines.append(f"  decals: {self.decals}")
+        if self.terrains:
+            lines.append(f"  terrains: {self.terrains}")
         if self.exposures:
             lines.append(f"  exposure ({len(self.exposures)}):")
             lines += [f"    - {e}" for e in self.exposures]

@@ -148,6 +148,7 @@ class PlacementStats:
     skipped_nodes: int = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き（シーンだけ）
     skipped_offsets: int = 0  # 置き直せなかった、アーマチュアで変形する部品（シーンだけ）
     skipped_decals: int = 0  # マテリアルが無いか使えない DecalProjector（シーンだけ。#165）
+    terrains_imported: bool = False  # Terrain を読み込む設定だった（読めなかったものは読み込む側が個別に警告する。#205）
     baked_lights: int = 0  # Unity ではライトマップにしか効かないライト（シーンだけ）
     light_notes: set[str] = field(default_factory=set)  # ライトの換算の注意（シーンだけ）
 
@@ -188,8 +189,8 @@ def scene_warnings(pathname: str, contents: SceneContents | None, stats: Placeme
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
             )
-        if contents.terrains:
-            messages.append(f"{contents.terrains} Unity Terrain(s) were not imported (terrains are not supported)")
+        if contents.terrains and not stats.terrains_imported:
+            messages.append(f"{contents.terrains} Unity Terrain(s) were not imported (turn on Terrain in the scene options)")
         if contents.ui_elements:
             messages.append(f"{contents.ui_elements} UI element(s) (RectTransform) were not imported")
         if stats.skipped_decals:

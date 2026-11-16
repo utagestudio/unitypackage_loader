@@ -388,5 +388,5 @@ def _prepare_scenes(
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn_skipped(warn, f"could not read scene {entry.pathname}", exc)
-        scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
+        scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported, pkg.entries))
     return scenes, hierarchies

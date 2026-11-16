@@ -169,6 +169,11 @@ class SceneWarningsTests(unittest.TestCase):
             ["1", "a", "b", "2", "1", "3", "8", "9", "4", "7", "5", "6"],
         )
 
+    def test_terrain_warning_only_when_terrains_are_off(self):
+        contents = SceneContents([], terrains=2)
+        self.assertEqual(len(scene_warnings("S", contents, PlacementStats())), 1)
+        self.assertEqual(scene_warnings("S", contents, PlacementStats(terrains_imported=True)), [])
+
     def test_unreadable_scene_reports_only_lights(self):
         self.assertEqual(scene_warnings("S", None, PlacementStats(hidden_unused=3)), [])
         self.assertEqual(len(scene_warnings("S", None, PlacementStats(baked_lights=1))), 1)

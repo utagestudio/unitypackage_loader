@@ -9,14 +9,16 @@ import bpy
 from mathutils import Matrix
 
 from ..core.fbx_units import read_unit_scale
-from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE
+from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, CLASS_TERRAIN, SOLE_NODE
 from ..core.placement import built_from_renderers
 from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light
 from ..core.model_ids import PartMatch, PartMatcher
 from ..core.prefab import RendererMaterials
 from ..core.scene_import import PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
-from ..core.transform import unity_to_blender
+from ..core.terrain import terrain_data_ref, terrain_local
+from ..core.transform import inverse_affine, multiply, unity_to_blender
+from ..core.unity_yaml import to_float
 from ..core.units import SceneSummary
 from .log import record_failure
 from .prepare import ModelSummary
@@ -79,6 +81,9 @@ class SceneImport:
                 self.session.step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {self.summary.name}")
             self.place_model(placement)
         self.place_primitives()
+        if self.opts.terrain_points is not None:
+            self.stats.terrains_imported = True
+            self.place_terrains()
         if self.opts.scene_decals:
             self.place_decals()
         self.place_lights_and_cameras()
@@ -241,6 +246,36 @@ class SceneImport:
             obj["unity_game_object"] = node.name
             self.link(obj, parent, local, primitive.visible)
             self.empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
+
+    def place_terrains(self) -> None:
+        """Terrain をメッシュにする（#205）。Terrain は回転・拡大縮小を受けないので、ワールドの位置だけで置く。"""
+        session = self.session
+        for component in scene_components(self.hierarchy, [CLASS_TERRAIN], self.worlds, self.active):
+            guid = terrain_data_ref(component.body)
+            if not guid:
+                continue
+            built = session.terrains.build(guid, self.pathname)
+            if built is None:
+                continue
+            key = component.node
+            node = self.hierarchy.nodes[key]
+            # 親の空間で、ワールドでは位置だけの行列（world · terrain_local(world)）になるように置く
+            world = self.worlds[key]
+            placed = multiply(world, terrain_local(world))
+            if key in self.empties:
+                parent, frame = self.empties[key], world
+            elif node.parent is not None:
+                parent, frame = self.empty(node.parent), self.worlds[node.parent]
+            else:
+                parent, frame = None, None
+            inverse = inverse_affine(frame) if frame is not None else None
+            local = multiply(inverse, placed) if inverse is not None else placed
+            obj = bpy.data.objects.new(node.name, built.mesh)
+            obj["unity_game_object"] = node.name
+            obj["unity_terrain"] = json_text(component.body)
+            visible = component.active and to_float(component.body.get("m_DrawHeightmap"), 1.0) != 0
+            self.link(obj, parent, Matrix(unity_to_blender(local)), visible)
+            self.report.terrains += 1
 
     def place_decals(self) -> None:
         """DecalProjector を板にする（#165）。"""

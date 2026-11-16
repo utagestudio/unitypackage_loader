@@ -29,6 +29,16 @@ UNIT_ITEMS = (
     ("PREFABS", "Prefabs", "Import prefabs with their own material assignments; each prefab gets its own collection"),
     ("MODELS", "Models", "Import model files (FBX etc.) as they are"),
 )
+# シーンの Terrain の読み込み（#205）。数字は 1 辺の点の数の上限（それより細かい高さマップは等間隔に間引く）
+TERRAIN_ITEMS = (
+    ("NONE", "No Terrain", "Do not import Unity Terrains"),
+    ("129", "Terrain 129", "Import Terrains with at most 129 x 129 vertices (fastest)"),
+    ("257", "Terrain 257", "Import Terrains with at most 257 x 257 vertices"),
+    ("513", "Terrain 513", "Import Terrains with at most 513 x 513 vertices"),
+    ("1025", "Terrain 1025", "Import Terrains with at most 1025 x 1025 vertices"),
+    ("FULL", "Terrain Full", "Import Terrains at their full heightmap resolution (a 4097 heightmap makes 16.8 million vertices)"),
+)
+
 ARRANGE_ITEMS = (
     ("SIDE_BY_SIDE", "Side by Side", "Place prefabs next to each other so they do not overlap"),
     ("STACK", "Stack at Origin", "Place every prefab at the origin"),

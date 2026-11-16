@@ -6,7 +6,7 @@ Scenes / Prefabs はパッケージ内のシーン・prefab をそのまま候�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from .placement import ModelPlacement, SceneContents
@@ -87,12 +87,23 @@ class SceneSummary:
 
 
 def summarize_scene(
-    guid: str, pathname: str, contents: SceneContents | None, unsupported_models: Mapping[str, str]
+    guid: str,
+    pathname: str,
+    contents: SceneContents | None,
+    unsupported_models: Mapping[str, str],
+    package_guids: Container[str] = (),
 ) -> SceneSummary:
-    """シーンの候補を作る。``contents`` が None なら読めなかったシーンとして理由を付ける。"""
+    """シーンの候補を作る。``contents`` が None なら読めなかったシーンとして理由を付ける。
+
+    ``package_guids``（パッケージにあるアセットの GUID）に TerrainData があるシーンは、モデルが無くても読み込める（#205）。
+    """
     summary = SceneSummary(guid, pathname, contents)
     if contents is None:
         summary.supported, summary.skip_reason = False, UNREADABLE_SCENE_REASON
+    elif any(g in package_guids for g in contents.terrain_data) and all(
+        g in unsupported_models for g in contents.model_guids
+    ):
+        pass  # Terrain だけでも読み込める
     elif not contents.placements:
         summary.supported, summary.skip_reason = False, NO_SCENE_MESH_REASON
     elif all(g in unsupported_models for g in contents.model_guids):
