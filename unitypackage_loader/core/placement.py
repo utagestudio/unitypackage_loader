@@ -39,6 +39,7 @@ from .hierarchy import (
     world_matrices,
 )
 from .primitives import builtin_mesh_kind
+from .terrain import terrain_data_ref
 from .transform import Mat4, inverse_affine, multiply
 from .unity_ids import mesh_file_id
 
@@ -366,7 +367,8 @@ class SceneContents:
     lights: int = 0
     cameras: int = 0
     ui_elements: int = 0  # RectTransform（読み込まない。#202）
-    terrains: int = 0  # Terrain（読み込まない。#202）
+    terrains: int = 0  # Terrain のコンポーネントの数（#202）
+    terrain_data: list[str] = field(default_factory=list)  # Terrain が指す TerrainData の GUID（重複なし、現れた順。#205）
     other_renderers: int = 0  # パッケージ外のメッシュを指す Renderer（組み込みメッシュの MeshRenderer は ``primitives``）
     decals: int = 0  # DecalProjector（#165）
     primitives: list[PrimitivePlacement] = field(default_factory=list)
@@ -414,6 +416,10 @@ def summarize(
         cameras=h.counts[CLASS_CAMERA],
         ui_elements=h.counts[CLASS_RECT_TRANSFORM],
         terrains=h.counts[CLASS_TERRAIN],
+        terrain_data=list(dict.fromkeys(
+            guid for n in h.nodes.values() for class_id, body in n.components.values()
+            if class_id == CLASS_TERRAIN and (guid := terrain_data_ref(body))
+        )),
         other_renderers=other,
         primitives=primitives,
         decals=sum(1 for n in h.nodes.values() for class_id, _ in n.components.values() if class_id == CLASS_MONO_BEHAVIOUR),

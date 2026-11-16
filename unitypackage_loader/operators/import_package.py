@@ -12,7 +12,9 @@ from bpy_extras.io_utils import ImportHelper
 from ..core.package import PackageError
 from ..core.report import describe_exception, sanitize_display
 from ..blender import log
-from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
+from ..ui.preferences import (
+    ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, TERRAIN_ITEMS, UNIT_ITEMS, get_prefs,
+)
 from . import select_models
 from .common import options_from_operator, report_level
 
@@ -38,6 +40,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     scene_cameras: BoolProperty(name="Scene Cameras", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_exposure: BoolProperty(name="Scene Exposure", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_decals: BoolProperty(name="Scene Decals", default=True, options={"HIDDEN", "SKIP_SAVE"})
+    scene_terrain: EnumProperty(name="Scene Terrain", items=TERRAIN_ITEMS, default="513", options={"HIDDEN", "SKIP_SAVE"})
     hide_lods: BoolProperty(
         name="Hide Lower LODs",
         default=True,

@@ -24,6 +24,7 @@ from ..core.profiles import ShaderTable, normalize_material
 from ..core.profiles.base import default_table
 from ..core.shader_graph import UVTransform, apply_uv_transforms, texture_uv_transforms
 from ..core.shader_source import SHADER_SOURCE_EXTS, ShaderDefaults, declared_properties, shader_defaults
+from ..core.terrain import CLASS_TERRAIN_DATA
 from ..core.units import PrefabSummary, SceneSummary, choice_count, summarize_prefabs, summarize_scene
 from .log import log_exception, warn_skipped
 from .model_import import operator_available
@@ -270,7 +271,7 @@ def prepare_package(
         elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
             skip_reason = COLLADA_UNAVAILABLE_REASON
         models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason, info))
-    if not models:
+    if not models and not (pkg.scenes() and _has_terrain_data(pkg)):
         raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
 
     referenced = material_textures(normalized, normalized)
@@ -371,6 +372,15 @@ def _prefab_reader(
     return read
 
 
+def _has_terrain_data(pkg: UnityPackage) -> bool:
+    """TerrainData の .asset があるか（.meta の mainObjectFileID が TerrainData のもの）。モデルが無くても、シーンの Terrain は
+    読み込めるので、解析を止めない（#205）。"""
+    return any(
+        e.ext == ".asset" and f"mainObjectFileID: {CLASS_TERRAIN_DATA * 100000}" in (e.meta_text or "")
+        for e in pkg.entries.values()
+    )
+
+
 def _prepare_scenes(
     pkg: UnityPackage, expander: Expander, catalog: ModelCatalog, warn: Callable[[str], None], unsupported: dict[str, str]
 ) -> tuple[list[SceneSummary], dict[str, Hierarchy]]:
@@ -388,5 +398,5 @@ def _prepare_scenes(
             hierarchies[entry.guid] = hierarchy
         except Exception as exc:  # noqa: BLE001 - 読めないシーンは候補を灰色にし、モデルや prefab の読み込みは続ける（#69）
             warn_skipped(warn, f"could not read scene {entry.pathname}", exc)
-        scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported))
+        scenes.append(summarize_scene(entry.guid, entry.pathname, contents, unsupported, pkg.entries))
     return scenes, hierarchies

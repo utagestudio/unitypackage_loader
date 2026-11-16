@@ -18,6 +18,9 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 * ``FastPropertyName``（古い .mat のキー）→ 中の文字列
 * ``bool`` → ``0`` / ``1``、``TypelessData`` → 16 進文字列
 
+``compact=True``（Terrain の高さマップ・アルファマップのような大きなデータ用。#205）では、数値の配列を ``array.array``、
+``TypelessData`` を ``bytes`` にする。要素ごとに Python のオブジェクトを作らないので、1,600 万要素でもメモリを食わない。
+
 壊れた / 細工されたファイルでも ``UnityBinaryError``（``ValueError`` の派生）だけを送出する。
 範囲外の読み取り、ファイルサイズを超える件数、不正な TypeTree の階層はいずれもここで止める。
 """
@@ -25,6 +28,8 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 from __future__ import annotations
 
 import struct
+import sys
+from array import array as _NumberArray
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -253,10 +258,15 @@ class _External:
     path: str
 
 
+# struct の書式 → array の型コード（compact のとき）。bool は 0 / 1 の 1 バイト
+_ARRAY_CODES = {"b": "b", "B": "B", "h": "h", "H": "H", "i": "i", "I": "I", "q": "q", "Q": "Q", "f": "f", "d": "d", "?": "B"}
+
+
 class _ValueReader:
-    def __init__(self, r: _Reader, externals: list[_External]):
+    def __init__(self, r: _Reader, externals: list[_External], compact: bool = False):
         self.r = r
         self.externals = externals
+        self.compact = compact
         self._min_sizes: dict[int, int] = {}  # id(node) → 値の最小バイト数
 
     def _min_size(self, node: _Node) -> int:
@@ -285,7 +295,8 @@ class _ValueReader:
             value = r.bytes(r.count("string byte")).decode("utf-8", "replace")
             align = True
         elif node.type == "TypelessData":
-            value = r.bytes(r.count("byte")).hex()
+            raw = r.bytes(r.count("byte"))
+            value = raw if self.compact else raw.hex()
         elif node.type == "pair" and len(node.children) == 2:
             value = (self.read(node.children[0]), self.read(node.children[1]))
         elif node.is_array_wrapper:
@@ -312,6 +323,15 @@ class _ValueReader:
             raise UnityBinaryError(f"invalid {node.name!r} element count {size} for empty elements")
         fmt = _PRIMITIVES.get(element.type)
         if fmt is not None and not element.children and not element.aligned:
+            if self.compact:
+                code = _ARRAY_CODES[fmt]
+                values = _NumberArray(code)
+                if values.itemsize != struct.calcsize(fmt):
+                    raise UnityBinaryError(f"unsupported element size for {node.name!r}")
+                values.frombytes(self.r.bytes(values.itemsize * size))
+                if (self.r.endian == ">") != (sys.byteorder == "big"):
+                    values.byteswap()
+                return values
             st = struct.Struct(f"{self.r.endian}{size}{fmt}")
             values = list(st.unpack(self.r.bytes(st.size)))
             return [int(v) for v in values] if fmt == "?" else values
@@ -382,8 +402,8 @@ def is_serialized_file(data: bytes) -> bool:
     return 9 <= version and struct.unpack_from(">I", data, 4)[0] == len(data)
 
 
-def parse_serialized_file(data: bytes) -> list[UnityDocument]:
-    """SerializedFile の全オブジェクトを ``UnityDocument`` の列にする。
+def parse_serialized_file(data: bytes, compact: bool = False) -> list[UnityDocument]:
+    """SerializedFile の全オブジェクトを ``UnityDocument`` の列にする（``compact`` はモジュールの説明を参照）。
 
     1 つのオブジェクトだけが読めない場合（参照型のデータなど）はそのオブジェクトを飛ばす。
     1 つも読めなければ最初のエラーを送出する。
@@ -438,7 +458,7 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
         try:
             if start < header.data_offset or start + size > len(data):
                 raise UnityBinaryError(f"object {path_id} lies outside the file")
-            reader = _ValueReader(_Reader(data, header.endian, start, start + size), externals)
+            reader = _ValueReader(_Reader(data, header.endian, start, start + size), externals, compact)
             tree = typ.tree
             assert tree is not None
             body = reader.read(tree)
@@ -453,10 +473,10 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
     return docs
 
 
-def load_documents(data: bytes | str) -> list[UnityDocument]:
-    """テキスト（Unity YAML）でもバイナリでも、アセットを ``UnityDocument`` の列にする。"""
+def load_documents(data: bytes | str, compact: bool = False) -> list[UnityDocument]:
+    """テキスト（Unity YAML）でもバイナリでも、アセットを ``UnityDocument`` の列にする（``compact`` はバイナリのときだけ使う）。"""
     if isinstance(data, str):
         return parse_documents(data)
     if is_serialized_file(data):
-        return parse_serialized_file(data)
+        return parse_serialized_file(data, compact)
     return parse_documents(data.decode("utf-8", "replace"))

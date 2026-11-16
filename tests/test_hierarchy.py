@@ -898,6 +898,30 @@ class DecalTest(unittest.TestCase):
         self.assertEqual(components(hierarchy), [])  # ライト・カメラだけを引くときは出てこない
 
 
+class TerrainTest(unittest.TestCase):
+    """Terrain のコンポーネントは中身ごと持ち、TerrainData の参照を概要に出す（#205）。"""
+
+    TERRAIN = (
+        "--- !u!218 &{id}\nTerrain:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        "  m_TerrainData: {{fileID: 15600000, guid: {data}, type: 2}}\n  m_DrawHeightmap: 1\n"
+    )
+
+    def test_terrain_components_and_data(self):
+        scene = HEADER + "".join([
+            game_object(10, "Terrain"), transform(11, 10, pos=(-200, 0, -200)), self.TERRAIN.format(id=12, go=10, data="a" * 32),
+            game_object(20, "Terrain (1)"), transform(21, 20), self.TERRAIN.format(id=22, go=20, data="a" * 32),
+            game_object(30, "Other"), transform(31, 30), self.TERRAIN.format(id=32, go=30, data="b" * 32),
+        ])
+        hierarchy = Expander(lambda g: None, {}).expand_raw(parse_asset(scene))
+        found = components(hierarchy, [218])
+        self.assertEqual([c.name for c in found], ["Terrain", "Terrain (1)", "Other"])
+        self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (-200.0, 0.0, -200.0))
+        contents = summarize(hierarchy, {})
+        self.assertEqual(contents.terrains, 3)
+        self.assertEqual(contents.terrain_data, ["a" * 32, "b" * 32])
+        self.assertEqual(components(hierarchy), [])  # ライト・カメラだけを引くときは出てこない
+
+
 class RobustnessTest(unittest.TestCase):
     def test_self_referencing_prefab_stops(self):
         h = expander().expand_asset(LOOP)

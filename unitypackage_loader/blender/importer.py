@@ -58,6 +58,7 @@ from .prepare import (
 from .scene_objects import arrange_collections, defer_hide, find_layer_collection, move_collection_contents, remove_parts
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
+from .terrain import SessionTerrains, layer_textures
 
 __all__ = [
     "BLEND_DISABLED_REASON",
@@ -237,6 +238,8 @@ class _ImportSession:
         self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
         self._scene_frames: dict[str, tuple[dict, dict]] = {}  # シーンの GUID → (ワールド行列, アクティブか)。scene_frames
+        self.terrains = SessionTerrains(self)  # TerrainData ごとに作った Terrain のメッシュとマテリアル（#205）
+        self.terrain_written: set[str] = set()  # この回で展開し直した TerrainData（アルファマップの PNG も書き直す）
 
     def run(self) -> None:
         self.step(0.0, "Scanning package")
@@ -299,7 +302,7 @@ class _ImportSession:
             for placement in scene_summary.placements:
                 if placement.model_guid in self.supported_models:
                     selected.setdefault(placement.model_guid, self.supported_models[placement.model_guid])
-        if selected:
+        if selected or any(self.scene_terrain_data(scenes)):
             return list(selected.values())
         reasons = {m.skip_reason for m in self.prepared.models if not m.supported}
         what = "models"
@@ -332,16 +335,29 @@ class _ImportSession:
         self.report.extract_root = str(self.extract_root)
         self.step(0.2, "Extracting files")
         sidecars = [g for m in models for g in sidecar_guids(self.pkg, m.entry)]
+        terrain_data = self.scene_terrain_data(scenes)
+        if terrain_data:
+            # レイヤーのテクスチャは TerrainData を読むまで分からないので、パッケージの .terrainlayer のものを先に展開する
+            needed_tex.update(g for g in layer_textures(self.pkg) if self.pkg.get(g) is not None)
         written: set[str] = set()  # 実際に書き出した（展開し直した）ファイル
         self.paths = self.pkg.extract(
-            [m.guid for m in models] + sidecars + sorted(needed_tex),
+            [m.guid for m in models] + sidecars + sorted(terrain_data) + sorted(needed_tex),
             self.extract_root,
             overwrite=self.opts.overwrite_extracted,
             progress=lambda f, n: self.step(0.2 + 0.3 * f, f"Extracting {n}"),
             max_total_size=self.opts.max_extract_size,
             written=written,
         )
+        self.terrain_written = written & terrain_data
         return needed_tex, written
+
+    def scene_terrain_data(self, scenes: list[SceneSummary]) -> set[str]:
+        """読み込むシーンの Terrain が使う、パッケージにある TerrainData の GUID（Terrain を読み込まない設定なら空）。"""
+        if self.opts.terrain_points is None:
+            return set()
+        return {
+            g for s in scenes if s.contents is not None for g in s.contents.terrain_data if self.pkg.get(g) is not None
+        }
 
     @contextmanager
     def collections_out_of_view_layer(self):

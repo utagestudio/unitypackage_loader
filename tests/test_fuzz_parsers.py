@@ -32,7 +32,9 @@ from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
 from unitypackage_loader.core.shader_graph import apply_uv_transforms, texture_uv_transforms
 from unitypackage_loader.core.shader_source import declared_properties, shader_defaults
+from unitypackage_loader.core.terrain import read_terrain_data, read_terrain_layer, terrain_mesh
 from unitypackage_loader.core.unity_binary import load_documents
+from tests.terrain_writer import terrain_data_asset, terrain_layer_yaml
 
 SEED = 20260915
 ROUNDS = 80  # フィクスチャ 1 つあたりの壊し方の数
@@ -249,6 +251,20 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
+
+    def test_terrain(self):
+        # Terrain の TerrainData と TerrainLayer（#205）。読めた TerrainData はメッシュまで作る
+        def run_terrain(data: bytes) -> None:
+            terrain_mesh(read_terrain_data(data), 3)
+
+        holes = [255, 0, 255, 255]
+        data = terrain_data_asset(3, 3, (1.0, 10.0, 1.0), [0, 1, 2, 3, 4, 5, 6, 7, 8], holes=holes, layers=["a" * 32],
+                                  alphamaps=[(2, 2, bytes(16))])
+        self.fuzz("terrain data", run_terrain, data, mutate_bytes)
+        old = terrain_data_asset(2, 3, (1.0, 1.0, 1.0), [0] * 6, old_layout=True, legacy=[{"texture": "b" * 32}],
+                                 alphamaps=[(2, 2, bytes(16))], argb=True)
+        self.fuzz("old terrain data", run_terrain, old, mutate_bytes)
+        self.fuzz("terrain layer", read_terrain_layer, terrain_layer_yaml("Road", "c" * 32, "d" * 32), mutate_text)
 
     def test_fbx_node_names(self):
         # 表の無いモデルの中への上書きの対象を決めるときに読む、FBX のノード名（#31）

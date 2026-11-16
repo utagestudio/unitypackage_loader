@@ -1,0 +1,81 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "AUTO"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "terrain_count": 2,
+  "images": {
+    "count": 7
+  },
+  "warnings_contain": [
+    "3 tree(s) were not imported"
+  ],
+  "warnings_exclude": [
+    "were not imported (turn on Terrain",
+    "is not in the package",
+    "could not"
+  ],
+  "placed_objects": [
+    {
+      "top": "Ground",
+      "object": "Ground",
+      "vertices": 66049,
+      "faces": 65532,
+      "hidden": false,
+      "bbox": [
+        -138.0,
+        -84.0,
+        1.0,
+        -10.0,
+        -20.0,
+        20.845
+      ]
+    },
+    {
+      "top": "Level",
+      "object": "Old Ground",
+      "vertices": 153,
+      "faces": 128,
+      "hidden": false,
+      "bbox": [
+        -116.0,
+        -3.0,
+        0.0,
+        -100.0,
+        5.0,
+        0.0
+      ]
+    }
+  ],
+  "material_checks": [
+    {
+      "name": "Ground Data (Terrain)",
+      "node_types": [
+        "ShaderNodeSeparateColor",
+        "ShaderNodeMapping",
+        "ShaderNodeNormalMap",
+        "ShaderNodeBsdfPrincipled"
+      ],
+      "has_unity_data": false
+    },
+    {
+      "name": "Old Data (Terrain)",
+      "node_types": [
+        "ShaderNodeSeparateColor",
+        "ShaderNodeMapping",
+        "ShaderNodeBsdfPrincipled"
+      ],
+      "node_types_absent": [
+        "ShaderNodeNormalMap"
+      ]
+    }
+  ],
+  "dialog_selected": {
+    "SCENES": [
+      "Assets/Synthetic/Scenes/Terrain.unity"
+    ]
+  }
+}
