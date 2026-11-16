@@ -100,6 +100,10 @@
       "alpha_mode": "cutout",
       "alpha_linked": true,
       "emission_strength": 0.0
+    },
+    {
+      "name": "ToonMat",
+      "base_image": "MeshColor.png"
     }
   ],
   "warnings_contain": [

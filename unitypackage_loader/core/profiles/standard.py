@@ -190,6 +190,38 @@ def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial, displa
             n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0, display_names)
 
 
+# 役割の分かるテクスチャの名前に含まれる語（大文字小文字・"_"・空白を無視した部分一致）。fill_sole_texture でベースカラーの候補から外す
+_NON_COLOR_WORDS = (
+    "ramp", "normal", "bump", "mask", "matcap", "noise", "height", "parallax", "displace", "rough", "metal", "gloss", "smooth",
+    "spec", "occlusion", "ao", "emiss", "emission", "detail", "cube", "reflect", "lut", "gradient", "dissolve", "flow",
+    "shadow", "outline", "rim", "thickness", "trans", "light", "splat", "control", "dirt", "wind",
+    # 手元の 71 パッケージで、色ではない画像に当たったもの（水の効果、色見本、Texture2DArray、室内の擬似表現、アルファ）
+    "caustic", "foam", "water", "overlay", "theme", "palette", "array", "room", "alpha",
+)
+_BUILTIN_GUID_PREFIX = "0000000000000000"  # Unity の組み込みのリソース（既定のテクスチャなど）
+
+
+def fill_sole_texture(mat: UnityMaterial, n: NormalizedMaterial, display_names: Mapping[str, str] | None = None) -> None:
+    """名前でベースカラーが見つからず、役割の分からない名前のテクスチャが 1 枚だけなら、それをベースカラーにする（#239）。
+
+    宣言が分かる自作シェーダー（前のシェーダーの残りを外したもの）だけに使う。Toon Harbor Pack の TH_CustomToon は
+    色を ``_TextureSample1``（表示名も「Texture Sample」）、陰の段階を ``_TextureRamp`` に持ち、名前では色が分からない。
+    2 枚以上残るときは決められないので当てない。
+    """
+    if n.base_color_tex is not None:
+        return
+    candidates = []
+    for name, ref in mat.textures.items():
+        if ref is None or not ref.guid or ref.guid.startswith(_BUILTIN_GUID_PREFIX):
+            continue
+        key = _alias_key(f"{name} {(display_names or {}).get(name, '')}")
+        if not any(word in key for word in _NON_COLOR_WORDS):
+            candidates.append(ref)
+    if len(candidates) == 1:
+        n.base_color_tex = candidates[0]
+        n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
+
+
 def scale_emission_by_alias(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     """一般名（``_EmissionColor``）で読んだ発光に、独自の名前の強さを掛ける（自作シェーダー向け。#241）。
 
