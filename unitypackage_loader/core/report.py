@@ -29,7 +29,7 @@ class MaterialReport:
     blender_name: str
     fbx_name: str
     guid: str | None
-    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split / shared
+    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split / shared / unused
     family: str = ""
     shader_name: str = ""
     alpha_mode: str = ""
@@ -67,8 +67,8 @@ class ImportReport:
             self.warnings.append(message)
 
     # 別のマテリアルに置き換わり、Blender 上に独立して残っていない行（replaced: prefab の割り当てで使われなくなった、
-    # shared: 同じモデルを別の prefab 用に読み直し、組み立て済みのマテリアルを使った）
-    _INACTIVE_METHODS = frozenset({"replaced", "shared"})
+    # shared: 同じモデルを別の prefab 用に読み直し、組み立て済みのマテリアルを使った、unused: 使われていない部品と一緒に消した。#221）
+    _INACTIVE_METHODS = frozenset({"replaced", "shared", "unused"})
 
     @property
     def mapped_count(self) -> int:

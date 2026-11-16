@@ -734,7 +734,12 @@ class _ImportSession:
         if not removed:
             return objects, 0
         self.report.objects[:] = [name for name in self.report.objects if name not in removed]
-        return remove_parts(objects, removed), len(removed & unused)
+        materials = {slot.material for o in objects if o.name in removed for slot in o.material_slots if slot.material}
+        kept = remove_parts(objects, removed)
+        # 消した部品だけが使っていた、この回に組んだマテリアルも消す（1 つの FBX に多くの部品が入り、配置ごとに 1 つだけ使う
+        # Corals では、配置ごとの読み直しで使われないマテリアルが何百も残り、未対応付けとして数えていた。#221）
+        self.materials.drop_unused_materials(materials)
+        return kept, len(removed & unused)
 
     def hide_named(self, objects: list[bpy.types.Object], names: set[str]) -> int:
         """``names`` のオブジェクトを隠し、隠した数を返す（prefab が使っていない部品。#151 / #172）。
