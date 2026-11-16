@@ -208,6 +208,13 @@ def check_images(ctx: Context) -> None:
     c, images = ctx.c, ctx.exp.get("images", {})
     if "count" in images:
         c.eq("image count", len(ctx.report.images), images["count"])
+    if "missing" in images:
+        # ファイルの見つからない画像（モデルの中のパスが作者の PC のものなど。#220）
+        missing = [
+            i.name for i in bpy.data.images
+            if i.source == "FILE" and not i.packed_file and i.filepath and not Path(bpy.path.abspath(i.filepath)).is_file()
+        ]
+        c.eq("images with missing files", len(missing), images["missing"])
     if "packed" in images:
         # レポートに載った画像（このアドオンが読み込んだもの）がすべて .blend に取り込まれているか
         unpacked = [n for n in ctx.report.images if bpy.data.images.get(n) is None or bpy.data.images[n].packed_file is None]

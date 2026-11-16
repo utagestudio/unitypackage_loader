@@ -8,6 +8,8 @@
   （位置 (0, 1, 0)）が MeshMat.mat と AssetMat.asset（マテリアルを .asset に入れたもの）で使う。
 - Prefabs/Embedded.prefab: prefab の中に埋め込んだ同じ形の Mesh を、Panel が MeshMat で使う（UModeler の prefab と同じ形）。
 - Scenes/Meshes.unity: Wedge.prefab を X に 5、Embedded.prefab を Z に 5 動かして置き、Direct が Wedge.asset を 2 倍で使う。
+- Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
+  同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
 
 from __future__ import annotations
@@ -19,7 +21,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.make_synthetic_package import guid_of, mat_yaml, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
+import tempfile  # noqa: E402
+
+import bpy  # noqa: E402
+
+from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
 from tests.test_unity_mesh import QUAD, QUAD_NORMALS, QUAD_TRIS, QUAD_UVS  # noqa: E402
 from tests.unity_mesh_writer import mesh_document  # noqa: E402
 from tests.unity_yaml_writer import HEADER, game_object, instance, mod, transform  # noqa: E402
@@ -33,6 +39,25 @@ def _renderer(filter_id: int, renderer_id: int, go: int, mesh_ref: str, material
         f"--- !u!33 &{filter_id}\nMeshFilter:\n  m_GameObject: {{fileID: {go}}}\n  m_Mesh: {mesh_ref}\n"
         f"--- !u!23 &{renderer_id}\nMeshRenderer:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n  m_Materials:\n{mats}"
     )
+
+
+def export_crate_fbx(path: Path) -> None:
+    """マテリアルの画像が作者の PC のパスを指す FBX（#220）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = obj.data.name = "Crate"
+    material = bpy.data.materials.new("CrateFbx")
+    material.use_nodes = True
+    image = bpy.data.images.new("CrateColor.png", 4, 4)
+    image.source = "FILE"
+    image.filepath = "/nonexistent/author/Textures/CrateColor.png"
+    tex = material.node_tree.nodes.new("ShaderNodeTexImage")
+    tex.image = image
+    bsdf = next(n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    material.node_tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    obj.data.materials.append(material)
+    bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False, path_mode="ABSOLUTE")
 
 
 def main() -> None:
@@ -73,6 +98,13 @@ def main() -> None:
         game_object(10, "Panel"), transform(11, 10), _renderer(12, 13, 10, f"{{fileID: {EMBEDDED_MESH_ID}}}", [mesh_mat]),
         mesh_document(EMBEDDED_MESH_ID, "um_panel", QUAD, [QUAD_TRIS], normals=QUAD_NORMALS, uvs=QUAD_UVS),
     ])).encode(), prefab_meta(embedded_path))
+
+    crate_tex_path = "Assets/Synthetic/Textures/CrateColor.png"
+    add(crate_tex_path, png_bytes(8, (200, 150, 60)), texture_meta(guid_of(crate_tex_path), False))
+    crate_fbx = Path(tempfile.mkdtemp(prefix="synthetic_mesh_")) / "crate.fbx"
+    export_crate_fbx(crate_fbx)
+    crate_path = "Assets/Synthetic/Models/Crate.fbx"
+    add(crate_path, crate_fbx.read_bytes(), model_meta(guid_of(crate_path), {}))
 
     scene_path = "Assets/Synthetic/Scenes/Meshes.unity"
     scene = HEADER + "".join([

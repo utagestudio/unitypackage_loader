@@ -41,6 +41,7 @@
     { "package": "synthetic_terrain.unitypackage", "expectations": "expectations_synthetic_terrain_none.json", "note": "Terrain を読み込まない設定（Terrain だけのシーンは読み込めない）" },
     { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh.json", "note": "Unity の Mesh（.asset と prefab に埋め込んだもの）と .asset のマテリアルを使うシーン" },
     { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh_prefabs.json", "note": "Unity の Mesh だけを使う prefab" },
+    { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh_models.json", "note": "FBX のマテリアルの画像が作者の PC のパスを指すモデル" },
     { "package": "synthetic_nested.unitypackage", "expectations": "expectations_synthetic_nested.json", "note": "入れ子のパッケージ（選ばなければ Built-in らしいもの）" },
     { "package": "synthetic_nested.unitypackage", "expectations": "expectations_synthetic_nested_chosen.json", "note": "入れ子のパッケージを選んで読む" },
     { "package": "synthetic_broken_model.unitypackage", "expectations": "expectations_synthetic_broken_model.json", "note": "1 つ失敗しても残りを読む" },
