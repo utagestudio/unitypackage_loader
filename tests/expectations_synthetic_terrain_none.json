@@ -1,0 +1,8 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "scene_terrain": "NONE"
+  },
+  "result": "CANCELLED",
+  "leaves_nothing": true
+}

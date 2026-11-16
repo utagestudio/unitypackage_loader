@@ -451,6 +451,10 @@ def check_placed_objects(ctx: Context) -> None:
             c.near(f"{label}.normal", (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized(), spec["normal"])
         if "hidden" in spec:
             c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "vertices" in spec:  # メッシュの頂点数と面数（Terrain の間引きと穴。#205）
+            c.eq(f"{label}.vertices", len(obj.data.vertices), spec["vertices"])
+        if "faces" in spec:
+            c.eq(f"{label}.faces", len(obj.data.polygons), spec["faces"])
         if "lod" in spec:
             c.eq(f"{label}.lod", obj.get("unity_lod"), spec["lod"])
         if "mat_files" in spec:
@@ -526,6 +530,8 @@ def check_scene_settings(ctx: Context) -> None:
         c.eq("report cameras", report.cameras, exp["camera_count"])
     if "decal_count" in exp:
         c.eq("report decals", report.decals, exp["decal_count"])
+    if "terrain_count" in exp:
+        c.eq("report terrains", report.terrains, exp["terrain_count"])
 
 
 def check_shared_meshes(ctx: Context) -> None:
