@@ -331,13 +331,8 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     gone = [obj for obj in objects if obj.name in names]
     used = {obj.data for obj in kept if obj.data is not None}
     orphans = {obj.data for obj in gone if obj.data is not None} - used
-    for obj in gone:
-        bpy.data.objects.remove(obj)
-    for data in orphans:
-        if isinstance(data, bpy.types.Mesh):
-            bpy.data.meshes.remove(data)
-        elif isinstance(data, bpy.types.Armature):
-            bpy.data.armatures.remove(data)
+    # 1 つずつ remove すると、そのたびに全データを調べて参照を外すので、シーンでは何万回も呼んで重い。まとめて消す（#219）
+    bpy.data.batch_remove(gone + [d for d in orphans if isinstance(d, (bpy.types.Mesh, bpy.types.Armature))])
     return kept
 
 
@@ -352,9 +347,13 @@ def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
 
 def move_collection_contents(source: bpy.types.Collection, target: bpy.types.Collection) -> None:
     """``source`` のオブジェクトと子コレクションを ``target`` へ移す（先にリンクしてから外す）。"""
+    # 名前での「含まれるか」は、オブジェクトの多いコレクションでは毎回すべてをなめるので重い（シーンでは何千回も呼ぶ。#219）。
+    # リンク済みなら link が RuntimeError を送るので、それで判断する
     for obj in list(source.objects):
-        if obj.name not in target.objects:
+        try:
             target.objects.link(obj)
+        except RuntimeError:
+            pass
         source.objects.unlink(obj)
     for child in list(source.children):
         if child.name not in target.children:

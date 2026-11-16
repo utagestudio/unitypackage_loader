@@ -369,16 +369,18 @@ class SessionMaterials:
 
     def drop_replaced_materials(self, remaining: list) -> None:
         """prefab のスロットの差し替えで使われなくなった、インポーターが作ったマテリアルを消し、レポートの行を "replaced" にする。"""
-        for bmat in remaining:
-            if bmat.users != 0:
-                continue
-            for mrep in self.report.materials:
-                if mrep.blender_name == bmat.name and mrep.method != "replaced":
-                    mrep.method = "replaced"
-            # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
-            for guid in [g for g, m in self.built_by_guid.items() if m == bmat]:
-                del self.built_by_guid[guid]
-            bpy.data.materials.remove(bmat)
+        gone = [bmat for bmat in remaining if bmat.users == 0]
+        if not gone:
+            return
+        names = {bmat.name for bmat in gone}
+        for mrep in self.report.materials:
+            if mrep.blender_name in names and mrep.method != "replaced":
+                mrep.method = "replaced"
+        # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
+        for guid in [g for g, m in self.built_by_guid.items() if m.name in names and any(m == b for b in gone)]:
+            del self.built_by_guid[guid]
+        # 1 つずつ remove すると、そのたびに全データを調べるので、シーンでは何千回も呼んで重い。まとめて消す（#219）
+        bpy.data.batch_remove(gone)
 
 
 def _named_after_mat(candidate: bpy.types.Material, current: bpy.types.Material, umat: UnityMaterial) -> bool:

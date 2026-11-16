@@ -34,6 +34,23 @@ def _common_prefix_len(a: str, b: str) -> int:
     return n
 
 
+_NAME_INDEX: tuple[int, int, dict[str, list[UnityMaterial]]] | None = None  # (id, 件数, 索引)。直前の表のものを使い回す
+
+
+def _name_index(materials: dict[str, UnityMaterial]) -> dict[str, list[UnityMaterial]]:
+    """.mat の m_Name とファイル名 → .mat。シーンではモデルを何千回も読み込むので、同じ表なら作り直さない（#219）。"""
+    global _NAME_INDEX
+    if _NAME_INDEX is not None and _NAME_INDEX[0] == id(materials) and _NAME_INDEX[1] == len(materials):
+        return _NAME_INDEX[2]
+    by_name: dict[str, list[UnityMaterial]] = {}
+    for mat in materials.values():
+        keys = {mat.name, PurePosixPath(mat.pathname).stem} - {""}
+        for key in keys:
+            by_name.setdefault(key, []).append(mat)
+    _NAME_INDEX = (id(materials), len(materials), by_name)
+    return by_name
+
+
 def resolve_materials(
     fbx_material_names: list[str],
     model_info: ModelImporterInfo | None,
@@ -52,11 +69,7 @@ def resolve_materials(
        サブメッシュとスロットの対応は ``submesh_order``、無ければスロット順）
     4. 解決不能
     """
-    by_name: dict[str, list[UnityMaterial]] = {}
-    for mat in materials.values():
-        keys = {mat.name, PurePosixPath(mat.pathname).stem} - {""}
-        for key in keys:
-            by_name.setdefault(key, []).append(mat)
+    by_name = _name_index(materials)
 
     result: dict[str, MaterialResolution] = {}
     for fbx_name in fbx_material_names:
