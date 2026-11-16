@@ -157,10 +157,11 @@ def build_shader_table(extra_path: str = "") -> ShaderTable:
 
 def _model_info(entry: AssetEntry, warn: Callable[[str], None]) -> ModelImporterInfo:
     """モデルの .meta を読む。壊れていても（構文エラー・ネスト過多）そのモデルだけ既定値で続ける。"""
-    if not entry.meta_text:
+    meta = entry.meta_text or entry.legacy_meta
+    if not meta:
         return ModelImporterInfo()
     try:
-        return ModelImporterInfo.from_meta(entry.meta_text)
+        return ModelImporterInfo.from_meta(meta)
     except Exception as exc:  # noqa: BLE001 - 補助データなので、そのモデルだけ既定値で続ける（#69）
         warn_skipped(warn, f"could not parse .meta of {entry.pathname}", exc)
         return ModelImporterInfo()

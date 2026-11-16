@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .meta import MetaInfo, legacy_meta
 from .model_ids import parse_fbx_material_names, parse_fbx_node_names, parse_fbx_top_nodes
 
 __all__ = [
@@ -87,7 +88,10 @@ class AssetEntry:
     fbx_materials: list[str] | None = None
     # OBJ のグループ（``g``）の名前（出てくる順・重複なし）。scan で中身を読めた .obj だけ（それ以外は None。#214）
     obj_groups: list[str] | None = None
+    # Unity 4 以前のパッケージで asset.meta の代わりにある metaData から読んだ、モデルのインポーターの表（#225 の続き）
+    legacy_meta: MetaInfo | None = None
     _cache: bytes | None = field(default=None, repr=False)
+    _legacy_raw: bytes | None = field(default=None, repr=False)  # 拡張子が分かるまで保持する metaData
 
     @property
     def name(self) -> str:
@@ -359,6 +363,20 @@ def _settle_cache(entry: AssetEntry) -> None:
         entry._cache = None
 
 
+def _settle_legacy_meta(entry: AssetEntry, warnings: list[str]) -> None:
+    """保持している metaData を、モデルなら読み、それ以外なら捨てる。拡張子が分からないうちは保持する。"""
+    raw = entry._legacy_raw
+    if raw is None or not entry.pathname:
+        return
+    entry._legacy_raw = None
+    if entry.ext not in MODEL_EXTS or entry.meta_text:
+        return
+    try:
+        entry.legacy_meta = legacy_meta(raw)
+    except ValueError as exc:  # 補助データなので、読めなければ表の無いモデルとして続ける
+        warnings.append(f"ignored metaData of {entry.pathname}: {exc}")
+
+
 # 入れ子のパッケージを選ばなかったときに優先する中身（Blender のマテリアルにもっとも近い Built-in のもの。#217）
 _NESTED_PREFERRED = ("builtin", "built-in", "birp", "standard", "3d")
 
@@ -450,7 +468,7 @@ class UnityPackage:
                     if held is not None and held is not entry:
                         _settle_cache(held)  # 別の GUID に移った。pathname は後から来ないものとして扱う
                         held = None
-                    if part in ("pathname", "asset.meta") and member.size > _METADATA_MAX_SIZE:
+                    if part in ("pathname", "asset.meta", "metaData") and member.size > _METADATA_MAX_SIZE:
                         self.warnings.append(
                             f"ignored {member.name}: {member.size} bytes exceeds the {_METADATA_MAX_SIZE} byte limit"
                         )
@@ -458,9 +476,13 @@ class UnityPackage:
                         text = tar.extractfile(member).read().decode("utf-8", "replace")
                         entry.pathname = text.splitlines()[0].strip() if text.strip() else ""
                         _settle_cache(entry)
+                        _settle_legacy_meta(entry, self.warnings)
                         held = None
                     elif part == "asset.meta":
                         entry.meta_text = tar.extractfile(member).read().decode("utf-8", "replace")
+                    elif part == "metaData" and (not entry.pathname or entry.ext in MODEL_EXTS):
+                        entry._legacy_raw = tar.extractfile(member).read()
+                        _settle_legacy_meta(entry, self.warnings)
                     elif part == "asset":
                         entry.has_asset = True
                         entry.size = member.size
@@ -484,6 +506,8 @@ class UnityPackage:
         for entry in entries.values():
             if entry._cache is not None and entry.ext not in _CACHE_EXTS:
                 _drop_cache(entry)
+            _settle_legacy_meta(entry, self.warnings)
+            entry._legacy_raw = None
 
         self.entries = entries
         self._scanned = True

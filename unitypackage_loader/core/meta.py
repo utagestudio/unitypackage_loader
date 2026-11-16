@@ -1,17 +1,24 @@
-"""``asset.meta`` から必要なインポーター設定だけを取り出す。"""
+"""``asset.meta`` から必要なインポーター設定だけを取り出す。
+
+Unity 4 以前に書き出したパッケージは ``asset.meta`` の代わりに ``metaData``（取り込み結果とインポーターを入れた
+バイナリの SerializedFile）を持つ。モデルの ``m_FileIDToRecycleName`` だけを ``legacy_meta`` で同じ形にして読む（#225 の続き）。
+"""
 
 from __future__ import annotations
 
 import re
+import struct
 from dataclasses import dataclass, field
 from typing import Any
 
+from .unity_binary import parse_serialized_file
 from .unity_yaml import UnityRef, parse_text
 
 __all__ = [
     "MetaInfo",
     "ModelImporterInfo",
     "TextureImporterInfo",
+    "legacy_meta",
     "parse_meta",
     "strip_numeric_suffix",
 ]
@@ -42,6 +49,30 @@ def parse_meta(text: str) -> MetaInfo:
             importer, data = key, value
             break
     return MetaInfo(guid=guid, importer=importer, data=data)
+
+
+def legacy_meta(data: bytes) -> MetaInfo | None:
+    """Unity 4 以前の ``metaData`` を読む。モデル（ModelImporter）でなければ None。
+
+    ヘッダーのファイルサイズまでが SerializedFile で、その後ろにはプレビューの PNG が続く。モデルの中のオブジェクトの
+    fileID → 名前の表（``m_FileIDToRecycleName``）を、テキストの .meta と同じ ``fileIDToRecycleName`` の形にする。
+    壊れたデータには ``ValueError`` 系を送出する。
+    """
+    if len(data) < 20:
+        raise ValueError("metaData too small")
+    size = struct.unpack_from(">I", data, 4)[0]
+    if not 20 <= size <= len(data):
+        raise ValueError(f"metaData header size {size} out of range")
+    for doc in parse_serialized_file(data[:size], compact=True):
+        if doc.type_name != "ModelImporter":
+            continue
+        table: dict[int, str] = {}
+        items = doc.body.get("m_FileIDToRecycleName")
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, dict) and isinstance(item.get("first"), int) and isinstance(item.get("second"), str):
+                table[item["first"]] = item["second"]
+        return MetaInfo(guid="", importer="ModelImporter", data={"fileIDToRecycleName": table})
+    return None
 
 
 _NUMERIC_SUFFIX_RE = re.compile(r"\.[0-9]{3,}$")

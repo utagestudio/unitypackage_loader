@@ -26,7 +26,7 @@ from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import components, effective_active, parse_asset, world_matrices
 from unitypackage_loader.core.placement import placements, summarize
 from unitypackage_loader.core.material import parse_material
-from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
+from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo, legacy_meta
 from unitypackage_loader.core.model_ids import parse_fbx_node_names
 from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
@@ -253,6 +253,13 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
+
+    def test_legacy_meta_data(self):
+        # Unity 4 以前のパッケージの metaData（#225 の続き）
+        from tests.test_meta import LegacyMetaDataTests as MetaTests
+
+        data = MetaTests.meta_data("ModelImporter", 1040, MetaTests.TABLE)
+        self.fuzz("legacy metaData", lambda d: ModelImporterInfo.from_meta(legacy_meta(d) or ""), data, mutate_bytes)
 
     def test_mesh(self):
         # Unity の Mesh（#216）

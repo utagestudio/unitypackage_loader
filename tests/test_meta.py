@@ -1,9 +1,11 @@
 import unittest
 
 from tests import _paths  # noqa: F401
+from tests import unity_binary_writer as w
 from unitypackage_loader.core.meta import (
     ModelImporterInfo,
     TextureImporterInfo,
+    legacy_meta,
     parse_meta,
     strip_numeric_suffix,
 )
@@ -140,6 +142,39 @@ ModelImporter:
 
     def test_new_format_has_empty_table(self):
         self.assertEqual(ModelImporterInfo.from_meta(MODEL_META).recycle_names, {})
+
+
+class LegacyMetaDataTests(unittest.TestCase):
+    """Unity 4 以前のパッケージの metaData（バイナリの SerializedFile + プレビューの PNG。#225 の続き）。"""
+
+    # Unity 4 は //RootNode を後ろに置くことがあり、100000 / 400000 が中のノードを指す
+    TABLE = [(100000, "frame"), (100002, "//RootNode"), (400000, "frame"), (400002, "//RootNode"), (4300000, "frame")]
+
+    @staticmethod
+    def meta_data(importer: str, class_id: int, table: list[tuple[int, str]], big_endian: bool = False) -> bytes:
+        tree = w.cls(importer, "Base", w.string("m_Name"), w.map_("m_FileIDToRecycleName", w.prim("SInt64", "first"), w.string("second")))
+        data = w.build_serialized_file(
+            [(3, class_id, tree, {"m_Name": "", "m_FileIDToRecycleName": table})],
+            version=9, big_endian=big_endian, unity_version="4.6.1f1",
+        )
+        return data + b"\x89PNG\r\n\x1a\n" + bytes(64)  # 後ろに続くプレビュー
+
+    def test_model_table_is_read(self):
+        for big_endian in (False, True):
+            with self.subTest(big_endian=big_endian):
+                meta = legacy_meta(self.meta_data("ModelImporter", 1040, self.TABLE, big_endian))
+                info = ModelImporterInfo.from_meta(meta)
+                self.assertEqual(info.recycle_names, dict(self.TABLE))
+
+    def test_other_importers_are_ignored(self):
+        self.assertIsNone(legacy_meta(self.meta_data("TextureImporter", 1006, [])))
+
+    def test_broken_data_raises_value_error(self):
+        data = self.meta_data("ModelImporter", 1040, self.TABLE)
+        for broken in (b"", data[:10], data[:4] + b"\xff\xff\xff\xff" + data[8:], data[:200]):
+            with self.subTest(size=len(broken)):
+                with self.assertRaises(ValueError):
+                    legacy_meta(broken)
 
 
 class TextureImporterTests(unittest.TestCase):
