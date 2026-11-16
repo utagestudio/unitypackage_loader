@@ -229,7 +229,9 @@ class ShaderDefaultsTests(unittest.TestCase):
 
     def test_alpha_test_queue_and_cull_off(self):
         defaults = shader_defaults(LEAVES, ".shader")
-        self.assertEqual(defaults, ShaderDefaults(queue=2450, render_type="TransparentCutout", cull_off=True))
+        self.assertEqual(
+            defaults, ShaderDefaults(queue=2450, render_type="TransparentCutout", cull_off=True, hidden=frozenset({"__dirty"}))
+        )
         self.assertEqual(defaults.alpha_mode, "cutout")
 
     def test_render_type_wins_over_queue(self):
@@ -284,6 +286,101 @@ class ShaderDefaultsTests(unittest.TestCase):
         text = mat_yaml("Std", STANDARD, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], floats=[("_Mode", 0)])
         n = normalize_material(parse_material(text), defaults=ShaderDefaults(queue=2450, cull_off=True))
         self.assertEqual((n.alpha_mode, n.cull_backface), ("opaque", True))
+
+
+# Amplify Shader Editor の URP テンプレートで作ったシェーダー（The Basilica Cathedral の Tripolygon(URP)/Leaf、
+# Corals の ASE_StandartCutout2Sided と同じ形）。タグは Opaque のまま、パスの中で常に切り抜く。
+# テンプレートは使わなくても白い _EmissionColor を隠して宣言する
+AMPLIFY = """Shader "Tripolygon(URP)/Leaf"
+{
+	Properties
+	{
+		[HideInInspector] _EmissionColor("Emission Color", Color) = (1,1,1,1)
+		[ASEBegin]_Color("Color", Color) = (1,1,1,1)
+		_AlphaCutoff("Alpha Cutoff", Range( 0 , 1)) = 0.5
+		[ASEEnd]_MainTex("MainTex", 2D) = "white" {}
+	}
+	SubShader
+	{
+		Tags { "RenderPipeline"="UniversalPipeline" "RenderType"="Opaque" "Queue"="Geometry" }
+		Cull Back
+		Pass
+		{
+			Tags { "LightMode"="UniversalForward" }
+			HLSLPROGRAM
+			ALPHA_TEST_LINE
+			#pragma vertex vert
+			float3 Emission = 0;
+			#ifdef _ALPHATEST_ON
+				clip(Alpha - AlphaClipThreshold);
+			#endif
+			ENDHLSL
+		}
+	}
+}
+"""
+
+
+class AmplifyTemplateTests(unittest.TestCase):
+    """パスが常に切り抜く・白い発光色を隠して宣言する Amplify Shader Editor のシェーダー（#235 / #241）。"""
+
+    def shader(self, line: str) -> str:
+        return AMPLIFY.replace("ALPHA_TEST_LINE", line)
+
+    def test_always_alpha_test(self):
+        for line in (
+            "#define _ALPHATEST_ON 1",  # Basilica の葉
+            "#pragma multi_compile_local_fragment _ALPHATEST_ON",  # Corals（キーワードが 1 つだけなので常に有効）
+            "#pragma multi_compile _ALPHATEST_ON",
+        ):
+            with self.subTest(line=line):
+                defaults = shader_defaults(self.shader(line), ".shader")
+                self.assertTrue(defaults.alpha_test)
+                self.assertEqual(defaults.alpha_mode, "cutout")
+
+    def test_switchable_alpha_test_is_not_always_on(self):
+        # 無効の選択肢がある multi_compile と shader_feature は、マテリアルのキーワード次第
+        for line in (
+            "#pragma multi_compile _ _ALPHATEST_ON",
+            "#pragma multi_compile_local __ _ALPHATEST_ON",
+            "#pragma shader_feature_local _ALPHATEST_ON",
+            "// #define _ALPHATEST_ON 1",
+        ):
+            with self.subTest(line=line):
+                defaults = shader_defaults(self.shader(line), ".shader")
+                self.assertFalse(defaults.alpha_test)
+                self.assertIsNone(defaults.alpha_mode)
+
+    def test_hidden_properties(self):
+        self.assertEqual(shader_defaults(self.shader(""), ".shader").hidden, frozenset({"_EmissionColor"}))
+
+    def test_leaf_material(self):
+        # マテリアルには前のシェーダーの _Cutoff は無く、Amplify の _AlphaCutoff がしきい値。白い _EmissionColor は光らせない
+        shader = self.shader("#define _ALPHATEST_ON 1")
+        text = mat_yaml(
+            "BC_Leaf_A", CUSTOM, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))],
+            floats=[("_AlphaCutoff", 0.679)], colors=[("_EmissionColor", (1, 1, 1, 1)), ("_Color", (0.58, 0.79, 0.26, 1))],
+        )
+        n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+        self.assertEqual((n.alpha_mode, n.alpha_from_texture), ("cutout", True))
+        self.assertAlmostEqual(n.alpha_cutoff, 0.679)
+        self.assertFalse(n.has_emission)
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        # 隠していなければ、今までどおり発光として読む
+        visible = shader.replace("[HideInInspector] _EmissionColor", "_EmissionColor")
+        n = normalize_material(parse_material(text), declared=declared_properties(visible, ".shader"), defaults=shader_defaults(visible, ".shader"))
+        self.assertTrue(n.has_emission)
+
+    def test_emission_multiplier_scales_standard_emission(self):
+        # Corals: Emission = _EmissionColor × _EmissionMultiplayer × 画像。強さが 0 なら光らない（#241）
+        shader = 'Shader "ASE/C" { Properties { _EmissionColor("E", Color) = (0,0,0,0) _EmissionMultiplayer("M", Float) = 0 } SubShader { } }'
+        for value, strength in ((0.0, 0.0), (2.5, 2.5)):
+            text = mat_yaml("Corals4", CUSTOM, floats=[("_EmissionMultiplayer", value)], colors=[("_EmissionColor", (1, 1, 1, 1))])
+            n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+            self.assertAlmostEqual(n.emission_strength, strength)
+        # 独自の名前で読んだ発光の強さは 1 回だけ掛ける
+        text = mat_yaml("Synty", CUSTOM, floats=[("_Emission_Intensity", 3.0)], colors=[("_Emission_Color", (1, 0, 0, 1))])
+        self.assertAlmostEqual(normalize_material(parse_material(text)).emission_strength, 3.0)
 
 
 if __name__ == "__main__":

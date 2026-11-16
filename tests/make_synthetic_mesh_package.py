@@ -10,6 +10,8 @@
 - Scenes/Meshes.unity: Wedge.prefab を X に 5、Embedded.prefab を Z に 5 動かして置き、Direct が Wedge.asset を 2 倍で使う。
   Direct のマテリアルは PsdMat.mat（Textures/PsdColor.psd。統合した画像を持つ PSD）と BrokenPsdMat.mat
   （Textures/Broken.psd。ヘッダーだけで画素の無い PSD。読めずに警告になる）（#238）。
+  Leaf が Wedge.asset を LeafMat.mat で使う。LeafMat のシェーダー Shaders/Leaf.shader は Amplify Shader Editor の URP テンプレートと
+  同じ形で、タグは Opaque だがパスで常に切り抜き、白い _EmissionColor を隠して宣言する（#235 / #241）。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
@@ -27,7 +29,8 @@ import tempfile  # noqa: E402
 
 import bpy  # noqa: E402
 
-from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, texture_meta, write_package  # noqa: E402
+from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, shader_meta, texture_meta, write_package  # noqa: E402
+from tests.test_shader_source import AMPLIFY  # noqa: E402
 from tests.test_unity_mesh import QUAD, QUAD_NORMALS, QUAD_TRIS, QUAD_UVS  # noqa: E402
 from tests.unity_mesh_writer import mesh_document  # noqa: E402
 from tests.unity_yaml_writer import HEADER, game_object, instance, mod, transform  # noqa: E402
@@ -120,6 +123,17 @@ def main() -> None:
     broken_mat_path = "Assets/Synthetic/Materials/BrokenPsdMat.mat"
     broken_mat = add(broken_mat_path, mat_yaml("BrokenPsdMat", broken, None, (1, 1, 1), 0).encode(), native_meta(broken_mat_path, 2100000))
 
+    leaf_shader_path = "Assets/Synthetic/Shaders/Leaf.shader"
+    leaf_shader = add(leaf_shader_path, AMPLIFY.replace("ALPHA_TEST_LINE", "#define _ALPHATEST_ON 1").encode(), shader_meta(leaf_shader_path))
+    leaf_mat_path = "Assets/Synthetic/Materials/LeafMat.mat"
+    leaf_yaml = mat_yaml("LeafMat", tex, None, (1, 1, 1), 0).replace(
+        "m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+        f"m_Shader: {{fileID: 4800000, guid: {leaf_shader}, type: 3}}",
+    ).replace("    - _Cutoff: 0.5\n", "    - _AlphaCutoff: 0.679\n").replace(
+        "_EmissionColor: {r: 0, g: 0, b: 0, a: 1}", "_EmissionColor: {r: 1, g: 1, b: 1, a: 1}"
+    )
+    leaf_mat = add(leaf_mat_path, leaf_yaml.encode(), native_meta(leaf_mat_path, 2100000))
+
     crate_tex_path = "Assets/Synthetic/Textures/CrateColor.png"
     add(crate_tex_path, png_bytes(8, (200, 150, 60)), texture_meta(guid_of(crate_tex_path), False))
     crate_fbx = Path(tempfile.mkdtemp(prefix="synthetic_mesh_")) / "crate.fbx"
@@ -131,6 +145,7 @@ def main() -> None:
     scene = HEADER + "".join([
         instance(100, wedge_prefab, 0, [mod(11, wedge_prefab, "m_LocalPosition.x", 5)]),
         instance(200, embedded, 0, [mod(11, embedded, "m_LocalPosition.z", 5)]),
+        game_object(400, "Leaf"), transform(401, 400, pos=(0, 0, -5)), _renderer(402, 403, 400, wedge_ref, [leaf_mat, leaf_mat]),
         game_object(300, "Direct"), transform(301, 300, scale=(2, 2, 2)), _renderer(302, 303, 300, wedge_ref, [psd_mat, broken_mat]),
     ])
     add(scene_path, scene.encode(), f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
