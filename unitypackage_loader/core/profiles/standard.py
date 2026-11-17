@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ..material import BLACK, NormalizedMaterial, UnityMaterial
 from .base import ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, cull_backface, is_black, texture_transform
 from .hdrp import hdrp_emission
@@ -133,15 +135,19 @@ _EMISSION_STANDARD_NAMES = frozenset({"_EmissionColor", "_EmissionMap", "_Emissi
 
 
 def _alias_key(name: str) -> str:
-    return name.replace("_", "").lower()
+    """大文字小文字と "_"、空白（Shader Graph の表示名の「Base Map」。#236）を無視する。"""
+    return name.replace("_", "").replace(" ", "").lower()
 
 
-def _find_texture(mat: UnityMaterial, aliases: tuple[str, ...]):
-    """``aliases`` の順に、値の入ったテクスチャを探す。"""
-    by_key = {_alias_key(name): ref for name, ref in mat.textures.items()}
-    for alias in aliases:
-        if by_key.get(alias) is not None:
-            return by_key[alias]
+def _find_texture(mat: UnityMaterial, aliases: tuple[str, ...], display_names: Mapping[str, str] | None = None):
+    """``aliases`` の順に、値の入ったテクスチャを探す。名前で見つからなければ、表示名（Shader Graph。#236）で探す。"""
+    for key_of in (lambda name: name, lambda name: (display_names or {}).get(name, "")):
+        by_key = {_alias_key(key_of(name)): ref for name, ref in mat.textures.items() if key_of(name)}
+        for alias in aliases:
+            if by_key.get(alias) is not None:
+                return by_key[alias]
+        if not display_names:
+            break
     return None
 
 
@@ -154,28 +160,34 @@ def _find_color(mat: UnityMaterial, aliases: tuple[str, ...], exclude: frozenset
     return None
 
 
-def _find_float(mat: UnityMaterial, aliases: tuple[str, ...], default: float) -> float:
+def _find_float(mat: UnityMaterial, aliases: tuple[str, ...], default: float, display_names: Mapping[str, str] | None = None) -> float:
     names = {_alias_key(name): name for name in (*mat.floats, *mat.ints)}
+    for name in (*mat.floats, *mat.ints):  # 名前で見つからなければ表示名で（#236）
+        display = (display_names or {}).get(name)
+        if display:
+            names.setdefault(_alias_key(display), name)
     for alias in aliases:
         if alias in names:
             return mat.f(names[alias], default)
     return default
 
 
-def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial, display_names: Mapping[str, str] | None = None) -> None:
     """ベースカラー・法線のテクスチャが一般名で見つからなかったとき、自作シェーダーでよく使われる名前で探す。
 
     Shader Graph で作ったシェーダーは URP Lit の ``_WorkflowMode`` / ``_Surface`` を持つので指紋では URP Lit と読まれるが、
     テクスチャは ``_Albedo_Map`` / ``_Base_Map`` / ``_Normal_Map`` のような独自の名前で持つことがある（Synty の POLYGON シリーズ）。
+    ``display_names`` は Shader Graph の参照名 → 表示名。参照名が自動の ``Texture2D_E1B0D043`` のようなもので見つからなければ、
+    表示名（「Base Map」）で探す（Terrain Asset Pack の草。#236）。
     """
     if n.base_color_tex is None:
-        n.base_color_tex = _find_texture(mat, _BASE_COLOR_ALIASES)
+        n.base_color_tex = _find_texture(mat, _BASE_COLOR_ALIASES, display_names)
         if n.base_color_tex is not None:
             n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
     if n.normal_tex is None:
-        n.normal_tex = _find_texture(mat, _NORMAL_ALIASES)
+        n.normal_tex = _find_texture(mat, _NORMAL_ALIASES, display_names)
         if n.normal_tex is not None:
-            n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
+            n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0, display_names)
 
 
 def scale_emission_by_alias(mat: UnityMaterial, n: NormalizedMaterial) -> None:

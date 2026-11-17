@@ -811,7 +811,10 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    この別名での検索は、シェーダー表に無いシェーダーなら、指紋で選んだプロファイル（URP Lit など）で読んだあとにも行う（`fill_textures_from_aliases`）。
    Shader Graph のマテリアルは URP Lit の `_WorkflowMode` / `_Surface` を持つので指紋で URP Lit と読まれるが、テクスチャは独自の名前で持つことがある
    （Synty の POLYGON シリーズは `_Albedo_Map` / `_Base_Map` / `_Normal_Map` / `_Normal_Amount`。URP Lit の `_BaseMap` だけを読んでいたため、すべて白かった。#158）。
-   表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）
+   表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）。
+   名前で見つからなければ、Shader Graph の表示名（Inspector に出る名前）でも探す（`ShaderDefaults.display_names`、#236）。参照名が自動で
+   `Texture2D_E1B0D043` のように付いたグラフは、役割が表示名（「Base Map」「Normal Map」）でしか分からない（Terrain Asset Pack の草が白かった。
+   Water Caustics の砂も表示名「BaseMap」で付くようになった）。照合では大文字小文字・`_`・空白を無視する
    発光も同じく、一般名で見つからなければ独自の名前（ON / OFF は `_Enable_Emission` / `_UseEmission` など、色は `_Emission_Color` / `_EmissiveColor` など、
    テクスチャは `_Emission_Map` / `_EmissiveMap` など、強さは `_Emission_Intensity` など）で探す（`fill_emission_from_aliases`。#167）。発光は「色 × テクスチャ」とし
    （Synty の Shader Graph は ON のとき Emission_Map × Emission_Color。テクスチャを指定しなければ白）、ON / OFF が OFF なら光らせず、色が黒なら光らせない。

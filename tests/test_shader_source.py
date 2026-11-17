@@ -12,6 +12,7 @@ from unitypackage_loader.core.shader_source import (
     ShaderDefaults,
     ShaderSourceError,
     declared_properties,
+    graph_display_names,
     restrict_to_declared,
     shader_defaults,
 )
@@ -381,6 +382,49 @@ class AmplifyTemplateTests(unittest.TestCase):
         # 独自の名前で読んだ発光の強さは 1 回だけ掛ける
         text = mat_yaml("Synty", CUSTOM, floats=[("_Emission_Intensity", 3.0)], colors=[("_Emission_Color", (1, 0, 0, 1))])
         self.assertAlmostEqual(normalize_material(parse_material(text)).emission_strength, 3.0)
+
+
+def terrain_grass_graph() -> str:
+    """Terrain Asset Pack の TerrainGrass.shadergraph と同じ形。テクスチャの参照名は自動で付いたもので、役割は表示名でしか分からない。"""
+    props = [
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Base Map", "Texture2D_E1B0D043"),
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Normal Map", "Texture2D_9DCAAA49"),
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Mask Map", "Texture2D_A5E0646"),
+        ("UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty", "Normal Scale", "Vector1_a6983181c8dc4691ba6a28a34c4223a6"),
+        ("UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty", "Wind Speed", "Wind_Speed"),
+    ]
+    objects = [{"m_SGVersion": 3, "m_Type": "UnityEditor.ShaderGraph.GraphData", "m_Properties": [{"m_Id": str(i)} for i in range(len(props))]}]
+    for i, (kind, display, reference) in enumerate(props):
+        objects.append({"m_Type": kind, "m_ObjectId": str(i), "m_Name": display, "m_DefaultReferenceName": reference, "m_OverrideReferenceName": ""})
+    return "\n\n".join(json.dumps(o, indent=4) for o in objects)
+
+
+class GraphDisplayNameTests(unittest.TestCase):
+    """Shader Graph の自動の参照名（Texture2D_XXXX）のテクスチャを、表示名で役割を探す（#236）。"""
+
+    def test_display_names(self):
+        names = graph_display_names(terrain_grass_graph())
+        self.assertEqual(names["Texture2D_E1B0D043"], "Base Map")
+        self.assertNotIn("Wind_Speed", names)  # 表示名と同じ形の参照名は入れない
+        self.assertEqual(shader_defaults(terrain_grass_graph(), ".shadergraph").display_names, names)
+        self.assertEqual(graph_display_names(graph_v1("_Color")), {})
+
+    def test_grass_material(self):
+        # 前のシェーダーの Base_Map / Normal_Map も残っているが、宣言されていないので読まない。参照名では役割が分からず、表示名で探す
+        graph = terrain_grass_graph()
+        text = mat_yaml(
+            "GrassDry", GRAPH,
+            tex=[("Base_Map", TEX_N, (1, 1), (0, 0)), ("Texture2D_E1B0D043", TEX_A, (1, 1), (0, 0)),
+                 ("Texture2D_9DCAAA49", TEX_N, (1, 1), (0, 0)), ("Texture2D_A5E0646", TEX_N, (1, 1), (0, 0))],
+            floats=[("Vector1_a6983181c8dc4691ba6a28a34c4223a6", 0.7)],
+        )
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"), defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        self.assertEqual(n.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(n.normal_strength, 0.7)
+        # 表示名が分からなければ今までどおり（テクスチャ無し）
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertIsNone(n.base_color_tex)
 
 
 if __name__ == "__main__":

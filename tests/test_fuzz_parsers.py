@@ -241,7 +241,7 @@ class ParserFuzzTest(unittest.TestCase):
     def test_shader_source(self):
         # パッケージに入っているシェーダーの定義（#118）
         self.fuzz("shader", run_shader_source(".shader"), tss.SHADERLAB, mutate_text)
-        for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color")):
+        for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color"), tss.terrain_grass_graph()):
             self.fuzz("shader graph", run_shader_source(".shadergraph"), graph, mutate_text)
 
     def test_shader_graph_uvs(self):
