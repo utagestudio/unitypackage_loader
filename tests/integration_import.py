@@ -221,6 +221,20 @@ def check_images(ctx: Context) -> None:
         c.eq("images not packed", unpacked if images["packed"] else [], [])
 
 
+def check_shadows_only(ctx: Context) -> None:
+    """Shadows Only の Renderer（#232）: カメラなどから見えず、影だけを落とすオブジェクト（名前の連番は外して比べる）。"""
+    if "shadows_only" not in ctx.exp:
+        return
+    from unitypackage_loader.core.meta import strip_numeric_suffix
+
+    c = ctx.c
+    found = sorted({
+        strip_numeric_suffix(o.name) for o in bpy.data.objects
+        if o.get("unity_shadows_only") and not o.visible_camera and o.visible_shadow
+    })
+    c.eq("shadows-only objects", found, sorted(ctx.exp["shadows_only"]))
+
+
 def check_warnings(ctx: Context) -> None:
     c, exp, report = ctx.c, ctx.exp, ctx.report
     if "warnings_max" in exp:
@@ -571,6 +585,7 @@ CHECKS: list[Callable[[Context], None]] = [
     check_objects,
     check_materials,
     check_images,
+    check_shadows_only,
     check_warnings,
     check_submesh_materials,
     check_material_checks,

@@ -405,6 +405,22 @@ def hide_objects(context, objects: list[bpy.types.Object]) -> None:
             pass
 
 
+def make_shadows_only(obj: bpy.types.Object) -> None:
+    """Unity の Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）と同じく、影だけを残す。
+
+    レイの可視性でカメラ・拡散・光沢・透過・ボリュームから外す（Cycles と EEVEE の描画で効果がある）。ビューポートの
+    ソリッド表示などでは消えないので、ワイヤーフレームで描く。``unity_shadows_only`` に印を残す。
+    """
+    obj.visible_camera = False
+    obj.visible_diffuse = False
+    obj.visible_glossy = False
+    obj.visible_transmission = False
+    obj.visible_volume_scatter = False
+    obj.visible_shadow = True
+    obj.display_type = "WIRE"
+    obj["unity_shadows_only"] = True
+
+
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
     """レンダリングからはすぐ外し、ビューポートの非表示は ``hidden`` に積んで読み込みの後で当てる。
 

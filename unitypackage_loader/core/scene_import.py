@@ -33,6 +33,7 @@ class HiddenParts(NamedTuple):
     unused: int  # そのうち「Unity で使われていない部品」として隠した数（#58）
     lods: dict[str, int]  # LODGroup の段が分かったオブジェクトの名前 → 段（隠さない LOD0 も含む。#104）
     hidden_lods: int = 0  # そのうち遠景用 LOD として隠した数
+    shadows_only: frozenset[str] = frozenset()  # Shadows Only の Renderer のオブジェクト（隠すものは除く。#232）
 
 
 def unused_in_placement(h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]]) -> set[str]:
@@ -131,7 +132,14 @@ def parts_to_hide(
         if placement.active and name not in disabled:
             unused_count += int(unused)
             lod_count += int(lod_hidden and not unused)
-    return HiddenParts(hide, unused_count, lods, lod_count)
+    # Shadows Only の Renderer（#232）。無効と同じく、表の名前の連番も外した形で引く
+    shadows = {name for name, r in placement.renderers.items() if r.shadows_only}
+    shadows |= {strip_numeric_suffix(n) for n in shadows if len(by_base[strip_numeric_suffix(n)]) == 1}
+    shadow_objects = frozenset(
+        obj_name for obj_name, _ in objects
+        if obj_name not in hide and (obj_name in shadows or strip_numeric_suffix(obj_name) in shadows)
+    )
+    return HiddenParts(hide, unused_count, lods, lod_count, shadow_objects)
 
 
 @dataclass
@@ -145,6 +153,7 @@ class PlacementStats:
     removed_unused: int = 0  # 同じく、読み込まなかった FBX の部品（#152）
     hidden_lods: int = 0  # LODGroup の遠景用の段として隠したオブジェクト（#104）
     unmatched_parts: int = 0  # モデルの中への表示の上書き・削除で、当てられなかったもの（#172）
+    shadows_only: int = 0  # Shadows Only の Renderer として、カメラから見えなくしたオブジェクト（#232）
     skipped_nodes: int = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き（シーンだけ）
     skipped_offsets: int = 0  # 置き直せなかった、アーマチュアで変形する部品（シーンだけ）
     skipped_decals: int = 0  # マテリアルが無いか使えない DecalProjector（シーンだけ。#165）
@@ -163,6 +172,11 @@ class PlacementStats:
             messages.append(lod_warning(self.hidden_lods))
         if self.unmatched_parts:
             messages.append(parts_warning(self.unmatched_parts))
+        if self.shadows_only:
+            messages.append(
+                f"{self.shadows_only} object(s) only cast shadows in Unity (Shadows Only); they were made invisible to the camera "
+                "and drawn as wireframe in the viewport"
+            )
         return messages
 
 

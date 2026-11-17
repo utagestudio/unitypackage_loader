@@ -36,6 +36,7 @@ class RendererMaterials:
     lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
     # prefab で表示されているか（GameObject が祖先も含めてアクティブで、Renderer が有効。読み込む単位 Prefabs で隠す。#177）
     visible: bool = True
+    shadows_only: bool = False  # Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）
 
 
 def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
@@ -103,7 +104,7 @@ def tables_from_hierarchy(
                 continue
             table[name] = RendererMaterials(
                 name, list(renderer.materials), renderer.renderer_class, placement.model_guid,
-                renderer.mesh_file_id, renderer.lod_level, visible,
+                renderer.mesh_file_id, renderer.lod_level, visible, renderer.shadows_only,
             )
     return result
 

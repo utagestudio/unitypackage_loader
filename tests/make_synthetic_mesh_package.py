@@ -14,6 +14,7 @@
   同じ形で、タグは Opaque だがパスで常に切り抜き、白い _EmissionColor を隠して宣言する（#235 / #241）。
   Toon が Wedge.asset を ToonMat.mat で使う。ToonMat のシェーダー Shaders/Toon.shader は Toon Harbor Pack の TH_CustomToon と同じ形で、
   色を _TextureSample1、陰の段階を _TextureRamp に持つ（名前では色が分からない。#239）。
+  ShadowPlane は Wedge.asset を Shadows Only（m_CastShadows: 3）の Renderer で使う（影だけを落とし、本体は描かない。#232）。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
@@ -161,6 +162,8 @@ def main() -> None:
     scene = HEADER + "".join([
         instance(100, wedge_prefab, 0, [mod(11, wedge_prefab, "m_LocalPosition.x", 5)]),
         instance(200, embedded, 0, [mod(11, embedded, "m_LocalPosition.z", 5)]),
+        game_object(600, "ShadowPlane"), transform(601, 600, pos=(-5, 0, -5)),
+        _renderer(602, 603, 600, wedge_ref, [mesh_mat, mesh_mat]).replace("  m_Enabled: 1\n", "  m_Enabled: 1\n  m_CastShadows: 3\n"),
         game_object(500, "Toon"), transform(501, 500, pos=(5, 0, -5)), _renderer(502, 503, 500, wedge_ref, [toon_mat, toon_mat]),
         game_object(400, "Leaf"), transform(401, 400, pos=(0, 0, -5)), _renderer(402, 403, 400, wedge_ref, [leaf_mat, leaf_mat]),
         game_object(300, "Direct"), transform(301, 300, scale=(2, 2, 2)), _renderer(302, 303, 300, wedge_ref, [psd_mat, broken_mat]),

@@ -115,6 +115,8 @@ ticked):
   (turn off **Unused Parts** in the dialog to import them hidden instead). Where Unity has an LODGroup, only the most
   detailed level (LOD0) stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the
   dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property).
+  Renderers set to cast shadows only in Unity (Cast Shadows: Shadows Only) become objects that the camera does not see
+  but that still cast shadows, drawn as wireframe in the viewport (Scenes and Prefabs).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
   measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
   The render pipeline is detected from the URP / HDRP additional data on lights and cameras, and from the materials'

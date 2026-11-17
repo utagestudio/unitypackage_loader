@@ -818,6 +818,32 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
 
 
+class ShadowsOnlyTest(unittest.TestCase):
+    """Renderer の m_CastShadows が Shadows Only（3）なら、影だけを落とし本体は描かない（Japanese Hotel Room。#232）。"""
+
+    def test_renderer_value_and_prefab_override(self):
+        prefab = HEADER + game_object(10, "Shadow") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A).replace(
+            "  m_Enabled: 1\n", "  m_Enabled: 1\n  m_CastShadows: 3\n"
+        ) + game_object(20, "Room") + transform(21, 20) + mesh_renderer(22, 23, 20, MODEL, MAT_A, mesh_file_id=4300002)
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(prefab))
+        renderers = {r.name: r for p in placements(h, [MODEL]) for r in p.renderers.values()}
+        self.assertTrue(renderers["Shadow"].shadows_only)
+        self.assertFalse(renderers["Room"].shadows_only)
+        # シーンが prefab の上から切り替える
+        scene = HEADER + instance(3000, NESTED, 0, [mod(13, NESTED, "m_CastShadows", 1), mod(23, NESTED, "m_CastShadows", 3)])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(scene))
+        renderers = {r.name: r for p in placements(h, [MODEL]) for r in p.renderers.values()}
+        self.assertEqual((renderers["Shadow"].shadows_only, renderers["Room"].shadows_only), (False, True))
+
+    def test_override_inside_a_model_is_recorded(self):
+        # FBX を置いた PrefabInstance の中の Renderer への上書き（hotel_room_shadow.fbx の 2300000）
+        scene = HEADER + instance(2000, MODEL, 0, [mod(2300000, MODEL, "m_CastShadows", 3)])
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(scene))
+        self.assertEqual(placements(h, [MODEL])[0].parts, {pending_renderer(2300000): PartState(shadows_only=True)})
+        self.assertEqual(h.unresolved_overrides, 0)
+
+
 class ModelPartsTest(unittest.TestCase):
     """モデルの PrefabInstance の中のオブジェクトへの、表示の上書きと削除（Issue #172）。
 
