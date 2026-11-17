@@ -18,7 +18,6 @@ __all__ = [
     "parts_warning",
     "parts_to_hide",
     "parts_to_remove",
-    "prefab_warnings",
     "removed_warning",
     "scene_warnings",
     "unused_in_placement",
@@ -230,11 +229,6 @@ def scene_warnings(pathname: str, contents: SceneContents | None, stats: Placeme
                 f"{stats.skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
             )
     return [prefix + m for m in messages]
-
-
-def prefab_warnings(stats: PlacementStats) -> list[str]:
-    """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
-    return stats.part_warnings()
 
 
 def parts_warning(unmatched_parts: int) -> str:

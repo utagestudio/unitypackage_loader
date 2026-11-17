@@ -7,7 +7,6 @@ from unitypackage_loader.core.scene_import import (
     PlacementStats,
     parts_to_hide,
     parts_to_remove,
-    prefab_warnings,
     removed_warning,
     scene_warnings,
     unused_in_placement,
@@ -193,17 +192,10 @@ class SceneWarningsTests(unittest.TestCase):
         self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats()), [])
 
 
-class PrefabWarningsTests(unittest.TestCase):
-    def test_same_wording_as_scenes(self):
-        self.assertEqual(prefab_warnings(PlacementStats()), [])
-        messages = prefab_warnings(PlacementStats(hidden_unused=53, hidden_lods=2))
-        self.assertEqual(messages[0], unused_warning(53))
-        self.assertTrue(messages[0].startswith("53 object(s) from model files are not used"))
-        self.assertTrue(messages[1].startswith("2 object(s) are lower LOD levels"))
-
+class RemovedWarningTests(unittest.TestCase):
     def test_removed_parts(self):
-        messages = prefab_warnings(PlacementStats(removed_unused=53, hidden_unused=1))
-        self.assertEqual(messages, [removed_warning(53), unused_warning(1)])
+        messages = scene_warnings("S", SceneContents([]), PlacementStats(removed_unused=53, hidden_unused=1), "prefab")
+        self.assertEqual(messages, ["prefab S: " + removed_warning(53), "prefab S: " + unused_warning(1)])
         self.assertIn("were not imported", messages[0])
         self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats(removed_unused=4)), ["scene S: " + removed_warning(4)])
 

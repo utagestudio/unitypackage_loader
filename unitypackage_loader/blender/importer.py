@@ -13,26 +13,24 @@ import copy
 
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
-from mathutils import Matrix
 
 from ..core.fbx_units import read_axes
 from ..core.decals import Decal, decal_from_body
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
-from ..core.hierarchy import CLASS_CAMERA, CLASS_MONO_BEHAVIOUR, PartState, effective_active, world_matrices
+from ..core.hierarchy import CLASS_CAMERA, CLASS_MONO_BEHAVIOUR, effective_active, world_matrices
 from ..core.hierarchy import components as scene_components
 from ..core.lights import PIPELINE_HDRP
 from ..core.mapping import expected_materials, material_textures
 from ..core.meta import strip_numeric_suffix
-from ..core.model_ids import PartMatch, PartMatcher, fbx_node_names
+from ..core.model_ids import PartMatcher, fbx_node_names
 from ..core.package import AssetEntry, PackageError, UnityPackage, default_nested_package, merge_nested_package
-from ..core.prefab import PrefabAnalysis, RendererMaterials, find_renderer, has_pending_renderers, resolve_model_renderers, unused_parts
+from ..core.prefab import RendererMaterials, has_pending_renderers, resolve_model_renderers
 from ..core.report import ImportReport
-from ..core.scene_import import PlacementStats, parts_to_remove, prefab_warnings
-from ..core.transform import unity_to_blender
+from ..core.scene_import import parts_to_remove
 from ..core.unity_yaml import parse_documents
 from ..core.unity_binary import load_documents
 from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
@@ -66,13 +64,13 @@ from .prepare import (
     prepare_package,
 )
 from .scene_objects import (
-    arrange_collections, axis_correction, defer_hide, find_layer_collection, hide_objects, make_shadows_only,
+    arrange_collections, axis_correction, find_layer_collection, hide_objects,
     move_collection_contents, remove_parts,
 )
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
 from .terrain import SessionTerrains, layer_textures
-from .unity_meshes import SessionMeshes, make_mesh_object
+from .unity_meshes import SessionMeshes
 
 __all__ = [
     "BLEND_DISABLED_REASON",
@@ -160,25 +158,17 @@ def _select_prefabs(prepared: PreparedPackage, opts: ImportOptions) -> list[Pref
 
 @dataclass
 class _ImportGroup:
-    """1 つのコレクションにまとめて読み込むモデルと、それぞれに当てはめる prefab の表。"""
+    """読み込む単位 Models で、パッケージのコレクションに読み込むモデルと、それぞれに当てはめる表（prefab をまたいで統合したもの）。
 
-    prefab: PrefabSummary | None  # Models 単位なら None（パッケージのコレクションに直接入れる）
+    以前は Prefabs 単位でも prefab ごとにこれを作り、モデルを原点に読んでいた。今の Prefabs 単位は prefab をシーンと同じく
+    置く（``_ImportSession.prefab_scenes``。#240）。
+    """
+
     models: list[tuple[ModelSummary, dict[str, RendererMaterials]]]
-    analysis: PrefabAnalysis = field(default_factory=PrefabAnalysis)  # prefab の解析結果（Models 単位なら空）
 
 
 def _plan_groups(prepared: PreparedPackage, opts: ImportOptions) -> list[_ImportGroup]:
-    if opts.unit != UNIT_PREFABS:
-        return [_ImportGroup(None, [(m, prepared.table_for(m.guid)) for m in _select_models(prepared, opts)])]
-    supported = {m.guid: m for m in prepared.supported_models}
-    groups = []
-    for prefab in _select_prefabs(prepared, opts):
-        analysis = prepared.prefab_analyses.get(prefab.pathname, PrefabAnalysis())
-        tables = analysis.tables
-        models = [(supported[g], tables[g]) for g in prefab.model_guids if g in supported and g in tables]
-        if models or analysis.meshes:
-            groups.append(_ImportGroup(prefab, models, analysis))
-    return groups
+    return [_ImportGroup([(m, prepared.table_for(m.guid)) for m in _select_models(prepared, opts)])]
 
 
 def _select_scenes(prepared: PreparedPackage, opts: ImportOptions) -> list[SceneSummary]:
@@ -342,9 +332,7 @@ class _ImportSession:
             for placement in scene_summary.placements:
                 if placement.model_guid in self.supported_models:
                     selected.setdefault(placement.model_guid, self.supported_models[placement.model_guid])
-        has_meshes = any(p.mesh_guid for s in scenes if s.contents is not None for p in s.contents.primitives) or any(
-            group.analysis.meshes for group in groups
-        )
+        has_meshes = any(p.mesh_guid for s in scenes if s.contents is not None for p in s.contents.primitives)
         if selected or has_meshes or any(self.scene_terrain_data(scenes)):
             return list(selected.values())
         reasons = {m.skip_reason for m in self.prepared.models if not m.supported}
@@ -427,91 +415,16 @@ class _ImportSession:
             if prev_active is not None:
                 view_layer.active_layer_collection = prev_active
 
-    def prefab_collection(self, prefab: PrefabSummary) -> bpy.types.Collection:
-        """読み込む単位 Prefabs で、prefab 1 つ分のコレクションを作る。読み込めないモデルはここで警告する。"""
-        target = bpy.data.collections.new(prefab.name)
-        self.collection.children.link(target)
-        target["unity_prefab"] = prefab.pathname
-        target["unity_prefab_guid"] = prefab.guid
-        self.prefab_collections.append(target)
-        self.report.prefabs.append(prefab.pathname)
-        for guid in prefab.model_guids:
-            skipped = self.model_by_guid.get(guid)
-            if skipped is not None and not skipped.supported:
-                self.report.warn(f"prefab {prefab.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
-        return target
-
     def import_group(self, group: _ImportGroup, done: int, total: int) -> None:
-        """1 つのコレクションにまとめるモデルを読み込む（読み込む単位 Prefabs なら prefab 1 つ、Models ならすべてのモデル）。
-
-        prefab では、prefab が使っていない部品・中から消した部品・表示されていない部品・遠景用の LOD を隠すか消す。
-        Models 単位の表は prefab をまたいで統合したものなので、これは prefab 単位のときだけ行う。
-        """
-        prefab = group.prefab
-        target = self.prefab_collection(prefab) if prefab is not None else self.collection
-        stats = PlacementStats()
-        for index, (summary, prefab_table) in enumerate(group.models):
+        """読み込む単位 Models で、モデルをパッケージのコレクションに読み込む。"""
+        for index, (summary, table) in enumerate(group.models):
             self.step(0.55 + 0.4 * (done + index) / max(total, 1), f"Importing {summary.entry.name}")
             if summary.guid in self.failed_models:
                 continue
-            parts = group.analysis.parts.get(summary.guid, {})
             try:
-                objects = self.import_model(summary, prefab_table, target, with_parts=bool(parts))
+                self.import_model(summary, table, self.collection)
             except Exception as exc:  # noqa: BLE001 - そのモデルだけを外して続ける（#70）
                 record_failure(self.report, f"could not import {summary.entry.pathname}: {exc}")
-                continue
-            if prefab is not None:
-                self.apply_prefab_visibility(summary, prefab_table, group.analysis, parts, objects, stats)
-        if prefab is not None and group.analysis.meshes:
-            self.place_prefab_meshes(group.analysis.meshes, target)
-        if prefab is not None:
-            for message in prefab_warnings(stats):
-                self.report.warn(f"prefab {prefab.pathname}: {message}")
-
-    def place_prefab_meshes(self, meshes, target: bpy.types.Collection) -> None:
-        """prefab の中の Unity の Mesh を使う Renderer を、prefab のルートを原点にした位置に置く（#216）。"""
-        self.meshes.prefetch({p.mesh_guid for p, _ in meshes})
-        for primitive, world in meshes:
-            mesh = self.meshes.mesh(primitive.mesh_guid, primitive.mesh_file_id)
-            if mesh is None:
-                continue
-            materials = [self.materials.material_for([g]) for g in primitive.materials]
-            obj = make_mesh_object(mesh.name, mesh, materials)
-            target.objects.link(obj)
-            obj.matrix_world = Matrix(unity_to_blender(world))
-            self.report.objects.append(obj.name)
-            if not primitive.visible:
-                defer_hide(obj, self.hidden_objects)
-            elif primitive.shadows_only:
-                make_shadows_only(obj)  # Unity の Shadows Only（#232）
-
-    def apply_prefab_visibility(
-        self, summary: ModelSummary, prefab_table: dict[str, RendererMaterials], analysis: PrefabAnalysis,
-        parts: dict[str, PartState], objects: list[bpy.types.Object], stats: PlacementStats,
-    ) -> None:
-        """prefab に合わせて、読み込んだモデルの部品を隠すか消す。"""
-        match = self.last_matcher.match(parts) if parts and self.last_matcher else PartMatch()
-        stats.unmatched_parts += match.unmatched
-        # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
-        unused = set(match.removed)
-        if summary.guid not in analysis.whole_models:
-            unused |= unused_parts(prefab_table, [(node_name(o), o.type == "MESH") for o in objects])
-        if self.opts.skip_unused_parts:
-            objects, removed = self.remove_unused(objects, unused)
-            stats.removed_unused += removed
-        stats.hidden_unused += self.hide_named(objects, unused)
-        self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
-        if summary.guid in analysis.inactive_models:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
-            self.hide_named(objects, {node_name(o) for o in objects})
-        stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
-        # Shadows Only の Renderer（prefab の行と、モデルの中への上書き。#232）
-        for obj in objects:
-            if obj.type != "MESH" or obj.hide_render or node_name(obj) in match.hidden:
-                continue
-            row = find_renderer(prefab_table, node_name(obj))
-            if (row is not None and row.shadows_only) or node_name(obj) in match.shadows_only:
-                make_shadows_only(obj)
-                stats.shadows_only += 1
 
     def expected_materials(self, groups: list[_ImportGroup], scenes: list[SceneSummary]) -> set[str]:
         """読み込む前に分かる、この回で組む .mat の GUID（#164）。
@@ -535,7 +448,6 @@ class _ImportSession:
             for summary, table in group.models:
                 if builds(summary):
                     found.update(g for row in (table or {}).values() for g in row.materials if g)
-            found.update(g for p, _ in group.analysis.meshes for g in p.materials if g)
         for scene_summary in scenes:
             for placement in scene_summary.placements:
                 summary = self.supported_models.get(placement.model_guid)
@@ -762,27 +674,6 @@ class _ImportSession:
             self.failed_models.add(summary.guid)
             raise
 
-    def hide_prefab_rows(self, objects: list[bpy.types.Object], prefab_table: dict[str, RendererMaterials]) -> int:
-        """prefab で表示されていない Renderer（非アクティブな GameObject の下か、無効な Renderer。#177）と、LODGroup で
-        遠景用だったメッシュ（#104）を隠し、遠景用として隠した数を返す（表示されていないものは Unity と同じく数えない）。
-
-        段はどのオブジェクトにも ``unity_lod`` として残すので、オプションを切っていても LOD0 かどうかは分かる。
-        """
-        hidden = 0
-        for obj in objects:
-            if obj.type != "MESH":
-                continue
-            rm = find_renderer(prefab_table, node_name(obj))
-            if rm is None:
-                continue
-            obj["unity_lod"] = rm.lod_level
-            if not rm.visible:
-                defer_hide(obj, self.hidden_objects)
-            elif rm.lod_level and self.opts.hide_lods:
-                defer_hide(obj, self.hidden_objects)
-                hidden += 1
-        return hidden
-
     def remove_unused(self, objects: list[bpy.types.Object], unused: set[str]) -> tuple[list[bpy.types.Object], int]:
         """使われていない部品を消し、(残ったオブジェクト, 消した使われていないメッシュの数) を返す（#152）。
 
@@ -801,18 +692,6 @@ class _ImportSession:
         # Corals では、配置ごとの読み直しで使われないマテリアルが何百も残り、未対応付けとして数えていた。#221）
         self.materials.drop_unused_materials(materials)
         return kept, len(removed & unused)
-
-    def hide_named(self, objects: list[bpy.types.Object], names: set[str]) -> int:
-        """``names`` のオブジェクトを隠し、隠した数を返す（prefab が使っていない部品。#151 / #172）。
-
-        使っていない部品を読み込まない設定でも、子孫に残すものがある部品は消さずに残るので、ここで隠す。
-        """
-        hidden = 0
-        for obj in objects:
-            if node_name(obj) in names:
-                defer_hide(obj, self.hidden_objects)
-                hidden += 1
-        return hidden
 
     def light_scale(self, scene_summary: SceneSummary, target: bpy.types.Collection) -> float:
         """HDRP のシーンのグローバルな Volume の露出から、そのシーンの HDRP のライトに掛ける倍率を決める（#130）。
