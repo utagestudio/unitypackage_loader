@@ -152,8 +152,14 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 if not self.properties.is_property_set(prop):
                     setattr(self, prop, getattr(prefs, pref))
         # ドラッグ＆ドロップ（FileHandler 経由）で filepath が既に入っていればオプションのポップアップ、
-        # メニューからならファイルブラウザを開く
-        return self.invoke_popup(context, confirm_text="Import")
+        # メニューからならファイルブラウザを開く。ImportHelper.invoke_popup と同じだが、タイトルはファイル名だけにする
+        # （フルパスをタイトルにすると、深いフォルダのパッケージでダイアログが横に伸びる。#211）
+        if self.properties.is_property_set("filepath"):
+            return context.window_manager.invoke_props_dialog(
+                self, confirm_text="Import", title=Path(self.filepath).name, translate=False
+            )
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
 
     def draw(self, context):
         layout = self.layout
