@@ -420,6 +420,9 @@ def check_prefab_overlap(ctx: Context) -> None:
 
 
 def check_scenes(ctx: Context) -> None:
+    if "package_collection" in ctx.exp:  # パッケージのコレクションの名前（入れ子のパッケージは「外側 (中身)」。#217）
+        ctx.c.true("package collection", ctx.exp["package_collection"] in bpy.data.collections,
+                   f"collections: {[c.name for c in bpy.data.collections]}")
     if "count" in ctx.exp.get("scenes", {}):
         ctx.c.eq("scene count", len(ctx.report.scenes), ctx.exp["scenes"]["count"])
 

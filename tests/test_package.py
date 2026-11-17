@@ -459,6 +459,60 @@ class ObjGroupTests(unittest.TestCase):
             self.assertIsNone(pkg.entries[GUID_FBX]._cache)
 
 
+class NestedPackageTests(unittest.TestCase):
+    """中に .unitypackage だけを持つパッケージ（パイプライン別の中身。#217）。"""
+
+    def _package(self, tmp: str, extra: dict[str, bytes]) -> UnityPackage:
+        path = Path(tmp) / "outer.unitypackage"
+        with tarfile.open(path, "w:gz") as tar:
+            for i, (pathname, data) in enumerate(extra.items()):
+                guid = f"{i:032x}"
+                _add(tar, f"{guid}/pathname", pathname.encode())
+                _add(tar, f"{guid}/asset", data)
+        pkg = UnityPackage(path)
+        pkg.scan()
+        return pkg
+
+    def test_nested_packages_and_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = self._package(tmp, {
+                "Assets/Pack/HDRP.unitypackage": b"x", "Assets/Pack/URP.unitypackage": b"x",
+                "Assets/Pack/BuiltIn_Pack.unitypackage": b"x", "Assets/Pack/ReadMe.txt": b"x",
+            })
+            nested = pkg.nested_packages()
+            self.assertEqual([e.name for e in nested], ["BuiltIn_Pack.unitypackage", "HDRP.unitypackage", "URP.unitypackage"])
+            self.assertEqual(package_module.default_nested_package(nested).name, "BuiltIn_Pack.unitypackage")
+            self.assertEqual(package_module.default_nested_package(nested[1:]).name, "HDRP.unitypackage")
+
+    def test_merge_with_outer_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner_path = Path(tmp) / "inner.unitypackage"
+            with tarfile.open(inner_path, "w:gz") as tar:
+                _add(tar, f"{'a' * 32}/pathname", b"Assets/Pack/Tree.prefab")
+                _add(tar, f"{'a' * 32}/asset", b"prefab")
+                _add(tar, f"{'b' * 32}/pathname", b"Assets/Pack/Shared.mat")
+                _add(tar, f"{'b' * 32}/asset", b"inner")
+            outer = self._package(tmp, {"Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/ReadMe.txt": b"x"})
+            dest = Path(tmp) / "merged.unitypackage"
+            self.assertIsNone(package_module.merge_nested_package(outer, inner_path, dest))  # 外側に足すものが無い
+            outer = self._package(tmp, {
+                "Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/Mesh.asset": b"mesh",
+            })
+            merged = package_module.merge_nested_package(outer, inner_path, dest)
+            self.assertEqual(merged, dest)
+            pkg = UnityPackage(merged)
+            pkg.scan()
+            self.assertEqual(sorted(e.pathname for e in pkg.entries.values()), [
+                "Assets/Pack/Mesh.asset", "Assets/Pack/Shared.mat", "Assets/Pack/Tree.prefab",
+            ])
+            self.assertEqual(pkg.read_asset("b" * 32), b"inner")
+
+    def test_not_nested_when_outer_has_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = self._package(tmp, {"Assets/Pack/URP.unitypackage": b"x", "Assets/Pack/Cube.fbx": b"x"})
+            self.assertEqual(pkg.nested_packages(), [])
+
+
 class ExtractBudgetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

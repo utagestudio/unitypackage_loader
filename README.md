@@ -97,6 +97,10 @@ material, textures used, and warnings). A Collection named after the package is 
 
 ### Choosing what to import
 
+Packages that only bundle other `.unitypackage` files (one per render pipeline, such as `BuiltIn.unitypackage` and
+`URP.unitypackage`, with no models, prefabs or scenes outside) first open a dialog to choose the one to import. The chosen
+package is written to the extract folder and imported together with the meshes and textures of the outer package.
+
 When the package has more than one scene, prefab or model to choose from, a selection dialog opens after the options.
 Choose the unit at the top, then tick what to import in the list. In Scenes only the first importable scene is ticked
 by default, since importing several scenes at once tends to overlap buildings and lights (Prefabs and Models are all

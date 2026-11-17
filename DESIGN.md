@@ -707,6 +707,12 @@ class UnityPackage:
   Windows では `PackageError`（Extract To で短いフォルダを選ぶよう案内）、ほかの OS では元のパスに書く。記録のキーは置いた場所の相対パス。
 - 書き出し時は展開先から対象までの各要素がシンボリックリンクでないことを確認し、リンクなら `PackageError`（既存のリンク経由で外側へ書くのを防ぐ）。展開先自体はユーザーが選んだ場所なのでリンクでもよい。
 - 進捗: `wm.progress_begin/update/end`。
+- 入れ子のパッケージ（#217）: 外側にモデル・prefab・シーンが無く `.unitypackage` を含むもの（NewGen Sci-Fi Slums・Toon Harbor Pack・Conifers BOTD）は、
+  `nested_packages()` の中身を選んで読む。対話的なら選ぶダイアログ（`import_scene.unitypackage_nested`）、一括読み込みとヘッドレスでは名前が
+  Built-in らしいもの（`builtin` / `birp` / `standard` / `3d`）か pathname 順の最初（`default_nested_package`。オペレーターの `nested_package` で指定もできる）。
+  選んだ中身を外側の展開先に書き出し、外側に説明書以外のアセットがあれば中身と合わせたパッケージ（`<中身> + outer.unitypackage`。中身にある GUID は中身を使う）
+  を書いて、そちらを読む（Conifers は中身が prefab とマテリアルだけで、メッシュとテクスチャは外側にある）。パッケージのコレクションの名前は「外側 (中身)」。
+  走査を 2 回しないよう、判定に使った `UnityPackage` を `prepare_package(pkg=...)` に渡す。
 
 ### 4.4 `core/unity_yaml.py` — Unity YAML サブセットパーサー
 

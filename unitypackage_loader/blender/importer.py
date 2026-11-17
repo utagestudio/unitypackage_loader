@@ -25,7 +25,7 @@ from ..core.lights import PIPELINE_HDRP
 from ..core.mapping import expected_materials, material_textures
 from ..core.meta import strip_numeric_suffix
 from ..core.model_ids import PartMatch, PartMatcher, fbx_node_names
-from ..core.package import AssetEntry, PackageError, UnityPackage
+from ..core.package import AssetEntry, PackageError, UnityPackage, default_nested_package, merge_nested_package
 from ..core.prefab import PrefabAnalysis, RendererMaterials, find_renderer, has_pending_renderers, resolve_model_renderers, unused_parts
 from ..core.report import ImportReport
 from ..core.scene_import import PlacementStats, parts_to_remove, prefab_warnings
@@ -103,6 +103,23 @@ def resolve_extract_root(opts: ImportOptions, package_path: Path) -> Path:
     if opts.extract_mode == "BESIDE_BLEND" and bpy.data.filepath:
         return Path(bpy.data.filepath).parent / "textures" / stem
     return cache_root() / stem
+
+
+# ---------------------------------------------------------------------------
+# 入れ子のパッケージ（#217）
+# ---------------------------------------------------------------------------
+
+def extract_nested_package(pkg: UnityPackage, entry: AssetEntry, opts: ImportOptions, package_path: Path) -> Path:
+    """入れ子のパッケージを外側の展開先に書き出し、そのパスを返す（同じものが書き出してあれば使い回す）。"""
+    root = resolve_extract_root(opts, package_path)
+    paths = pkg.extract([entry.guid], root, overwrite=opts.overwrite_extracted, max_total_size=opts.max_extract_size)
+    if entry.guid not in paths:
+        raise PackageError(f"could not extract {entry.pathname}")
+    opts.package_label = f"{package_path.stem} ({Path(entry.pathname).stem})"
+    inner = Path(paths[entry.guid])
+    # 外側にもアセットがあれば、中身と合わせたパッケージにする（中身の prefab が外側のメッシュを使うことがある）
+    merged = merge_nested_package(pkg, inner, inner.with_name(f"{inner.stem} + outer.unitypackage"))
+    return merged or inner
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +272,7 @@ class _ImportSession:
         self.step(0.5, "Loading textures")
         self.materials.load_textures(needed_tex, self.paths, written)
 
-        self.collection = bpy.data.collections.new(self.package_path.stem)
+        self.collection = bpy.data.collections.new(self.opts.package_label or self.package_path.stem)
         self.scene.collection.children.link(self.collection)
         self.staging = bpy.data.collections.new(f"{self.package_path.stem} (importing)")
         self.scene.collection.children.link(self.staging)

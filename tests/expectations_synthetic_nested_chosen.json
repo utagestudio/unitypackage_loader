@@ -1,0 +1,25 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "AUTO",
+    "nested_package": "Assets/Nested/URP_Mesh.unitypackage"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "placed_objects": [
+    {
+      "top": "Wedge",
+      "object": "Wedge",
+      "bbox": [
+        -5.5,
+        0.0,
+        0.5,
+        -4.5,
+        0.0,
+        1.5
+      ]
+    }
+  ],
+  "package_collection": "synthetic_nested (URP_Mesh)"
+}

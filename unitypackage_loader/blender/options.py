@@ -48,6 +48,7 @@ class ImportOptions:
     outline_width_scale: float = 0.01
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
+    package_label: str = ""  # パッケージのコレクションの名前（入れ子のパッケージを読むとき、外側の名前を付ける。#217）
 
     @property
     def terrain_points(self) -> int | None:
