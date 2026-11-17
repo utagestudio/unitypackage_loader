@@ -372,12 +372,21 @@ class ScanCacheTests(unittest.TestCase):
         self.assertEqual(pkg.read_asset(GUID_OTHER), self.PREFAB)
 
     def test_assets_over_read_limit_are_not_cached(self):
-        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64):
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64), \
+             mock.patch.object(package_module, "_LARGE_ASSET_MAX_SIZE", 64):
             pkg = UnityPackage(self.path)
             pkg.scan()
             self.assertIsNone(pkg.entries[GUID_SCENE]._cache)
             with self.assertRaises(PackageError):
                 pkg.read_asset(GUID_SCENE)
+
+    def test_scenes_and_prefabs_have_a_larger_limit(self):
+        # シーン・prefab は .mat などより大きくても読む（#218）
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+            self.assertEqual(pkg.entries[GUID_SCENE]._cache, self.SCENE)
+            self.assertEqual(pkg.read_asset(GUID_SCENE), self.SCENE)
 
 
 class FbxSoleNodeTests(unittest.TestCase):

@@ -54,6 +54,15 @@ _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
 _METADATA_MAX_SIZE = 16 << 20  # pathname / asset.meta（通常は数 KB）
 _READ_ASSET_MAX_SIZE = 64 << 20  # read_asset（.mat / .prefab のテキスト解析用）
+# シーンと prefab の上限。配置の多いシーンや、ライトマップのデータなどを抱えた prefab は 64 MiB を超える（Destroyed Building Kit の
+# DBK_Big_Scene.unity は 134 MB。読むのは 1 秒弱）。細工されたパッケージへの備えとして上限は残す（#218）
+_LARGE_ASSET_EXTS = frozenset({".unity", ".prefab"})
+_LARGE_ASSET_MAX_SIZE = 512 << 20
+
+
+def _read_limit(entry: "AssetEntry") -> int:
+    """メモリへ丸ごと読んでよい大きさ（拡張子が分からなければ小さいほう）。"""
+    return _LARGE_ASSET_MAX_SIZE if entry.ext in _LARGE_ASSET_EXTS else _READ_ASSET_MAX_SIZE
 
 ProgressFn = Callable[[float, str], None]
 
@@ -457,7 +466,7 @@ class UnityPackage:
                         entry.size = member.size
                         entry.mtime = int(member.mtime)
                         known = bool(entry.pathname)
-                        if member.size <= _READ_ASSET_MAX_SIZE and (not known or entry.ext in _CACHE_EXTS):
+                        if member.size <= (_read_limit(entry) if known else _READ_ASSET_MAX_SIZE) and (not known or entry.ext in _CACHE_EXTS):
                             entry._cache = tar.extractfile(member).read()
                             if not known:
                                 held = entry
@@ -478,6 +487,15 @@ class UnityPackage:
 
         self.entries = entries
         self._scanned = True
+        # pathname より先に来た大きなシーン・prefab は、拡張子が分からないうちは小さいほうの上限で読まなかった。
+        # まとめて 1 回の再走査で読んでおく（シーンごとに走査し直さない。#218）
+        large = [
+            e.guid for e in entries.values()
+            if e.ext in _LARGE_ASSET_EXTS and e.has_asset and e._cache is None and _READ_ASSET_MAX_SIZE < e.size <= _LARGE_ASSET_MAX_SIZE
+        ]
+        if large:
+            for guid, data in self.read_assets(large).items():
+                entries[guid]._cache = data
         return entries
 
     # ---------------------------------------------------------------- lookup
@@ -534,10 +552,11 @@ class UnityPackage:
             raise KeyError(guid)
         if entry._cache is not None:
             return entry._cache
-        if entry.size > _READ_ASSET_MAX_SIZE:
+        limit = _read_limit(entry)
+        if entry.size > limit:
             raise PackageError(
                 f"{entry.pathname or guid} is too large to read into memory "
-                f"({entry.size} bytes > {_READ_ASSET_MAX_SIZE} byte limit)"
+                f"({entry.size} bytes > {limit} byte limit)"
             )
         target = f"{entry.guid}/asset"
         try:
@@ -545,7 +564,7 @@ class UnityPackage:
                 for member in tar:
                     split = _split_member(member.name)
                     if split and split[0] == entry.guid and split[1] == "asset":
-                        if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
+                        if member.size > limit:  # 索引と食い違う場合の保険
                             raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
                         return tar.extractfile(member).read()
         except (tarfile.TarError, EOFError, OSError) as exc:  # scan と同じく PackageError に揃える
@@ -566,7 +585,7 @@ class UnityPackage:
         wanted: set[str] = set()
         for guid in guids:
             entry = self.get(guid)
-            if entry is None or not entry.has_asset or entry.size > _READ_ASSET_MAX_SIZE:
+            if entry is None or not entry.has_asset or entry.size > _read_limit(entry):
                 continue
             if entry._cache is not None:
                 result[entry.guid] = entry._cache
@@ -578,7 +597,7 @@ class UnityPackage:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
                     split = _split_member(member.name)
-                    if split and split[1] == "asset" and split[0] in wanted and member.size <= _READ_ASSET_MAX_SIZE:
+                    if split and split[1] == "asset" and split[0] in wanted and member.size <= _read_limit(self.entries[split[0]]):
                         result[split[0]] = tar.extractfile(member).read()
                         wanted.discard(split[0])
                         if not wanted:
