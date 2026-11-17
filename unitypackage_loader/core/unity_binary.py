@@ -6,7 +6,9 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 ``unity_yaml.parse_documents`` と同じ ``UnityDocument`` の列に変換する。
 
 形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。
-対応するのは SerializedFile version 14〜22（Unity 5.0 〜 Unity 6 のエディタ出力）で、TypeTree が付いたものだけ。
+対応するのは SerializedFile version 9〜22（Unity 3.5 〜 Unity 6 のエディタ出力）で、TypeTree が付いたものだけ。
+version 9〜13（Unity 4 まで）は、TypeTree が入れ子の古い形（9・11）か、型の表に型ハッシュが無く、オブジェクトの pathID が
+32 ビット（``m_BigIDEnabled`` が 0 のとき）などの違いがある（#215）。
 
 変換の約束（YAML パーサーの出力に揃える）:
 
@@ -44,7 +46,7 @@ __all__ = [
     "load_documents",
 ]
 
-MIN_VERSION = 14  # Unity 5.0
+MIN_VERSION = 9  # Unity 3.5 〜 4.x（#215）
 MAX_VERSION = 22  # Unity 2020.1 〜 Unity 6
 
 CLASS_MONO_BEHAVIOUR = 114
@@ -218,6 +220,22 @@ def _read_type_tree(r: _Reader, version: int) -> _Node:
     return root
 
 
+_MAX_TREE_DEPTH = 64  # 古い入れ子の TypeTree の深さの上限（細工されたファイルへの備え）
+
+
+def _read_type_tree_old(r: _Reader, level: int = 0) -> _Node:
+    """version 9 / 11 の入れ子の TypeTree（ノードごとに型名・名前・大きさ・番号・配列か・版・メタフラグ・子の数）。"""
+    if level > _MAX_TREE_DEPTH:
+        raise UnityBinaryError("type tree nested too deeply")
+    type_name = r.cstring()
+    name = r.cstring()
+    _byte_size, _index, _is_array, _node_version, flags = r.unpack("iiiii")
+    node = _Node(type_name, name, level, flags)
+    for _ in range(r.count("type tree child", 21)):
+        node.children.append(_read_type_tree_old(r, level + 1))
+    return node
+
+
 @dataclass
 class _SerializedType:
     class_id: int
@@ -230,12 +248,13 @@ def _read_type(r: _Reader, version: int, has_tree: bool) -> _SerializedType:
     stripped = bool(r.one("B")) if version >= 16 else False
     if version >= 17:
         r.one("h")  # script_type_index
-    if (version < 16 and class_id < 0) or (version >= 16 and class_id == CLASS_MONO_BEHAVIOUR):
-        r.bytes(16)  # script id
-    r.bytes(16)  # old type hash
+    if version >= 13:  # 型ハッシュは version 13 から
+        if (version < 16 and class_id < 0) or (version >= 16 and class_id == CLASS_MONO_BEHAVIOUR):
+            r.bytes(16)  # script id
+        r.bytes(16)  # old type hash
     tree = None
     if has_tree:
-        tree = _read_type_tree(r, version)
+        tree = _read_type_tree(r, version) if version >= 12 or version == 10 else _read_type_tree_old(r)
         if version >= 21:
             r.bytes(4 * r.count("type dependency", 4))
     return _SerializedType(class_id, stripped, tree)
@@ -413,15 +432,17 @@ def parse_serialized_file(data: bytes, compact: bool = False) -> list[UnityDocum
     r = _Reader(data, header.endian, header.metadata_offset, header.data_offset)
     r.cstring()  # Unity のバージョン文字列
     r.one("i")  # target platform
-    if not r.one("B"):
+    if version >= 13 and not r.one("B"):  # 12 以前は常に TypeTree が付く
         raise UnityBinaryError("binary serialized file without a type tree is not supported")
 
-    types = [_read_type(r, version, True) for _ in range(r.count("type", 24))]
+    types = [_read_type(r, version, True) for _ in range(r.count("type", 24 if version >= 13 else 4))]
+    big_ids = bool(r.one("i")) if 7 <= version < 14 else True  # 14 からは常に 64 ビット
 
     objects: list[tuple[int, int, int, _SerializedType, bool]] = []
-    for _ in range(r.count("object", 20)):
-        r.align()
-        path_id = r.one("q")
+    for _ in range(r.count("object", 20 if version >= 14 else 16)):
+        if version >= 14:
+            r.align()
+        path_id = r.one("q" if big_ids else "i")
         byte_start = r.one("q" if version >= 22 else "I")
         byte_size, type_id = r.unpack("Ii")
         stripped = False
@@ -438,10 +459,14 @@ def parse_serialized_file(data: bytes, compact: bool = False) -> list[UnityDocum
             raise UnityBinaryError(f"object {path_id} refers to unknown type {type_id}")
         objects.append((path_id, header.data_offset + byte_start, byte_size, typ, stripped))
 
-    for _ in range(r.count("script type", 12)):
-        r.one("i")
-        r.align()
-        r.one("q")
+    if version >= 11:
+        for _ in range(r.count("script type", 12 if version >= 14 else 8)):
+            r.one("i")
+            if version >= 14:
+                r.align()
+                r.one("q")
+            else:
+                r.one("i")
 
     externals: list[_External] = []
     for _ in range(r.count("external", 21)):

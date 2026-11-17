@@ -721,7 +721,10 @@ prefab が読めないとマテリアルが一つも当たらない）。
 
 - 判定: 先頭 20 バイトのヘッダー（ビッグエンディアン）の version と、ファイルサイズが実際の長さと一致するか（version 22 以降は 64 ビットの欄）。
   `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `hierarchy.parse_asset` は bytes をそのまま受け取る。
-- 対応範囲: version 14〜22（Unity 5.0 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
+- 対応範囲: version 9〜22（Unity 3.5 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
+  version 9〜13（Unity 4 まで）は、型の表に型ハッシュが無く（13 から）、TypeTree が入れ子の古い形（9 / 11。10 / 12 は平らな形）、
+  オブジェクトの pathID が `m_BigIDEnabled` が 0 なら 32 ビット、スクリプトの型の表は 11 から。手元では SbbUtutuya の Japanese School
+  Cafeteria / Library Set / Phone Booth の .mat、City Terrace Pack と Global Illumination Proxy の一部の .mat・prefab・シーンがこの形（#215）。
   形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。共通文字列表も同じ表を持つ。
 - 読み方: 型ごとの TypeTree（blob 形式。ノードは 24 バイト、version 19 以降は 32 バイト）をたどり、値を YAML パーサーと同じ形に変換する。
   クラスは dict、配列は list、`map` は 1 要素 dict の list、`FastPropertyName` は中の文字列、`PPtr<...>` は externals の GUID

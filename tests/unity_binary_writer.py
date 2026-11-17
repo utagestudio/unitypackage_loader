@@ -127,6 +127,22 @@ def _type_tree(root: Node, e: str, version: int) -> bytes:
     return struct.pack(e + "ii", len(flat), len(local)) + bytes(nodes) + bytes(local)
 
 
+def _type_tree_old(root: Node, e: str) -> bytes:
+    """version 9 / 11 の入れ子の TypeTree。"""
+    out = bytearray()
+    counter = [0]
+
+    def walk(node: Node) -> None:
+        out.extend(node.type.encode() + b"\0" + node.name.encode() + b"\0")
+        out.extend(struct.pack(e + "iiiiii", -1, counter[0], 1 if node.is_array else 0, 1, node.flags, len(node.children)))
+        counter[0] += 1
+        for child in node.children:
+            walk(child)
+
+    walk(root)
+    return bytes(out)
+
+
 def build_serialized_file(
     objects: list[tuple[int, int, Node, Any]],
     externals: list[tuple[str | None, int, str]] = (),
@@ -138,7 +154,7 @@ def build_serialized_file(
 ) -> bytes:
     """``objects`` は ``(pathID, classID, TypeTree のルート, 値)``、``externals`` は ``(GUID, 種別, パス)``。
 
-    対応するのは version 17 以降の並び（型の表を番号で引く形式）。
+    version 9〜13（Unity 4 まで。型ハッシュが無く、pathID が 32 ビット、9 / 11 は入れ子の TypeTree）も書ける（#215）。
     """
     e = ">" if big_endian else "<"
     types: dict[int, Node] = {}
@@ -158,26 +174,42 @@ def build_serialized_file(
     header_size = 48 if version >= 22 else 20
     meta = bytearray(unity_version.encode() + b"\0")
     meta += struct.pack(e + "i", -2)
-    meta.append(1 if type_tree else 0)
+    if version >= 13:
+        meta.append(1 if type_tree else 0)
     meta += struct.pack(e + "i", len(types))
     for class_id, root in types.items():
         meta += struct.pack(e + "i", class_id)
-        meta.append(0)  # stripped
-        meta += struct.pack(e + "h", -1)
-        if class_id == CLASS_MONO_BEHAVIOUR:
+        if version >= 16:
+            meta.append(0)  # stripped
+        if version >= 17:
+            meta += struct.pack(e + "h", -1)
+        if version >= 13:
+            if (version >= 16 and class_id == CLASS_MONO_BEHAVIOUR) or (version < 16 and class_id < 0):
+                meta += bytes(16)
             meta += bytes(16)
-        meta += bytes(16)
-        if type_tree:
-            meta += _type_tree(root, e, version)
+        if type_tree or version < 13:
+            meta += _type_tree(root, e, version) if version >= 12 or version == 10 else _type_tree_old(root, e)
             if version >= 21:
                 meta += struct.pack(e + "i", 0)
+    if 7 <= version < 14:
+        meta += struct.pack(e + "i", 0)  # m_BigIDEnabled: pathID は 32 ビット
     meta += struct.pack(e + "i", len(placed))
-    for path_id, start, size, index in placed:
-        meta += bytes(-(header_size + len(meta)) % 4)
-        meta += struct.pack(e + "q", path_id)
+    for (path_id, start, size, index), class_id in zip(placed, [o[1] for o in objects]):
+        if version >= 14:
+            meta += bytes(-(header_size + len(meta)) % 4)
+            meta += struct.pack(e + "q", path_id)
+        else:
+            meta += struct.pack(e + "i", path_id)
         meta += struct.pack(e + ("q" if version >= 22 else "I"), start)
-        meta += struct.pack(e + "Ii", size, index)
-    meta += struct.pack(e + "i", 0)  # script types
+        meta += struct.pack(e + "Ii", size, index if version >= 16 else class_id)
+        if version < 16:
+            meta += struct.pack(e + "H", class_id)
+        if version < 17:
+            meta += struct.pack(e + "h", -1)
+        if version in (15, 16):
+            meta.append(0)
+    if version >= 11:
+        meta += struct.pack(e + "i", 0)  # script types
     meta += struct.pack(e + "i", len(externals))
     for guid, ext_type, path in externals:
         meta += b"\0" + guid_bytes(guid) + struct.pack(e + "i", ext_type) + path.encode() + b"\0"
