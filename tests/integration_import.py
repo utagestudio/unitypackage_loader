@@ -192,7 +192,7 @@ def check_objects(ctx: Context) -> None:
     if "armature_count" in objs:
         c.eq("armature count", sum(1 for o in bpy.data.objects if o.type == "ARMATURE"), objs["armature_count"])
         # 読み込んだアーマチュアは線で表示する（#260）
-        displays = {o.data.display_type for o in bpy.data.objects if o.type == "ARMATURE"}
+        displays = {o.display_type for o in bpy.data.objects if o.type == "ARMATURE"}
         c.true("armatures are displayed as wire", displays <= {"WIRE"})
 
 

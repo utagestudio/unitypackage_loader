@@ -91,7 +91,7 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 
 結果は Info バーに要約が、3D View のサイドバー（N キー）の "UPI" タブに件数・マテリアルごとの解決状況・警告が、
 システムコンソールに詳細（各マテリアルの対応先 .mat、使用テクスチャ、警告）が出ます。
-パッケージ名の Collection が作られ、その中にオブジェクトが入ります。アーマチュアは、メッシュを覆わないよう線（Viewport Display の Display As が Wire）で表示します。
+パッケージ名の Collection が作られ、その中にオブジェクトが入ります。アーマチュアは、メッシュを覆わないよう線で表示します（オブジェクトの Viewport Display > Display As を Wire にします）。
 
 ### 読み込むものを選ぶ
 

@@ -94,7 +94,7 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) shows counts,
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
 material, textures used, and warnings). A Collection named after the package is created and the objects are placed in it.
-Armatures are displayed as wire (Viewport Display > Display As) so that they don't cover the meshes.
+Armature objects are displayed as wire (Object > Viewport Display > Display As) so that they don't cover the meshes.
 
 ### Choosing what to import
 
