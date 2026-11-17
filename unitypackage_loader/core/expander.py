@@ -38,7 +38,6 @@ from typing import NamedTuple
 from .hierarchy import (
     CLASS_GAME_OBJECT,
     CLASS_TRANSFORM,
-    LEGACY_MODEL_IDS,
     MAX_NESTING,
     MAX_NODES,
     MAX_SLOTS,
@@ -66,6 +65,7 @@ from .hierarchy import (
     pending_renderer,
     remap,
     file_uid,
+    legacy_root_ids,
     ID_MASK,
 )
 from .transform import chain
@@ -89,6 +89,9 @@ class _Inserted:
     components: dict[int, int] = field(default_factory=dict)
 
 
+_DEFAULT_LEGACY_ROOTS = legacy_root_ids({})
+
+
 class Expander:
     """アセットの GUID から ``RawAsset`` を得る関数を受け取り、階層を展開する（prefab の展開結果はキャッシュする）。"""
 
@@ -104,6 +107,8 @@ class Expander:
         self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
         # 1 メッシュの FBX（Unity がノードを //RootNode に畳むモデル）の GUID → そのノードの名前（#99）
         self._collapsed = {g: name for g, table in self._recycle.items() if (name := collapsed_root_name(table))}
+        # モデルの GUID → 古い形式のルートの fileID → 新しい形式のルートの fileID（表が無いモデルは 100000 / 400000）
+        self._legacy_roots = {g: legacy_root_ids(table) for g, table in self._recycle.items()}
         # GUID → (展開結果, 深さで打ち切ったときの展開時のスタックの長さ。打ち切りが無ければ None)
         self._cache: dict[str, tuple[Hierarchy | None, int | None]] = {}
 
@@ -134,6 +139,10 @@ class Expander:
         self._cache[guid] = (result, len(stack) if result is not None and result.depth_truncated else None)
         return result
 
+    def legacy_roots(self, guid: str) -> dict[int, int]:
+        """モデルの古い形式のルートの fileID → 新しい形式のルートの fileID（``hierarchy.legacy_root_ids``）。"""
+        return self._legacy_roots.get(guid) or _DEFAULT_LEGACY_ROOTS
+
     def _model(self, guid: str) -> Hierarchy:
         h = Hierarchy()
         root = Node(
@@ -158,7 +167,7 @@ class Expander:
     def _build(self, raw: RawAsset, stack: tuple[str, ...], own_guid: str | None = None) -> Hierarchy:
         h = Hierarchy(counts=Counter(raw.counts))
         own_guid = own_guid or (stack[-1] if stack else None)
-        model_instances = {i.file_id for i in raw.instances if i.source_guid in self._models}
+        model_instances = {i.file_id: i.source_guid for i in raw.instances if i.source_guid in self._models}
         inserted: dict[int, _Inserted] = {}  # PrefabInstance の fileID → 差し込んだオブジェクトの表
 
         def resolve(file_id: int, table: str) -> int | None:
@@ -171,7 +180,7 @@ class Expander:
             if scope is None:
                 return None
             if instance_id in model_instances:
-                source_id = LEGACY_MODEL_IDS.get(source_id, source_id)
+                source_id = self.legacy_roots(model_instances[instance_id]).get(source_id, source_id)
             return getattr(scope, table).get(file_uid(source_id))
 
         fathers: list[tuple[int, int]] = []  # (Node の key, 親の fileID)。差し込みが終わってから解決する
@@ -314,6 +323,7 @@ class _Insertion:
         self.table = expander._recycle.get(self.source, {}) if is_model else {}
         self.collapsed = expander._collapsed.get(self.source) if is_model else None
         self.has_table = self.source in expander._recycle
+        self.legacy_roots = expander.legacy_roots(self.source) if is_model else {}
         # prefab を挟んで、その中のモデルのオブジェクトを指しているかもしれない上書き・削除（#31 / #172）
         self.through: list[_Through] = []
 
@@ -353,7 +363,7 @@ class _Insertion:
         if guid is not None and guid != self.source:
             return None
         if self.is_model:
-            file_id = LEGACY_MODEL_IDS.get(file_id, file_id)
+            file_id = self.legacy_roots.get(file_id, file_id)
         return file_uid(file_id)
 
     def model_root(self) -> Node | None:

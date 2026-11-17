@@ -120,7 +120,9 @@ class SceneImport:
     def unit_scale(self, summary: ModelSummary) -> float | None:
         if summary.guid not in self.unit_scales:
             fbx = summary.entry.ext == ".fbx"
-            self.unit_scales[summary.guid] = read_unit_scale(self.session.paths[summary.guid]) if fbx else None
+            unit = read_unit_scale(self.session.paths[summary.guid]) if fbx else None
+            # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
+            self.unit_scales[summary.guid] = summary.info.unity_unit_scale(unit) if fbx else None
         return self.unit_scales[summary.guid]
 
     # --- モデルの配置 ---

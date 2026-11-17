@@ -468,6 +468,37 @@ class ObjGroupTests(unittest.TestCase):
             self.assertIsNone(pkg.entries[GUID_FBX]._cache)
 
 
+class LegacyMetaDataTests(unittest.TestCase):
+    """Unity 4 以前のパッケージは asset.meta の代わりに metaData（バイナリ）を持つ。モデルの表だけを読む（#225 の続き）。"""
+
+    def test_scan_reads_model_tables(self):
+        from tests.test_meta import LegacyMetaDataTests as MetaTests
+
+        model = MetaTests.meta_data("ModelImporter", 1040, MetaTests.TABLE)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unity4.unitypackage"
+            with tarfile.open(path, "w:gz") as tar:
+                # Unity 4 が書き出す順（asset → metaData → preview.png → pathname）
+                _add(tar, f"{GUID_FBX}/asset", b"fbx")
+                _add(tar, f"{GUID_FBX}/metaData", model)
+                _add(tar, f"{GUID_FBX}/pathname", b"Assets/Mesh/window.fbx")
+                _add(tar, f"{GUID_TEX}/pathname", b"Assets/Texture/window.png")
+                _add(tar, f"{GUID_TEX}/metaData", model)  # モデル以外の metaData は読まない
+                _add(tar, f"{GUID_OTHER}/asset", b"fbx")
+                _add(tar, f"{GUID_OTHER}/metaData", b"broken")
+                _add(tar, f"{GUID_OTHER}/pathname", b"Assets/Mesh/broken.fbx")
+            pkg = UnityPackage(path)
+            pkg.scan()
+            fbx = pkg.entries[GUID_FBX]
+            self.assertEqual(fbx.legacy_meta.data["fileIDToRecycleName"], dict(MetaTests.TABLE))
+            self.assertIsNone(fbx.meta_text)
+            self.assertIsNone(fbx._legacy_raw)
+            self.assertIsNone(pkg.entries[GUID_TEX].legacy_meta)
+            self.assertIsNone(pkg.entries[GUID_OTHER].legacy_meta)
+            self.assertEqual(len(pkg.warnings), 1)
+            self.assertIn("broken.fbx", pkg.warnings[0])
+
+
 class NestedPackageTests(unittest.TestCase):
     """中に .unitypackage だけを持つパッケージ（パイプライン別の中身。#217）。"""
 

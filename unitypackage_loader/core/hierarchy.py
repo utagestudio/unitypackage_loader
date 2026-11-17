@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from .decals import is_decal_projector
 from .transform import IDENTITY, Mat4, multiply, trs
 from .unity_binary import load_documents
-from .unity_yaml import UnityRef, ref_guid, to_float
+from .unity_yaml import UnityDocument, UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
 CLASS_TRANSFORM = 4
@@ -151,6 +151,20 @@ def legacy_class(file_id: int) -> int:
     return file_id // _LEGACY_ID_STRIDE
 
 
+def legacy_root_ids(table: dict[int, str]) -> dict[int, int]:
+    """古い形式のモデルで、ルートの GameObject / Transform を指す fileID → 新しい形式のルートの fileID。
+
+    ふつうは 100000 / 400000 だが、Unity 4 では名前順などで番号が振られ、``//RootNode`` が 100006 / 400006 のように
+    後ろになり、100000 が中のノードを指すこともある（Japanese School Cafeteria）。表にルートの行があればそれを使い、
+    無ければ（表が無い・一部の行しか無い）100000 / 400000 とみなす。
+    """
+    roots = {CLASS_GAME_OBJECT: MODEL_ROOT_GAME_OBJECT, CLASS_TRANSFORM: MODEL_ROOT_TRANSFORM}
+    found = {k: roots[legacy_class(k)] for k, name in table.items() if name == ROOT_NODE_NAME and legacy_class(k) in roots}
+    if {legacy_class(k) for k in found} == set(roots):
+        return found
+    return dict(LEGACY_MODEL_IDS)
+
+
 # ---------------------------------------------------------------------------
 # 1 アセットの読み取り
 # ---------------------------------------------------------------------------
@@ -234,14 +248,41 @@ def _lod_levels(body: dict) -> list[list[int]]:
     return levels
 
 
+def _exploded_instances(docs: list[UnityDocument]) -> set[int]:
+    """中身を展開済み（``m_IsExploded``）で保存した PrefabInstance の fileID。
+
+    Unity 4 のシーンは PrefabInstance の中のオブジェクトを stripped にせず、値ごと丸ごと保存している（Japanese School
+    Cafeteria）。元を差し込むと二重になるので、``parse_asset`` はその中身を stripped と同じく元のオブジェクトの別名として
+    扱い、PrefabInstance の差し込みと上書きで作る。2018.2 以前でも YAML のシーンは stripped を使い、この値を持たない。
+    """
+    return {
+        doc.file_id for doc in docs
+        if doc.class_id == CLASS_PREFAB_INSTANCE and not doc.stripped
+        and ref_guid(doc.body.get("m_ParentPrefab")) and to_float(doc.body.get("m_IsExploded"), 0.0) != 0
+    }
+
+
+def _in_exploded(body: dict, exploded: set[int]) -> bool:
+    """展開済みの PrefabInstance の中にある、元のアセットのオブジェクトか（その PrefabInstance で足したものは除く）。"""
+    if not exploded:
+        return False
+    source, instance = body.get("m_PrefabParentObject"), body.get("m_PrefabInternal")
+    return (
+        isinstance(source, UnityRef) and bool(source.file_id)
+        and isinstance(instance, UnityRef) and instance.file_id in exploded
+    )
+
+
 def parse_asset(data: str | bytes) -> RawAsset:
     """シーンか prefab を読む（テキスト / バイナリは自動判定）。"""
     raw = RawAsset()
     meshes: dict[int, str] = {}  # GameObject → MeshFilter のメッシュの GUID
     renderer_docs = []
-    for doc in load_documents(data):
+    docs = load_documents(data)
+    exploded = _exploded_instances(docs)
+    for doc in docs:
         body = doc.body
-        if doc.stripped:
+        if doc.stripped or _in_exploded(body, exploded):
             # 2018.3 以降は m_CorrespondingSourceObject / m_PrefabInstance、それより前は m_PrefabParentObject / m_PrefabInternal
             source = body.get("m_CorrespondingSourceObject", body.get("m_PrefabParentObject"))
             instance = body.get("m_PrefabInstance", body.get("m_PrefabInternal"))
