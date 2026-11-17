@@ -264,9 +264,9 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 doc.class_id == CLASS_RECT_TRANSFORM,
             )
         elif doc.class_id == CLASS_MESH_FILTER:
-            mesh = ref_guid(body.get("m_Mesh"))
-            if mesh:
-                meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
+            mesh, mesh_id = ref_guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+            if mesh or mesh_id:  # GUID の無い参照は同じアセットに埋め込んだ Mesh（展開するときにアセットの GUID にする。#216）
+                meshes[_file_id(body.get("m_GameObject"))] = (mesh, mesh_id)
         elif doc.class_id in RENDERER_CLASSES:
             renderer_docs.append(doc)
         elif (

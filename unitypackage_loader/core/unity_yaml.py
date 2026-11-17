@@ -105,7 +105,8 @@ _DOC_HEADER_RE = re.compile(r"^--- !u!(\d+) &(-?\d+)( stripped)?\s*$")
 _INT_RE = re.compile(r"^-?\d+$")
 _FLOAT_RE = re.compile(r"^-?(\d+\.\d*|\.\d+|\d+)([eE][-+]?\d+)?$")
 # 値が数値に見えても文字列として保持したいキー
-_STRING_KEYS = frozenset({"guid", "m_Name", "name", "pathname", "m_Script"})
+# m_IndexBuffer / _typelessdata は Mesh の 16 進のデータ。数字だけ・指数に見える並びでも数値にしない（#216）
+_STRING_KEYS = frozenset({"guid", "m_Name", "name", "pathname", "m_Script", "m_IndexBuffer", "_typelessdata"})
 
 
 @dataclass

@@ -21,6 +21,7 @@ from ..core.transform import inverse_affine, multiply, unity_to_blender
 from ..core.unity_yaml import to_float
 from ..core.units import SceneSummary
 from .log import record_failure
+from .unity_meshes import make_mesh_object
 from .prepare import ModelSummary
 from .scene_objects import (
     SceneTemplate,
@@ -243,9 +244,19 @@ class SceneImport:
         """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190）。"""
         session = self.session
         primitives = self.summary.contents.primitives if self.summary.contents is not None else []
+        session.meshes.prefetch({p.mesh_guid for p in primitives if p.mesh_guid})
         for primitive in primitives:
             node = self.hierarchy.nodes[primitive.key]
             parent, local = self.parent_and_local(primitive.key)
+            if primitive.mesh_guid:  # パッケージの Unity の Mesh（#216）
+                mesh = session.meshes.mesh(primitive.mesh_guid, primitive.mesh_file_id)
+                if mesh is None:
+                    continue
+                obj = make_mesh_object(node.name, mesh, [session.materials.material_for([g]) for g in primitive.materials])
+                obj["unity_game_object"] = node.name
+                self.link(obj, parent, local, primitive.visible)
+                self.empties.setdefault(primitive.key, obj)
+                continue
             obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.materials.material_for(primitive.materials))
             obj["unity_game_object"] = node.name
             self.link(obj, parent, local, primitive.visible)

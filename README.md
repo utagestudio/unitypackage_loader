@@ -119,7 +119,9 @@ ticked):
   unchanged, so scenes from different pipelines can be mixed in one Blender scene.
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
   warnings. Unity's built-in meshes (Cube, Sphere, Capsule, Cylinder, Plane and Quad, such as a Quad laid as the
-  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. URP / HDRP Decal
+  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. Renderers that use a Unity
+  Mesh asset instead of a model file (a `.asset`, or a mesh embedded in a prefab by tools such as UModeler) are built
+  from that mesh too, also with the Prefabs unit. URP / HDRP Decal
   Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
   the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
   close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are

@@ -32,7 +32,7 @@ import copy
 import math
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
 from .hierarchy import (
@@ -110,9 +110,9 @@ class Expander:
     def expand_asset(self, guid: str) -> Hierarchy | None:
         return self._asset(guid.lower(), ())
 
-    def expand_raw(self, raw: RawAsset) -> Hierarchy:
-        """シーンなど、キャッシュしないアセットを展開する。"""
-        return self._build(raw, ())
+    def expand_raw(self, raw: RawAsset, guid: str | None = None) -> Hierarchy:
+        """シーンなど、キャッシュしないアセットを展開する。``guid`` はそのアセットの GUID（埋め込んだ Mesh の参照に使う）。"""
+        return self._build(raw, (), guid.lower() if guid else None)
 
     def _asset(self, guid: str, stack: tuple[str, ...]) -> Hierarchy | None:
         """prefab を展開する（結果はキャッシュする）。
@@ -155,8 +155,9 @@ class Expander:
             h.game_objects[file_uid(game_object_id)] = root.key
         return h
 
-    def _build(self, raw: RawAsset, stack: tuple[str, ...]) -> Hierarchy:
+    def _build(self, raw: RawAsset, stack: tuple[str, ...], own_guid: str | None = None) -> Hierarchy:
         h = Hierarchy(counts=Counter(raw.counts))
+        own_guid = own_guid or (stack[-1] if stack else None)
         model_instances = {i.file_id for i in raw.instances if i.source_guid in self._models}
         inserted: dict[int, _Inserted] = {}  # PrefabInstance の fileID → 差し込んだオブジェクトの表
 
@@ -198,6 +199,9 @@ class Expander:
         for renderer_id, (go, info) in raw.renderers.items():
             key = h.game_objects.get(file_uid(go))
             if key is not None:
+                if info.mesh_guid is None and info.mesh_file_id and own_guid:
+                    # 同じアセットに埋め込んだ Mesh（UModeler の prefab など。#216）。GUID の無い参照をアセット自身の GUID にする
+                    info = replace(info, mesh_guid=own_guid)
                 h.nodes[key].renderer = info
                 h.nodes[key].renderer_key = file_uid(renderer_id)
                 h.renderers[file_uid(renderer_id)] = key

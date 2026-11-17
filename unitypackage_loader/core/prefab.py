@@ -119,6 +119,8 @@ class PrefabAnalysis:
     whole_models: set[str] = field(default_factory=set)  # FBX を丸ごと置いているモデル（表に無い部品も隠さない。#151）
     parts: dict[str, dict[str, PartState]] = field(default_factory=dict)  # モデル → 中のオブジェクトの表示の上書きと削除（#172）
     inactive_models: set[str] = field(default_factory=set)  # prefab の中の配置がすべて非アクティブなモデル（#177）
+    # Unity の Mesh を使う Renderer（``PrimitivePlacement``）と、prefab のルートを原点にしたその GameObject のワールド行列（#216）
+    meshes: list[tuple[object, tuple]] = field(default_factory=list)
 
 
 def analyze_prefab(h: Hierarchy, placed: list[ModelPlacement]) -> PrefabAnalysis:

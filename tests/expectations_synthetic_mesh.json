@@ -1,0 +1,90 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "AUTO"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "warnings_exclude": [
+    "could not read",
+    "is not in",
+    "no importable"
+  ],
+  "placed_objects": [
+    {
+      "top": "Wedge",
+      "object": "Wedge",
+      "hidden": false,
+      "vertices": 4,
+      "faces": 2,
+      "bbox": [
+        -5.5,
+        0.0,
+        0.5,
+        -4.5,
+        0.0,
+        1.5
+      ],
+      "mat_files": [
+        "AssetMat.asset",
+        "MeshMat.mat"
+      ]
+    },
+    {
+      "top": "Panel",
+      "object": "Panel",
+      "hidden": false,
+      "faces": 2,
+      "bbox": [
+        -0.5,
+        -5.0,
+        -0.5,
+        0.5,
+        -5.0,
+        0.5
+      ],
+      "mat_files": [
+        "MeshMat.mat"
+      ]
+    },
+    {
+      "top": "Direct",
+      "object": "Direct",
+      "hidden": false,
+      "bbox": [
+        -1.0,
+        0.0,
+        -1.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "mat_files": [
+        "MeshMat.mat"
+      ]
+    }
+  ],
+  "shared_meshes": [
+    {
+      "objects": [
+        {
+          "top": "Wedge",
+          "object": "Wedge"
+        },
+        {
+          "top": "Direct",
+          "object": "Direct"
+        }
+      ],
+      "shared": true
+    }
+  ],
+  "material_checks": [
+    {
+      "name": "AssetMat",
+      "mode": "PRINCIPLED",
+      "shader_name": "Standard"
+    }
+  ]
+}

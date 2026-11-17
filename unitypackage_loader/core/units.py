@@ -44,12 +44,15 @@ def summarize_prefabs(
     prefab_tables: Mapping[str, Mapping[str, Mapping[str, RendererMaterials]]],
     model_order: Sequence[str],
     unsupported_models: Mapping[str, str],
+    mesh_prefabs: Mapping[str, Sequence[str]] | None = None,
 ) -> list[PrefabSummary]:
     """prefab の (GUID, pathname) から候補を作る（pathname 順）。
 
     ``prefab_tables`` は pathname → モデル GUID → GameObject 名の表、``model_order`` はモデル GUID の並び、
-    ``unsupported_models`` は読み込めないモデルの GUID → 理由。
+    ``unsupported_models`` は読み込めないモデルの GUID → 理由。``mesh_prefabs`` は Unity の Mesh を使う prefab の
+    pathname → その Renderer のマテリアルの GUID（モデルが無くても読み込める。#216）。
     """
+    mesh_prefabs = mesh_prefabs or {}
     result: list[PrefabSummary] = []
     for guid, pathname in sorted(prefabs, key=lambda p: p[1]):
         tables = prefab_tables.get(pathname, {})
@@ -61,7 +64,13 @@ def summarize_prefabs(
                     if mat and mat not in seen:
                         seen.add(mat)
                         summary.material_guids.append(mat)
-        if not summary.model_guids:
+        for mat in mesh_prefabs.get(pathname, ()):
+            if mat not in seen:
+                seen.add(mat)
+                summary.material_guids.append(mat)
+        if pathname in mesh_prefabs and all(g in unsupported_models for g in summary.model_guids):
+            pass  # Unity の Mesh だけでも読み込める
+        elif not summary.model_guids:
             summary.supported, summary.skip_reason = False, NO_MESH_REASON
         elif all(g in unsupported_models for g in summary.model_guids):
             summary.supported, summary.skip_reason = False, unsupported_models[summary.model_guids[0]]
@@ -100,10 +109,10 @@ def summarize_scene(
     summary = SceneSummary(guid, pathname, contents)
     if contents is None:
         summary.supported, summary.skip_reason = False, UNREADABLE_SCENE_REASON
-    elif any(g in package_guids for g in contents.terrain_data) and all(
-        g in unsupported_models for g in contents.model_guids
-    ):
-        pass  # Terrain だけでも読み込める
+    elif (
+        any(g in package_guids for g in contents.terrain_data) or any(p.mesh_guid for p in contents.primitives)
+    ) and all(g in unsupported_models for g in contents.model_guids):
+        pass  # Terrain や Unity の Mesh（#216）だけでも読み込める
     elif not contents.placements:
         summary.supported, summary.skip_reason = False, NO_SCENE_MESH_REASON
     elif all(g in unsupported_models for g in contents.model_guids):
