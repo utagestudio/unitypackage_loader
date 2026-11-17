@@ -561,6 +561,10 @@ class _ImportSession:
         delegated = self.import_with_node_names(model, target)
         new = new_since(before)
         adopt_into_collection(new, self.scene, target)
+        for obj in new["objects"]:
+            if obj.type == "ARMATURE":
+                # 既定の八面体はメッシュを覆って見づらいので、線だけにする（Viewport Display > Display As。#260）
+                obj.data.display_type = "WIRE"
         if delegated:
             # add-on が読み込んだ（pack 済みの）画像もレポートに載せる
             self.report.images.extend(i.name for i in new["images"])
