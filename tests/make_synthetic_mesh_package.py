@@ -12,6 +12,8 @@
   （Textures/Broken.psd。ヘッダーだけで画素の無い PSD。読めずに警告になる）（#238）。
   Leaf が Wedge.asset を LeafMat.mat で使う。LeafMat のシェーダー Shaders/Leaf.shader は Amplify Shader Editor の URP テンプレートと
   同じ形で、タグは Opaque だがパスで常に切り抜き、白い _EmissionColor を隠して宣言する（#235 / #241）。
+  Toon が Wedge.asset を ToonMat.mat で使う。ToonMat のシェーダー Shaders/Toon.shader は Toon Harbor Pack の TH_CustomToon と同じ形で、
+  色を _TextureSample1、陰の段階を _TextureRamp に持つ（名前では色が分からない。#239）。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
@@ -30,7 +32,7 @@ import tempfile  # noqa: E402
 import bpy  # noqa: E402
 
 from tests.make_synthetic_package import guid_of, mat_yaml, model_meta, png_bytes, prefab_meta, shader_meta, texture_meta, write_package  # noqa: E402
-from tests.test_shader_source import AMPLIFY  # noqa: E402
+from tests.test_shader_source import AMPLIFY, TOON  # noqa: E402
 from tests.test_unity_mesh import QUAD, QUAD_NORMALS, QUAD_TRIS, QUAD_UVS  # noqa: E402
 from tests.unity_mesh_writer import mesh_document  # noqa: E402
 from tests.unity_yaml_writer import HEADER, game_object, instance, mod, transform  # noqa: E402
@@ -134,6 +136,20 @@ def main() -> None:
     )
     leaf_mat = add(leaf_mat_path, leaf_yaml.encode(), native_meta(leaf_mat_path, 2100000))
 
+    toon_shader_path = "Assets/Synthetic/Shaders/Toon.shader"
+    toon_shader = add(toon_shader_path, TOON.encode(), shader_meta(toon_shader_path))
+    ramp_path = "Assets/Synthetic/Textures/ToonRamp.png"
+    ramp = add(ramp_path, png_bytes(4, (40, 40, 40)), texture_meta(guid_of(ramp_path), False))
+    toon_mat_path = "Assets/Synthetic/Materials/ToonMat.mat"
+    toon_yaml = mat_yaml("ToonMat", tex, None, (1, 1, 1), 0).replace(
+        "m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}",
+        f"m_Shader: {{fileID: 4800000, guid: {toon_shader}, type: 3}}",
+    ).replace("    - _MainTex:", "    - _TextureSample1:").replace(
+        "    - _BumpMap:", f"    - _TextureRamp:\n        m_Texture: {{fileID: 2800000, guid: {ramp}, type: 3}}\n"
+        "        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n    - _BumpMap:",
+    )
+    toon_mat = add(toon_mat_path, toon_yaml.encode(), native_meta(toon_mat_path, 2100000))
+
     crate_tex_path = "Assets/Synthetic/Textures/CrateColor.png"
     add(crate_tex_path, png_bytes(8, (200, 150, 60)), texture_meta(guid_of(crate_tex_path), False))
     crate_fbx = Path(tempfile.mkdtemp(prefix="synthetic_mesh_")) / "crate.fbx"
@@ -145,6 +161,7 @@ def main() -> None:
     scene = HEADER + "".join([
         instance(100, wedge_prefab, 0, [mod(11, wedge_prefab, "m_LocalPosition.x", 5)]),
         instance(200, embedded, 0, [mod(11, embedded, "m_LocalPosition.z", 5)]),
+        game_object(500, "Toon"), transform(501, 500, pos=(5, 0, -5)), _renderer(502, 503, 500, wedge_ref, [toon_mat, toon_mat]),
         game_object(400, "Leaf"), transform(401, 400, pos=(0, 0, -5)), _renderer(402, 403, 400, wedge_ref, [leaf_mat, leaf_mat]),
         game_object(300, "Direct"), transform(301, 300, scale=(2, 2, 2)), _renderer(302, 303, 300, wedge_ref, [psd_mat, broken_mat]),
     ])

@@ -814,7 +814,11 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）。
    名前で見つからなければ、Shader Graph の表示名（Inspector に出る名前）でも探す（`ShaderDefaults.display_names`、#236）。参照名が自動で
    `Texture2D_E1B0D043` のように付いたグラフは、役割が表示名（「Base Map」「Normal Map」）でしか分からない（Terrain Asset Pack の草が白かった。
-   Water Caustics の砂も表示名「BaseMap」で付くようになった）。照合では大文字小文字・`_`・空白を無視する
+   Water Caustics の砂も表示名「BaseMap」で付くようになった）。照合では大文字小文字・`_`・空白を無視する。
+   それでも見つからず、宣言の分かる自作シェーダー（前のシェーダーの残りを外したもの）で、役割の分かる語（ramp・normal・mask・foam・theme・array など。
+   名前か表示名の部分一致）を含まないテクスチャが 1 枚だけなら、それをベースカラーにする（`fill_sole_texture`、#239）。Toon Harbor Pack の `TH_CustomToon` は
+   色を `_TextureSample1`、陰の段階を `_TextureRamp` に持つ。2 枚以上残れば決められないので当てない。組み込みのテクスチャ（GUID が `0000000000000000` で始まる）は除く。
+   除外する語は、手元の 71 パッケージで色ではない画像（水の効果・色見本・Texture2DArray・室内の擬似表現など）に当たったものから足した
    発光も同じく、一般名で見つからなければ独自の名前（ON / OFF は `_Enable_Emission` / `_UseEmission` など、色は `_Emission_Color` / `_EmissiveColor` など、
    テクスチャは `_Emission_Map` / `_EmissiveMap` など、強さは `_Emission_Intensity` など）で探す（`fill_emission_from_aliases`。#167）。発光は「色 × テクスチャ」とし
    （Synty の Shader Graph は ON のとき Emission_Map × Emission_Color。テクスチャを指定しなければ白）、ON / OFF が OFF なら光らせず、色が黒なら光らせない。

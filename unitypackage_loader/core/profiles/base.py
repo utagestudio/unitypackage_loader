@@ -231,9 +231,14 @@ def normalize_material(
             norm.emission_color = (0.0, 0.0, 0.0, 1.0)
     if info is None:
         # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
-        from .standard import GenericProfile, fill_emission_from_aliases, fill_textures_from_aliases, scale_emission_by_alias
+        from .standard import (
+            GenericProfile, fill_emission_from_aliases, fill_sole_texture, fill_textures_from_aliases, scale_emission_by_alias,
+        )
 
-        fill_textures_from_aliases(mat, norm, defaults.display_names if defaults is not None else None)
+        display_names = defaults.display_names if defaults is not None else None
+        fill_textures_from_aliases(mat, norm, display_names)
+        if declared and custom:  # 前のシェーダーの残りを外したときだけ（残りがあると 1 枚に決められない）
+            fill_sole_texture(mat, norm, display_names)
         # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）。generic は自分で済ませている
         if norm.lighting != "toon" and not isinstance(profile, GenericProfile):
             if norm.has_emission:

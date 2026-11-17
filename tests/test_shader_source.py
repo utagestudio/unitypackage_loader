@@ -427,5 +427,47 @@ class GraphDisplayNameTests(unittest.TestCase):
         self.assertIsNone(n.base_color_tex)
 
 
+# Toon Harbor Pack の TH_CustomToon（Amplify のトゥーン）。色は _TextureSample1、陰の段階は _TextureRamp
+TOON = """Shader "Toon/TH_CustomToon"
+{
+	Properties
+	{
+		_TextureSample1("Texture Sample", 2D) = "white" {}
+		_TextureRamp("Texture Ramp", 2D) = "white" {}
+		[HideInInspector] _texcoord( "", 2D ) = "white" {}
+	}
+	SubShader { Tags{ "RenderType" = "Opaque"  "Queue" = "Geometry+0" } }
+}
+"""
+
+
+class SoleTextureTests(unittest.TestCase):
+    """役割の分からない名前のテクスチャが 1 枚だけなら、ベースカラーにする（#239）。"""
+
+    def normalize(self, shader: str, textures):
+        text = mat_yaml("Atlas_1A_D", CUSTOM, tex=textures)
+        return normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+
+    def test_toon_atlas(self):
+        # 前のシェーダーの _MainTex（パッケージに無い画像）は宣言されていないので候補にしない
+        n = self.normalize(TOON, [("_TextureSample1", TEX_A, (1, 1), (0, 0)), ("_TextureRamp", TEX_N, (1, 1), (0, 0)), ("_MainTex", TEX_N, (1, 1), (0, 0))])
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+
+    def test_two_unknown_textures_are_not_guessed(self):
+        shader = TOON.replace('_TextureRamp("Texture Ramp"', '_TextureSample2("Texture Sample 2"')
+        n = self.normalize(shader, [("_TextureSample1", TEX_A, (1, 1), (0, 0)), ("_TextureSample2", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(n.base_color_tex)
+
+    def test_known_roles_are_not_base_color(self):
+        shader = TOON.replace('_TextureSample1("Texture Sample"', '_DetailMask("Mask"')
+        n = self.normalize(shader, [("_DetailMask", TEX_A, (1, 1), (0, 0)), ("_TextureRamp", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(n.base_color_tex)
+
+    def test_without_declarations_nothing_is_guessed(self):
+        # 宣言が分からなければ前のシェーダーの残りも混ざるので当てない
+        text = mat_yaml("Atlas_1A_D", CUSTOM, tex=[("_TextureSample1", TEX_A, (1, 1), (0, 0))])
+        self.assertIsNone(normalize_material(parse_material(text)).base_color_tex)
+
+
 if __name__ == "__main__":
     unittest.main()
