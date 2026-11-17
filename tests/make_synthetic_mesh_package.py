@@ -8,6 +8,8 @@
   （位置 (0, 1, 0)）が MeshMat.mat と AssetMat.asset（マテリアルを .asset に入れたもの）で使う。
 - Prefabs/Embedded.prefab: prefab の中に埋め込んだ同じ形の Mesh を、Panel が MeshMat で使う（UModeler の prefab と同じ形）。
 - Scenes/Meshes.unity: Wedge.prefab を X に 5、Embedded.prefab を Z に 5 動かして置き、Direct が Wedge.asset を 2 倍で使う。
+  Direct のマテリアルは PsdMat.mat（Textures/PsdColor.psd。統合した画像を持つ PSD）と BrokenPsdMat.mat
+  （Textures/Broken.psd。ヘッダーだけで画素の無い PSD。読めずに警告になる）（#238）。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
@@ -31,6 +33,16 @@ from tests.unity_mesh_writer import mesh_document  # noqa: E402
 from tests.unity_yaml_writer import HEADER, game_object, instance, mod, transform  # noqa: E402
 
 EMBEDDED_MESH_ID = 5000
+
+
+def psd_bytes(size: int, rgb: tuple[int, int, int]) -> bytes:
+    """8 bit の RGB で、統合した画像（無圧縮）だけを持つ PSD。レイヤーは無い。"""
+    import struct
+
+    header = b"8BPS" + struct.pack(">H6xHIIHH", 1, 3, size, size, 8, 3)
+    sections = struct.pack(">III", 0, 0, 0)  # カラーモード・画像リソース・レイヤーとマスクの長さ
+    planes = b"".join(bytes([value]) * (size * size) for value in rgb)  # チャンネルごとの面
+    return header + sections + struct.pack(">H", 0) + planes
 
 
 def _renderer(filter_id: int, renderer_id: int, go: int, mesh_ref: str, materials: list[str]) -> str:
@@ -99,6 +111,15 @@ def main() -> None:
         mesh_document(EMBEDDED_MESH_ID, "um_panel", QUAD, [QUAD_TRIS], normals=QUAD_NORMALS, uvs=QUAD_UVS),
     ])).encode(), prefab_meta(embedded_path))
 
+    psd_path = "Assets/Synthetic/Textures/PsdColor.psd"
+    psd = add(psd_path, psd_bytes(8, (220, 120, 40)), texture_meta(guid_of(psd_path), False))
+    psd_mat_path = "Assets/Synthetic/Materials/PsdMat.mat"
+    psd_mat = add(psd_mat_path, mat_yaml("PsdMat", psd, None, (1, 1, 1), 0).encode(), native_meta(psd_mat_path, 2100000))
+    broken_path = "Assets/Synthetic/Textures/Broken.psd"
+    broken = add(broken_path, psd_bytes(8, (0, 0, 0))[:26], texture_meta(guid_of(broken_path), False))
+    broken_mat_path = "Assets/Synthetic/Materials/BrokenPsdMat.mat"
+    broken_mat = add(broken_mat_path, mat_yaml("BrokenPsdMat", broken, None, (1, 1, 1), 0).encode(), native_meta(broken_mat_path, 2100000))
+
     crate_tex_path = "Assets/Synthetic/Textures/CrateColor.png"
     add(crate_tex_path, png_bytes(8, (200, 150, 60)), texture_meta(guid_of(crate_tex_path), False))
     crate_fbx = Path(tempfile.mkdtemp(prefix="synthetic_mesh_")) / "crate.fbx"
@@ -110,7 +131,7 @@ def main() -> None:
     scene = HEADER + "".join([
         instance(100, wedge_prefab, 0, [mod(11, wedge_prefab, "m_LocalPosition.x", 5)]),
         instance(200, embedded, 0, [mod(11, embedded, "m_LocalPosition.z", 5)]),
-        game_object(300, "Direct"), transform(301, 300, scale=(2, 2, 2)), _renderer(302, 303, 300, wedge_ref, [mesh_mat]),
+        game_object(300, "Direct"), transform(301, 300, scale=(2, 2, 2)), _renderer(302, 303, 300, wedge_ref, [psd_mat, broken_mat]),
     ])
     add(scene_path, scene.encode(), f"fileFormatVersion: 2\nguid: {guid_of(scene_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
     write_package(out, entries)

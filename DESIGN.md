@@ -548,7 +548,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
   `\x1b` のような可視表現に置き換える（ANSI エスケープで表示を乱せないようにする）。
   - Objects / Materials / Textures の一覧
-  - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、PSD などの非対応画像形式
+  - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、読めない画像（統合した画像の無い PSD など）
   - 「Open extract folder」「Copy log」ボタン
 - 警告はインポートを止めず、可能なところまで進めて記録する。
 
@@ -999,7 +999,7 @@ def run(ctx, filepath, opts) -> Report:
 - カラースペース: `textureType == 1` or `sRGBTexture == 0` → `Non-Color`、それ以外 `sRGB`。
 - `alpha_mode`: `alphaIsTransparency == 1` → `STRAIGHT`、そうでなくアルファをカット/ブレンドに使う場合は `CHANNEL_PACKED`。
 - 画像ノードの `extension`: `wrapU == 1` → `EXTEND`、それ以外 `REPEAT`。
-- **PSD は Blender で読めない** → 警告して展開のみ行う。TGA/TIFF/EXR/BMP/JPG/PNG は可。
+- PSD は、統合した画像（Photoshop の「互換性を優先」）があれば Blender で読める。読み込んだ直後に大きさを見て、読めなければ（0 × 0）画像を消して警告にする（ピンクの画像を残さない）。以前は PSD を一律に「読めない形式」として展開だけしていて、Toon Harbor Pack の窓の明かり・ロゴや Conifers BOTD の法線が付かなかった（#238）。形式の分からないファイル（`images.load` の RuntimeError）も警告にする。
 - `Pack into .blend` ON なら `image.pack()`。
 - モデルのインポーターが作った画像（.mat に対応付かず FBX のマテリアルを残すときに使われる）のファイルが見つからなければ、パッケージの中の
   同じファイル名のテクスチャ（複数あればモデルに近いフォルダのもの）に付け替える。FBX に作者の PC のパスが入っているとピンクになっていた
@@ -1016,7 +1016,7 @@ def run(ctx, filepath, opts) -> Report:
 | 未知シェーダー | 警告、generic プロファイル |
 | `_EMISSION` が無効キーワード（別シェーダーからの切り替え残骸） | emission を無効化し警告 |
 | HDRP の白い `_EmissionColor`（`_EmissiveColor` が黒） | 発光させない（`_EmissiveColor` / `_EmissiveColorMap` だけを見る） |
-| 非対応画像形式（PSD 等） | 警告、展開のみ |
+| 読めない画像（統合した画像の無い PSD、形式の分からないファイル） | 警告、展開のみ |
 | .mat の YAML 解析失敗 | 警告、そのマテリアルのみスキップ |
 
 ### 4.10 テスト
