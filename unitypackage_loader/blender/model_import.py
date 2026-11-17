@@ -47,6 +47,40 @@ def remove_created(before: dict[str, set[str]]) -> None:
         bpy.data.batch_remove(ids)
 
 
+# 読み込んだオブジェクトの、FBX のノードとしての名前を残すカスタムプロパティ（#237）。同じセッションで先に読んだ別の FBX に
+# 同じ名前のオブジェクトがあると、Blender は新しいほうの名前を付け替える。ノード名がもともと Blender の連番の形
+# （Plane.010 など）だと、連番を外しても元の名前に戻せないので、読み込んだときの名前をここに残し、Unity のデータとの照合に使う
+FBX_NODE_PROP = "unity_fbx_node"
+
+
+def node_name(obj: bpy.types.Object) -> str:
+    """Unity のデータと照合するときの名前（読み込んだときの FBX のノード名。残っていなければオブジェクト名）。"""
+    name = obj.get(FBX_NODE_PROP)
+    return name if isinstance(name, str) and name else obj.name
+
+
+def reserve_names(names) -> list[tuple[bpy.types.Object, str]]:
+    """``names`` と同じ名前の既存のオブジェクトを一時的な名前にし、(オブジェクト, 元の名前) を返す（#237）。
+
+    これから読み込むモデルのオブジェクトに、FBX のノード名そのままの名前を付けさせるため。読み込みが終わったら
+    ``restore_names`` で戻す。
+    """
+    reserved = []
+    for name in names:
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            reserved.append((obj, name))
+            obj.name = f"__upi_reserved_{len(reserved)}"
+    return reserved
+
+
+def restore_names(reserved: list[tuple[bpy.types.Object, str]]) -> None:
+    """``reserve_names`` で一時的な名前にしたオブジェクトの名前を戻す。いまその名前を持つ新しいオブジェクトのほうに連番が付く。"""
+    for obj, name in reserved:
+        if not is_removed(obj):
+            obj.rename(name, mode="ALWAYS")
+
+
 def model_objects(objects: list[bpy.types.Object]) -> list[ModelObject]:
     """読み込んだモデルのオブジェクトと、最上位からの名前の並び（``model_ids.object_claims`` に渡す形）。
 
@@ -60,7 +94,7 @@ def model_objects(objects: list[bpy.types.Object]) -> list[ModelObject]:
         found = cache.get(obj)
         if found is not None:
             return found
-        cache[obj] = [(obj.name,)]  # 親子が循環していても止まるようにする
+        cache[obj] = [(node_name(obj),)]  # 親子が循環していても止まるようにする
         parent = obj.parent if obj.parent in members else None
         if parent is not None:
             above = paths(parent)
@@ -72,12 +106,12 @@ def model_objects(objects: list[bpy.types.Object]) -> list[ModelObject]:
                     bone = bone.parent
                 chain = tuple(reversed(bones))
                 above = [p + chain for p in above] + [p[:-1] + chain for p in above]
-            cache[obj] = [p + (obj.name,) for p in above]
+            cache[obj] = [p + (node_name(obj),) for p in above]
         return cache[obj]
 
     return [
         ModelObject(
-            o.name, paths(o), o.type == "MESH", o.parent.name if o.parent in members else None, o.type == "ARMATURE"
+            node_name(o), paths(o), o.type == "MESH", node_name(o.parent) if o.parent in members else None, o.type == "ARMATURE"
         )
         for o in objects
     ]

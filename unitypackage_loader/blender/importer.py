@@ -35,14 +35,18 @@ from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
 from .log import record_failure, warn_skipped
 from .model_import import (
+    FBX_NODE_PROP,
     adopt_into_collection,
     delegate_to_vrm_addon,
     import_model_file,
     is_removed,
     model_objects,
     new_since,
+    node_name,
     operator_available,
     remove_created,
+    reserve_names,
+    restore_names,
     sidecar_guids,
     snapshot,
     vrm_addon_available,
@@ -480,21 +484,21 @@ class _ImportSession:
         # prefab が使っていない部品と、prefab が中から消した部品（#172）は Unity に無い
         unused = set(match.removed)
         if summary.guid not in analysis.whole_models:
-            unused |= unused_parts(prefab_table, [(o.name, o.type == "MESH") for o in objects])
+            unused |= unused_parts(prefab_table, [(node_name(o), o.type == "MESH") for o in objects])
         if self.opts.skip_unused_parts:
             objects, removed = self.remove_unused(objects, unused)
             stats.removed_unused += removed
         stats.hidden_unused += self.hide_named(objects, unused)
         self.hide_named(objects, match.hidden)  # 非アクティブ・無効にしたもの（Unity と同じく数えない）
         if summary.guid in analysis.inactive_models:  # prefab の中の非アクティブな GameObject の下にだけ置いたモデル（#177）
-            self.hide_named(objects, {o.name for o in objects})
+            self.hide_named(objects, {node_name(o) for o in objects})
         stats.hidden_lods += self.hide_prefab_rows(objects, prefab_table)
         # Shadows Only の Renderer（prefab の行と、モデルの中への上書き。#232）
         for obj in objects:
-            if obj.type != "MESH" or obj.hide_render or obj.name in match.hidden:
+            if obj.type != "MESH" or obj.hide_render or node_name(obj) in match.hidden:
                 continue
-            row = find_renderer(prefab_table, obj.name)
-            if (row is not None and row.shadows_only) or obj.name in match.shadows_only:
+            row = find_renderer(prefab_table, node_name(obj))
+            if (row is not None and row.shadows_only) or node_name(obj) in match.shadows_only:
                 make_shadows_only(obj)
                 stats.shadows_only += 1
 
@@ -631,7 +635,7 @@ class _ImportSession:
         self.imported_models.add(model.guid)
         # 同名マテリアルの再利用を使うときだけ一覧を作る（シーンでは何百回も読み込むので、毎回作ると重い）
         existing_materials = {m.name: m for m in bpy.data.materials} if self.opts.reuse_existing else {}
-        delegated = import_model_file(self.paths[model.guid], model, self.opts, target, self.report)
+        delegated = self.import_with_node_names(model, target)
         new = new_since(before)
         adopt_into_collection(new, self.scene, target)
         if delegated:
@@ -657,6 +661,35 @@ class _ImportSession:
                 self.report.outlines += added
         return new["objects"]
 
+    def import_with_node_names(self, model: AssetEntry, target) -> bool:
+        """モデルを読み込み、各オブジェクトに FBX のノードとしての名前を残す（#237。``import_model_file`` の結果を返す）。
+
+        FBX のノード名と同じ名前の既存のオブジェクトがあれば、読み込む間だけ一時的な名前にして、新しいオブジェクトに
+        ノード名そのままの名前を付けさせる。読み込んだ後に既存のオブジェクトの名前を戻すので、新しいほうには今までどおり
+        連番が付くが、ノード名は ``FBX_NODE_PROP`` に残る。
+        """
+        names = self.fbx_node_names_of(model) if model.ext == ".fbx" else None
+        reserved = reserve_names(names) if names else []
+        existing = {o.as_pointer() for o in bpy.data.objects} if reserved else None
+        try:
+            delegated = import_model_file(self.paths[model.guid], model, self.opts, target, self.report)
+        finally:
+            if existing is not None:
+                for obj in bpy.data.objects:
+                    if obj.as_pointer() not in existing:
+                        obj[FBX_NODE_PROP] = obj.name
+            restore_names(reserved)
+        if existing is None:
+            for obj in target.all_objects:
+                if FBX_NODE_PROP not in obj:
+                    obj[FBX_NODE_PROP] = obj.name
+        return delegated
+
+    def fbx_node_names_of(self, model: AssetEntry):
+        if model.guid not in self.node_names:
+            self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
+        return self.node_names[model.guid]
+
     def match_model_parts(
         self, model: AssetEntry, prefab_table: dict[str, RendererMaterials], objects, before, with_parts: bool
     ) -> dict[str, RendererMaterials]:
@@ -669,13 +702,12 @@ class _ImportSession:
         pending = has_pending_renderers(prefab_table)
         if not (pending or with_parts):
             return prefab_table
-        if model.guid not in self.node_names:
-            self.node_names[model.guid] = fbx_node_names(self.paths[model.guid])
+        self.fbx_node_names_of(model)
         taken = {strip_numeric_suffix(name) for name in before["objects"]}
         self.last_matcher = PartMatcher(model_objects(objects), native=self.node_names[model.guid], taken=taken)
         if not pending:
             return prefab_table
-        mesh_names = [o.name for o in objects if o.type == "MESH"]
+        mesh_names = [node_name(o) for o in objects if o.type == "MESH"]
         prefab_table, unread = resolve_model_renderers(prefab_table, self.last_matcher.renderer_ids, mesh_names)
         if unread:
             self.report.warn(
@@ -722,7 +754,7 @@ class _ImportSession:
         for obj in objects:
             if obj.type != "MESH":
                 continue
-            rm = find_renderer(prefab_table, obj.name)
+            rm = find_renderer(prefab_table, node_name(obj))
             if rm is None:
                 continue
             obj["unity_lod"] = rm.lod_level
@@ -740,11 +772,12 @@ class _ImportSession:
         """
         if not unused:
             return objects, 0
-        removed = parts_to_remove([(o.name, o.parent.name if o.parent else None, o.type) for o in objects], unused)
+        removed = parts_to_remove([(node_name(o), node_name(o.parent) if o.parent else None, o.type) for o in objects], unused)
         if not removed:
             return objects, 0
-        self.report.objects[:] = [name for name in self.report.objects if name not in removed]
-        materials = {slot.material for o in objects if o.name in removed for slot in o.material_slots if slot.material}
+        gone = {o.name for o in objects if node_name(o) in removed}
+        self.report.objects[:] = [name for name in self.report.objects if name not in gone]
+        materials = {slot.material for o in objects if node_name(o) in removed for slot in o.material_slots if slot.material}
         kept = remove_parts(objects, removed)
         # 消した部品だけが使っていた、この回に組んだマテリアルも消す（1 つの FBX に多くの部品が入り、配置ごとに 1 つだけ使う
         # Corals では、配置ごとの読み直しで使われないマテリアルが何百も残り、未対応付けとして数えていた。#221）
@@ -758,7 +791,7 @@ class _ImportSession:
         """
         hidden = 0
         for obj in objects:
-            if obj.name in names:
+            if node_name(obj) in names:
                 defer_hide(obj, self.hidden_objects)
                 hidden += 1
         return hidden

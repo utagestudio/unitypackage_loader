@@ -126,6 +126,19 @@ class UnusedInPlacementTests(unittest.TestCase):
         self.assertEqual(unused_in_placement(h, whole, objects), set())
 
 
+    def test_numbered_node_names_are_not_merged(self):
+        # MeshDecals.fbx の RoadDecals / .001 / .002 / .003。連番を外すと同じ名前になるが、名前がそのまま一致する行が
+        # あれば、外した形では比べない（#237）
+        objects = [("RoadDecals", True), ("RoadDecals.001", True), ("RoadDecals.002", True), ("RoadDecals.003", True)]
+        for row in ("RoadDecals.002", "RoadDecals"):
+            with self.subTest(row=row):
+                h, placement = placed(renderer(row))
+                self.assertEqual(unused_in_placement(h, placement, objects), {n for n, _ in objects} - {row})
+        # 一致する行が無ければ今までどおり外した形で比べる（Blender が付け替えた名前）
+        h, placement = placed(renderer("Lamp.001"))
+        self.assertEqual(unused_in_placement(h, placement, [("Lamp.004", True), ("Pole", True)]), {"Pole"})
+
+
 class PartsToRemoveTests(unittest.TestCase):
     """使われていない部品を読み込まないときに消すもの（#152）。"""
 

@@ -111,10 +111,13 @@ def _strip_suffix(name: str) -> str:
     return base if dot and suffix.isdigit() and len(suffix) == 3 else name
 
 
-def _find_placed(top: str, name: str, parent: str | None = None) -> list:
+def _find_placed(top: str, name: str, parent: str | None = None, node_only: bool = False) -> list:
     found = []
     for obj in bpy.data.objects:
-        if _strip_suffix(obj.name) != name:
+        # 名前は連番を除いたオブジェクト名か、FBX のノードとしての名前（ノード名がもともと連番の形のとき。#237）。
+        # node_only ならノードとしての名前だけで探す（連番を外すと同じ名前になるノードを区別する）
+        node = obj.get("unity_fbx_node")
+        if node != name and (node_only or _strip_suffix(obj.name) != name):
             continue
         if parent is not None and (obj.parent is None or _strip_suffix(obj.parent.name) != parent):
             continue
@@ -455,7 +458,7 @@ def check_placed_objects(ctx: Context) -> None:
     c = ctx.c
     for spec in ctx.exp.get("placed_objects", []):
         label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
-        found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
+        found = _find_placed(spec["top"], spec["object"], spec.get("parent"), spec.get("node_only", False))
         if spec.get("absent"):  # 読み込まないもの（使われていない部品。#152）
             c.eq(f"{label} found", len(found), 0)
             continue

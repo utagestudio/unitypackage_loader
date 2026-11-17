@@ -114,7 +114,7 @@ ticked):
   pieces of a model file that bundles many props, or parts a prefab or the scene removed from a model) are not imported, matched by the mesh each Unity renderer references
   (turn off **Unused Parts** in the dialog to import them hidden instead). Where Unity has an LODGroup, only the most
   detailed level (LOD0) stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the
-  dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property).
+  dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property). Objects imported from model files keep their FBX node name in the `unity_fbx_node` custom property (Blender adds a numeric suffix when an object with the same name already exists).
   Renderers set to cast shadows only in Unity (Cast Shadows: Shadows Only) become objects that the camera does not see
   but that still cast shadows, drawn as wireframe in the viewport (Scenes and Prefabs).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
