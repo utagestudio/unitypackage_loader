@@ -4,7 +4,14 @@ import unittest
 from pathlib import Path
 
 from tests import _paths  # noqa: F401
-from unitypackage_loader.core.fbx_units import parse_unit_scale, read_unit_scale
+from unitypackage_loader.core.fbx_units import (
+    Y_UP_AXES,
+    blender_axis_matrix,
+    parse_axes,
+    parse_unit_scale,
+    read_unit_scale,
+    unity_axis_matrix,
+)
 
 HEADER = b"Kaydara FBX Binary  \x00\x1a\x00" + struct.pack("<I", 7400)
 
@@ -61,3 +68,42 @@ class ReadFileTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def axis_fbx(values) -> bytes:
+    """GlobalSettings の軸の 6 つの整数属性（I）だけを持つバイナリ FBX。"""
+    names = (b"UpAxis", b"UpAxisSign", b"FrontAxis", b"FrontAxisSign", b"CoordAxis", b"CoordAxisSign")
+    body = b"".join(
+        string_property(name) + string_property(b"int") + string_property(b"Integer") + string_property(b"") + b"I" + struct.pack("<i", v)
+        for name, v in zip(names, values)
+    )
+    return HEADER + b"\x00" * 64 + body + b"\x00" * 16
+
+
+MAX_AXES = (2, 1, 1, -1, 0, 1)  # 3ds Max の FBX（Z が上、前が -Y。Cardboard Boxes Pack の box0.FBX）
+
+
+class AxesTest(unittest.TestCase):
+    """FBX の軸（#240）。"""
+
+    def test_parse(self):
+        self.assertEqual(parse_axes(axis_fbx(MAX_AXES)), MAX_AXES)
+        self.assertEqual(parse_axes(axis_fbx(Y_UP_AXES)), Y_UP_AXES)
+        ascii_fbx = b"".join(b'P: "%s", "int", "Integer", "",%d\n' % (n, v) for n, v in zip(
+            (b"UpAxis", b"UpAxisSign", b"FrontAxis", b"FrontAxisSign", b"CoordAxis", b"CoordAxisSign"), MAX_AXES))
+        self.assertEqual(parse_axes(ascii_fbx), MAX_AXES)
+
+    def test_broken_axes(self):
+        self.assertIsNone(parse_axes(HEADER))
+        self.assertIsNone(parse_axes(axis_fbx((1, 1, 1, 1, 0, 1))))  # 軸が重なる
+        self.assertIsNone(parse_axes(axis_fbx((1, 2, 2, 1, 0, 1))))  # 向きが ±1 でない
+
+    def test_matrices(self):
+        # Y が上: Blender は X 軸のまわりに 90° 回し、Unity は X を反転する（C·diag(-1, 1, 1) = B なので今までの式と同じ）
+        self.assertEqual(blender_axis_matrix(Y_UP_AXES), [[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+        self.assertEqual(unity_axis_matrix(Y_UP_AXES), [[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        # Z が上（3ds Max）: Blender は回転を掛けず、Unity は Y と Z を入れ替える
+        self.assertEqual(blender_axis_matrix(MAX_AXES), [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        self.assertEqual(unity_axis_matrix(MAX_AXES), [[1, 0, 0], [0, 0, 1], [0, 1, 0]])
+        self.assertEqual(blender_axis_matrix(None), blender_axis_matrix(Y_UP_AXES))
+
