@@ -817,6 +817,9 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    （Synty の Shader Graph は ON のとき Emission_Map × Emission_Color。テクスチャを指定しなければ白）、ON / OFF が OFF なら光らせず、色が黒なら光らせない。
    色の項目が無ければテクスチャがあるときだけ白とする。Unity 標準の `_EmissionColor` / `_EmissionMap` と HDRP の `_EmissiveColor` / `_EmissiveColorMap` は各プロファイルが
    条件付きで読む（#52 のキーワードの判定など）ので、別名の検索では拾わない。トゥーン系のプロファイルで読んだマテリアルには当てない。
+   表に無いシェーダーで一般名から発光を読んだときも、独自の名前の強さ（`_EmissiveIntensity`、`_EmissionMultiplier`、Corals の綴り違いの `_EmissionMultiplayer` など）を掛ける
+   （`scale_emission_by_alias`。#241）。Corals は `_EmissionColor × _EmissionMultiplayer × 画像` で強さ 0、Dreamscape Nature Meadows の Shader Graph は
+   `_EmissiveColor × _EmissiveIntensity` で、強さ 0 のベンチなどが白く光っていた。
    独自シェーダーへの対応はこの汎用の仕組みで拾える範囲に限り、専用のプロファイルは分野の標準になっているシェーダーだけに作る（2026-11-09 に決定）
 
 **パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
@@ -843,6 +846,14 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
   `AlphaTest` のキューで `decal:blend`（半透明に重ねる）だから。マテリアルにカリングのプロパティが無く、シェーダーが固定の `Cull Off` なら両面にする。
   Tokyo Street の `Flowers`（`AE/Leaves`。`clip(_Base_Color.a - _Cutoff)` で切り抜く両面のシェーダー）が、葉の周りの四角い板ごと不透明に出ていた。
   手元の 17 パッケージで変わるのは同じ作者の 4 つ（Tokyo Street の Flowers・Decals_Wall、Japanese Street の AE_Flower・AE_Grass_01 が両面に）だけ。
+- パスが常に切り抜くシェーダーは、タグが `Opaque` でも切り抜きにする（`ShaderDefaults.alpha_test`、#235 / #241）。最初の `SubShader` の中の `#define _ALPHATEST_ON` と、
+  キーワードを 1 つだけ書いた `#pragma multi_compile… _ALPHATEST_ON`（無効の選択肢が無いので常に有効になる。`shader_feature` や `multi_compile _ _ALPHATEST_ON` は
+  マテリアルのキーワード次第なので含めない）。Amplify Shader Editor の URP テンプレートの形で、The Basilica Cathedral の葉（`Tripolygon(URP)/Leaf`。`#define`）と
+  Corals（`ASE_StandartCutout2Sided`。マテリアルにキーワードは無いが、URP の Unity 6000.6.9f1 で描画して切り抜かれることを確かめた）。
+  このときマテリアルに `_Cutoff` が無ければ、テンプレートのしきい値 `_AlphaCutoff` を使う。
+- `[HideInInspector]` で宣言されたプロパティも覚え（`ShaderDefaults.hidden`）、`_EmissionColor` が隠されていて発光の画像も無ければ、発光として読まない。
+  Amplify の URP テンプレートは、使わなくても白い `_EmissionColor` を隠して宣言し、マテリアルにも白が残る（Basilica の葉が真っ白に光っていた。#235）。
+  手元の 71 パッケージで読み方が変わったのは Corals・Basilica・Dreamscape Nature Meadows・Water Caustics の 62 マテリアル。
 
 **Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
 

@@ -6,6 +6,9 @@ Standard / URP / HDRP の名前を決まった順に読むと、いまのシェ�
 
 .shader からは、マテリアルが上書きしていないときに Unity が使う描画の既定（SubShader の ``RenderType`` / ``Queue`` タグと、固定の ``Cull``）も読む
 （``shader_defaults``。#202）。アルファで切り抜くかどうかがシェーダーの中だけで決まっている自作シェーダーのため。
+タグが Opaque でも、パスが常に切り抜く（``#define _ALPHATEST_ON`` か、無効の選択肢の無い ``#pragma multi_compile… _ALPHATEST_ON``）
+シェーダーは切り抜きにする。``[HideInInspector]`` で宣言されたプロパティ（Amplify Shader Editor のテンプレートが足す白い
+``_EmissionColor`` など）も覚えておく（#235 / #241）。
 """
 
 from __future__ import annotations
@@ -40,6 +43,12 @@ _COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 _PROPERTIES = re.compile(r"\bProperties\s*\{")
 # [Attribute] [Attribute(args)] _Name ("Display", Type) = default
 _PROPERTY = re.compile(r"(?:\[[^\]\n]*\]\s*)*\b([A-Za-z_]\w*)\s*\(\s*\"")
+_PROPERTY_WITH_ATTRIBUTES = re.compile(r"((?:\[[^\]\n]*\]\s*)*)\b([A-Za-z_]\w*)\s*\(\s*\"")
+# パスが常に切り抜く。multi_compile にキーワードを 1 つだけ書くと「無効」の選択肢が無く、常に有効になる
+# （shader_feature は無効の選択肢が自動で付くので、マテリアルのキーワード次第）
+_ALWAYS_ALPHA_TEST = re.compile(
+    r"^[ \t]*#[ \t]*(?:define[ \t]+_ALPHATEST_ON\b|pragma[ \t]+multi_compile\w*[ \t]+_ALPHATEST_ON[ \t]*$)", re.M
+)
 
 
 # ShaderLab の Queue の名前と値（"AlphaTest+1" のように足し引きできる）
@@ -63,6 +72,8 @@ class ShaderDefaults:
     queue: int | None = None  # SubShader の Tags の "Queue"。マテリアルの m_CustomRenderQueue が -1 のときに使われる
     render_type: str | None = None  # SubShader の Tags の "RenderType"（Opaque / TransparentCutout / Transparent など）
     cull_off: bool = False  # 最初の Cull が固定の Off（両面）。"Cull [_Cull]" のようにプロパティで決めるものは含めない
+    alpha_test: bool = False  # パスが常に切り抜く（#235 / #241）
+    hidden: frozenset[str] = frozenset()  # [HideInInspector] で宣言されたプロパティ
 
     @property
     def alpha_mode(self) -> str | None:
@@ -70,7 +81,7 @@ class ShaderDefaults:
         render_type = (self.render_type or "").lower()
         if render_type == "transparent":
             return "blend"
-        if render_type == "transparentcutout":
+        if render_type == "transparentcutout" or self.alpha_test:
             return "cutout"
         if render_type or self.queue is None:
             return None
@@ -102,7 +113,25 @@ def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
         if render_type is None and match:
             render_type = match.group(1)
     cull = _CULL.search(body)
-    return ShaderDefaults(queue=queue, render_type=render_type, cull_off=bool(cull and cull.group(1).lower() == "off"))
+    end = _SUBSHADER.search(body)  # 最初の SubShader の中だけを見る（2 つ目以降は別のパイプライン・品質向け）
+    return ShaderDefaults(
+        queue=queue,
+        render_type=render_type,
+        cull_off=bool(cull and cull.group(1).lower() == "off"),
+        alpha_test=bool(_ALWAYS_ALPHA_TEST.search(body[:end.start()] if end else body)),
+        hidden=_hidden_properties(text),
+    )
+
+
+def _hidden_properties(text: str) -> frozenset[str]:
+    """``[HideInInspector]`` で宣言されたプロパティ名。Properties が読めなければ空。"""
+    try:
+        block = _properties_block(text)
+    except ShaderSourceError:
+        return frozenset()
+    return frozenset(
+        name for attributes, name in _PROPERTY_WITH_ATTRIBUTES.findall(block or "") if "hideininspector" in attributes.lower()
+    )
 
 
 def declared_properties(data: bytes | str, ext: str) -> frozenset[str]:
@@ -123,10 +152,15 @@ def declared_properties(data: bytes | str, ext: str) -> frozenset[str]:
 
 def _shaderlab_properties(text: str) -> frozenset[str]:
     """ShaderLab の ``Properties { ... }`` に並んだ名前。"""
-    text = _COMMENT.sub("", text)
+    block = _properties_block(_COMMENT.sub("", text))
+    return frozenset(_PROPERTY.findall(block)) if block is not None else frozenset()
+
+
+def _properties_block(text: str) -> str | None:
+    """``Properties { ... }`` の中身（コメントは除いてから渡す）。無ければ None。"""
     match = _PROPERTIES.search(text)
     if match is None:
-        return frozenset()
+        return None
     depth, i, in_string = 1, match.end(), False
     while i < len(text) and depth:
         c = text[i]
@@ -144,7 +178,7 @@ def _shaderlab_properties(text: str) -> frozenset[str]:
         i += 1
     if depth:
         raise ShaderSourceError("unterminated Properties block")
-    return frozenset(_PROPERTY.findall(text[match.end():i - 1]))
+    return text[match.end():i - 1]
 
 
 def _graph_properties(text: str) -> frozenset[str]:

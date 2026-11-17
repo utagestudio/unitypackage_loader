@@ -221,15 +221,25 @@ def normalize_material(
         if norm.alpha_mode == "opaque" and mat.render_queue < 0 and defaults.alpha_mode is not None:
             norm.alpha_mode = defaults.alpha_mode
             norm.alpha_from_texture = True
+            if "_Cutoff" not in mat.floats and "_AlphaCutoff" in mat.floats:
+                # Amplify Shader Editor のテンプレートは _AlphaCutoff をしきい値にする（#235）
+                norm.alpha_cutoff = mat.f("_AlphaCutoff", norm.alpha_cutoff)
         if defaults.cull_off and cull_backface(mat, default=None) is None:
             norm.cull_backface = False
+        if "_EmissionColor" in defaults.hidden and norm.emission_tex is None:
+            # Amplify の URP テンプレートは、使わなくても白い _EmissionColor を隠して宣言する。発光として読まない（#235）
+            norm.emission_color = (0.0, 0.0, 0.0, 1.0)
     if info is None:
         # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
-        from .standard import fill_emission_from_aliases, fill_textures_from_aliases
+        from .standard import GenericProfile, fill_emission_from_aliases, fill_textures_from_aliases, scale_emission_by_alias
 
         fill_textures_from_aliases(mat, norm)
-        if norm.lighting != "toon":  # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）
-            fill_emission_from_aliases(mat, norm)
+        # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）。generic は自分で済ませている
+        if norm.lighting != "toon" and not isinstance(profile, GenericProfile):
+            if norm.has_emission:
+                scale_emission_by_alias(mat, norm)
+            else:
+                fill_emission_from_aliases(mat, norm)
     if dropped:
         norm.extras["undeclared_properties"] = dropped
     return norm

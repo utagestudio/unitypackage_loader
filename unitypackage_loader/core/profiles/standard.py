@@ -125,7 +125,10 @@ _EMISSION_COLOR_ALIASES = ("emissioncolor", "emissioncolour", "emissivecolor", "
 _EMISSION_TEX_ALIASES = (
     "emissionmap", "emissiontex", "emissiontexture", "emissivemap", "emissivetex", "emissivetexture", "emission", "emissive",
 )
-_EMISSION_STRENGTH_ALIASES = ("emissionintensity", "emissionstrength", "emissionpower", "emissiveintensity", "emissivestrength")
+_EMISSION_STRENGTH_ALIASES = (
+    "emissionintensity", "emissionstrength", "emissionpower", "emissiveintensity", "emissivestrength",
+    "emissionmultiplier", "emissionmultiplayer",  # Corals の Amplify シェーダーは綴り違いの _EmissionMultiplayer（#241）
+)
 _EMISSION_STANDARD_NAMES = frozenset({"_EmissionColor", "_EmissionMap", "_EmissiveColor", "_EmissiveColorMap", "_EmissiveColorLDR"})
 
 
@@ -175,6 +178,15 @@ def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> Non
             n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
 
 
+def scale_emission_by_alias(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """一般名（``_EmissionColor``）で読んだ発光に、独自の名前の強さを掛ける（自作シェーダー向け。#241）。
+
+    Corals の Amplify シェーダーは ``_EmissionColor × _EmissionMultiplayer × 画像`` で、強さが 0 なら光らない。
+    """
+    if n.has_emission:
+        n.emission_strength *= max(0.0, _find_float(mat, _EMISSION_STRENGTH_ALIASES, 1.0))
+
+
 def fill_emission_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     """発光が一般名で見つからなかったとき、独自の名前（ON / OFF・色・テクスチャ・強さ）で探す（#167）。
 
@@ -215,7 +227,10 @@ class GenericProfile(StandardProfile):
     def normalize(self, mat: UnityMaterial, info: ShaderInfo | None = None) -> NormalizedMaterial:
         n = super().normalize(mat, info)
         fill_textures_from_aliases(mat, n)
-        fill_emission_from_aliases(mat, n)
+        if n.has_emission:
+            scale_emission_by_alias(mat, n)  # 一般名で読んだ発光にも、独自の名前の強さを掛ける（#241）
+        else:
+            fill_emission_from_aliases(mat, n)
         if info is None:
             n.family = "unknown"
             n.warnings.append("unknown shader; used generic property mapping")
