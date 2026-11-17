@@ -818,6 +818,47 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
 
 
+class MeshSwapTest(unittest.TestCase):
+    """MeshFilter のメッシュの差し替え（m_Mesh の上書き。Destroyed Building Kit。#242）。"""
+
+    OTHER = "d" * 32
+    ONE_MESH = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 3300000: "//RootNode", 4300000: "Rubble_A"}
+    OTHER_ONE_MESH = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 3300000: "//RootNode", 4300000: "Rubble_C"}
+
+    def test_prefab_renderer(self):
+        prefab = HEADER + game_object(10, "Wall") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A)
+        scene = HEADER + instance(3000, NESTED, 0, [mod(12, NESTED, "m_Mesh", "", f"{{fileID: 4300002, guid: {self.OTHER}, type: 3}}")])
+        h = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "A", self.OTHER: "B"}).expand_raw(parse_asset(scene))
+        renderer = next(n.renderer for n in h.nodes.values() if n.renderer)
+        self.assertEqual((renderer.mesh_guid, renderer.mesh_file_id), (self.OTHER, 4300002))
+
+    def test_model_instance_with_one_mesh_models(self):
+        # 瓦礫の FBX（Rubble_A）を置いて、メッシュを別の 1 メッシュの FBX（Rubble_C）に差し替える。位置とマテリアルの上書きは引き継ぐ
+        scene = HEADER + LegacyFormatTest.legacy_instance(2000, MODEL, 0, [
+            mod(400000, MODEL, "m_LocalPosition.x", 2),
+            mod(2300000, MODEL, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {MAT_B}, type: 2}}"),
+            mod(3300000, MODEL, "m_Mesh", "", f"{{fileID: 4300000, guid: {self.OTHER}, type: 3}}"),
+        ])
+        tables = {MODEL: self.ONE_MESH, self.OTHER: self.OTHER_ONE_MESH}
+        exp = Expander(lambda g: None, {MODEL: "Rubble_A", self.OTHER: "Rubble_C"}, tables)
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, {MODEL: "Rubble_A", self.OTHER: "Rubble_C"}, tables)[0]
+        self.assertEqual(placement.model_guid, self.OTHER)
+        self.assertEqual(placement.root_node, "Rubble_C")
+        self.assertEqual(placement.node_transforms["Rubble_C"]["position"], [2.0, None, None])
+        self.assertEqual(placement.renderers["Rubble_C"].materials, [MAT_B])
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    def test_multi_mesh_target_is_not_swapped(self):
+        scene = HEADER + LegacyFormatTest.legacy_instance(2000, MODEL, 0, [
+            mod(3300000, MODEL, "m_Mesh", "", f"{{fileID: 4300002, guid: {self.OTHER}, type: 3}}"),
+        ])
+        tables = {MODEL: self.ONE_MESH, self.OTHER: {100000: "//RootNode", 100002: "Lid", 100004: "Pot", 4300002: "Lid", 4300004: "Pot"}}
+        exp = Expander(lambda g: None, {MODEL: "Rubble_A", self.OTHER: "Set"}, tables)
+        placement = placements(exp.expand_raw(parse_asset(scene)), {MODEL: "Rubble_A", self.OTHER: "Set"}, tables)[0]
+        self.assertEqual(placement.model_guid, MODEL)
+
+
 class ShadowsOnlyTest(unittest.TestCase):
     """Renderer の m_CastShadows が Shadows Only（3）なら、影だけを落とし本体は描かない（Japanese Hotel Room。#232）。"""
 

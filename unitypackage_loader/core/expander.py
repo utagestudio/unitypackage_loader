@@ -73,7 +73,7 @@ from .transform import chain
 from .unity_yaml import UnityRef, ref_guid, to_float
 
 
-_TABLES = ("transforms", "game_objects", "renderers", "components")
+_TABLES = ("transforms", "game_objects", "renderers", "components", "mesh_filters")
 
 
 @dataclass
@@ -84,10 +84,12 @@ class _Inserted:
     """
 
     instance_id: int
+    source_guid: str | None = None  # 差し込んだ元のアセットの GUID（埋め込んだ Mesh の参照に使う。#242）
     transforms: dict[int, int] = field(default_factory=dict)
     game_objects: dict[int, int] = field(default_factory=dict)
     renderers: dict[int, int] = field(default_factory=dict)
     components: dict[int, int] = field(default_factory=dict)
+    mesh_filters: dict[int, int] = field(default_factory=dict)
 
 
 _DEFAULT_LEGACY_ROOTS = legacy_root_ids({})
@@ -225,6 +227,10 @@ class Expander:
             if key is not None:
                 h.nodes[key].components[file_uid(component_id)] = (class_id, copy.deepcopy(body))
                 h.components[file_uid(component_id)] = key
+        for filter_id, go in raw.mesh_filters.items():
+            key = h.game_objects.get(file_uid(go))
+            if key is not None:
+                h.mesh_filters[file_uid(filter_id)] = key
         _assign_scopes(h, own)
 
         roots: list[tuple[int, int]] = []  # (差し込んだ最上位の Node の key, m_TransformParent の fileID)
@@ -323,7 +329,7 @@ class _Insertion:
         self.is_model = is_model
         self.iid = instance.file_id
         self.added: dict[int, int] = {}  # 元の key → 差し込んだ key（copy_nodes で作る）
-        self.scope = _Inserted(self.iid)
+        self.scope = _Inserted(self.iid, self.source)
         # モデルの PrefabInstance なら、そのルートの Node と、古い形式の .meta の表（中への上書きを名前に結び付ける）
         self.root_key: int | None = None
         self.table = expander._recycle.get(self.source, {}) if is_model else {}
@@ -460,6 +466,10 @@ class _Insertion:
         """モデルの中のオブジェクトへの上書きを、モデルのルートに記録する（名前を引ければ名前で、引けなければ fileID で）。"""
         h = self.h
         root = self.model_root()
+        if path == "m_Mesh" and root is not None and isinstance(reference, UnityRef):
+            # モデルの中の MeshFilter のメッシュを差し替える。配置を作るときに、1 メッシュのモデル同士なら入れ替える（#242）
+            root.model_meshes[uid] = (reference.guid, reference.file_id)
+            return
         if root is not None and _apply_named_model_override(root, self.table, file_id, path, value, reference):
             return
         visibility = _visibility_change(path, value)
@@ -605,7 +615,7 @@ def _is_tracked(path: str) -> bool:
     return bool(
         TRS_PATH.fullmatch(path)
         or MATERIAL_PATH.fullmatch(path)
-        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled", "m_CastShadows")
+        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled", "m_CastShadows", "m_Mesh")
     )
 
 
@@ -640,6 +650,14 @@ def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, val
         if component is None:
             return False
         _set_property(component[1], path, value, reference)
+        return True
+    if path == "m_Mesh":
+        # MeshFilter のメッシュの差し替え（#242）。GUID の無い参照は、差し込んだ元のアセットに埋め込んだ Mesh
+        node = h.nodes.get(scope.mesh_filters.get(uid))  # type: ignore[arg-type]
+        if node is None or node.renderer is None or not isinstance(reference, UnityRef):
+            return False
+        node.renderer.mesh_guid = reference.guid or scope.source_guid
+        node.renderer.mesh_file_id = reference.file_id
         return True
     node = h.nodes.get(scope.renderers.get(uid))  # type: ignore[arg-type]
     renderer = node.renderer if node is not None else None
