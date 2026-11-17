@@ -77,6 +77,14 @@ class ModelImporterTests(unittest.TestCase):
         self.assertAlmostEqual(info.global_scale, 0.01)
         self.assertFalse(info.use_file_scale)
         self.assertTrue(info.import_blend_shapes)
+        self.assertFalse(info.bake_axis_conversion)  # 書かれていなければ無効（Unity の既定）
+
+    def test_bake_axis_conversion(self):
+        # Cardboard Boxes Pack の箱は有効、Shibuya の Unreal 由来の FBX は無効（#240）
+        info = ModelImporterInfo.from_meta("ModelImporter:\n  meshes:\n    bakeAxisConversion: 1\n")
+        self.assertTrue(info.bake_axis_conversion)
+        info = ModelImporterInfo.from_meta("ModelImporter:\n  meshes:\n    bakeAxisConversion: 0\n")
+        self.assertFalse(info.bake_axis_conversion)
 
     def test_resolve_material(self):
         info = ModelImporterInfo.from_meta(MODEL_META)

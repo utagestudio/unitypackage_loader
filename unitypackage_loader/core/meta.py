@@ -109,6 +109,9 @@ class ModelImporterInfo:
     material_import_mode: int | None = None
     global_scale: float = 1.0
     use_file_scale: bool = True
+    # Bake Axis Conversion（meshes.bakeAxisConversion）。有効なら Unity は Y が上でない FBX の軸の変換を頂点に焼き込み、
+    # 無効（既定）ならルートの回転として持つ（#240）
+    bake_axis_conversion: bool = False
     import_blend_shapes: bool = True
     # モデルの中のオブジェクトの fileID → 名前（//RootNode はルート）。Unity 2018.2 以前の形式の fileIDToRecycleName と、
     # 古い番号を引き継いだ internalIDToNameTable から読む。新しい形式（ハッシュの fileID）では空
@@ -163,6 +166,7 @@ class ModelImporterInfo:
             if isinstance(scale, (int, float)):
                 info.global_scale = float(scale)
             info.use_file_scale = bool(meshes.get("useFileScale", 1))
+            info.bake_axis_conversion = bool(meshes.get("bakeAxisConversion", 0))
             info.import_blend_shapes = bool(meshes.get("importBlendShapes", 1))
         return info
 
