@@ -80,6 +80,7 @@
 | `materials.modes` | レポートの行の、実際に組んだモードの集合（`PRINCIPLED` / `TOON` / `UNLIT` / `NAMES_ONLY`。組まなかった行は数えない） |
 | `before.materials` | 読み込む前に、この名前の空のマテリアルを作っておく（同名のマテリアルを使う `reuse_existing` の確認に使う） |
 | `images.count` | 読み込まれた画像数 |
+| `images.missing` | ファイルの見つからない画像の数（パッケージの外のパスを指す画像。#220） |
 | `images.packed` | `true` なら、レポートに載った画像がすべて .blend に取り込まれている（`pack_images`） |
 | `outlines` | `count` はレポートのアウトラインの数、`objects` はオブジェクト名 → アウトライン（Solidify モディファイアー `UnityOutline`）の厚さ。`null` なら付いていないこと |
 | `warnings_max` | 許容する警告数の上限 |

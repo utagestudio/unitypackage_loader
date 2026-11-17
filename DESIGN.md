@@ -997,6 +997,9 @@ def run(ctx, filepath, opts) -> Report:
 - 画像ノードの `extension`: `wrapU == 1` → `EXTEND`、それ以外 `REPEAT`。
 - **PSD は Blender で読めない** → 警告して展開のみ行う。TGA/TIFF/EXR/BMP/JPG/PNG は可。
 - `Pack into .blend` ON なら `image.pack()`。
+- モデルのインポーターが作った画像（.mat に対応付かず FBX のマテリアルを残すときに使われる）のファイルが見つからなければ、パッケージの中の
+  同じファイル名のテクスチャ（複数あればモデルに近いフォルダのもの）に付け替える。FBX に作者の PC のパスが入っているとピンクになっていた
+  （MegapolyArt - Cardboard Boxes Pack）。展開は、組み立てで足りなかったテクスチャと一緒に最後にまとめて行う（`fill_missed_textures`。#220）。
 
 ### 4.9 エラーと警告の分類
 

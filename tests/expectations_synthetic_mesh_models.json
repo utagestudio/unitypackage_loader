@@ -1,0 +1,15 @@
+{
+  "options": {
+    "unit": "MODELS",
+    "material_mode": "AUTO"
+  },
+  "images": {
+    "missing": 0
+  },
+  "material_checks": [
+    {
+      "name": "CrateFbx",
+      "method": "none"
+    }
+  ]
+}

@@ -259,6 +259,9 @@ class _ImportSession:
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
         self._scene_frames: dict[str, tuple[dict, dict]] = {}  # シーンの GUID → (ワールド行列, アクティブか)。scene_frames
         self.meshes = SessionMeshes(self)  # パッケージの Unity の Mesh から作ったメッシュ（#216）
+        # モデルのインポーターが作った画像のうち、ファイルが見つからないもの → パッケージの同じファイル名のテクスチャ（#220）
+        self.image_relinks: list[tuple[bpy.types.Image, str]] = []
+        self._textures_by_name: dict[str, list[AssetEntry]] | None = None
         self.terrains = SessionTerrains(self)  # TerrainData ごとに作った Terrain のメッシュとマテリアル（#205）
         self.terrain_written: set[str] = set()  # この回で展開し直した TerrainData（アルファマップの PNG も書き直す）
 
@@ -542,17 +545,51 @@ class _ImportSession:
                 found.append((component, decal))
         return found
 
+    def note_missing_images(self, model: AssetEntry, images) -> None:
+        """モデルのインポーターが作った画像で、ファイルが見つからないもの（FBX に作者の PC のパスが入っているなど）を、
+        パッケージの同じファイル名のテクスチャに付け替える予定にする（展開は最後にまとめて行う。#220）。"""
+        for image in images:
+            if is_removed(image) or image.packed_file or not image.filepath or image.source != "FILE":
+                continue
+            if Path(bpy.path.abspath(image.filepath)).is_file():
+                continue
+            entry = self.texture_by_name(Path(bpy.path.abspath(image.filepath)).name, model.pathname)
+            if entry is not None:
+                self.image_relinks.append((image, entry.guid))
+
+    def texture_by_name(self, filename: str, near: str) -> AssetEntry | None:
+        """パッケージのテクスチャのうち、ファイル名が同じもの（大文字小文字は区別しない）。複数あればフォルダが ``near`` に近いもの。"""
+        if self._textures_by_name is None:
+            self._textures_by_name = {}
+            for entry in self.pkg.textures():
+                self._textures_by_name.setdefault(entry.name.lower(), []).append(entry)
+        candidates = self._textures_by_name.get(filename.lower(), [])
+        if not candidates:
+            return None
+        near_parts = Path(near).parent.parts
+
+        def shared(entry: AssetEntry) -> int:
+            parts = Path(entry.pathname).parent.parts
+            return next((i for i, (a, b) in enumerate(zip(parts, near_parts)) if a != b), min(len(parts), len(near_parts)))
+
+        return max(candidates, key=lambda e: (shared(e), -len(e.pathname)))
+
     def fill_missed_textures(self) -> None:
-        """組み立てで足りなかったテクスチャ（読み込む前の予測から漏れたもの）を展開して読み込み、そのマテリアルを組み直す（#164）。"""
+        """組み立てで足りなかったテクスチャ（読み込む前の予測から漏れたもの）を展開して読み込み、そのマテリアルを組み直す（#164）。
+
+        モデルのインポーターが作った画像で、ファイルが見つからなかったものも、ここで展開して付け替える（#220）。
+        """
         pending, missed = self.materials.take_pending()
-        if not pending:
+        relinks, self.image_relinks = self.image_relinks, []
+        if not pending and not relinks:
             return
+        wanted = sorted(set(missed) | {guid for _, guid in relinks})
         self.step(0.95, "Loading textures")
         written: set[str] = set()
         try:
             self.paths.update(
                 self.pkg.extract(
-                    missed, self.extract_root, overwrite=self.opts.overwrite_extracted,
+                    wanted, self.extract_root, overwrite=self.opts.overwrite_extracted,
                     max_total_size=self.opts.max_extract_size, written=written,
                 )
             )
@@ -560,6 +597,13 @@ class _ImportSession:
             self.report.warn(f"could not extract textures: {exc}")
         self.materials.load_textures(set(missed), self.paths, written)
         self.materials.rebuild_pending(pending)
+        for image, guid in relinks:
+            path = self.paths.get(guid)
+            if path is None or is_removed(image):
+                continue
+            image.filepath = str(path)
+            image.reload()
+            self.report.images.append(image.name)
 
     def step(self, fraction: float, message: str) -> None:
         if self.progress is not None:
@@ -595,6 +639,8 @@ class _ImportSession:
 
         prefab_table = self.match_model_parts(model, prefab_table or {}, new["objects"], before, with_parts)
         self.materials.assign_materials(summary, prefab_table, new, delegated, existing_materials)
+        if not delegated:
+            self.note_missing_images(model, new["images"])
         if self.opts.outlines:
             added = outline_builder.apply_outlines(new["objects"], self.opts.outline_width_scale)
             if added:
