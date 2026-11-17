@@ -53,6 +53,10 @@ class StandardProfile(ShaderProfile):
 
     @staticmethod
     def _alpha_mode(mat: UnityMaterial, info: ShaderInfo | None):
+        # Legacy Shaders などの組み込みシェーダーは、半透明・切り抜きがシェーダーで決まっている。前に使っていた Standard の
+        # _Mode（0 = 不透明）が残っていても使わない（Synty の FX_Default_01 は Particles/Additive (Soft) で _Mode が 0。#256）
+        if info is not None and info.family == "legacy" and info.alpha is not None:
+            return info.alpha
         if mat.has("_Mode"):  # Built-in Standard
             mode = int(mat.f("_Mode", 0))
             if mode == MODE_CUTOUT:

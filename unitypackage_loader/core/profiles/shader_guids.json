@@ -1,27 +1,343 @@
 {
-  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids. MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py. URP entries were collected from the .shader.meta files of com.unity.render-pipelines.universal 17.6 bundled with Unity 6000.6; their name selects the rule set in profiles/urp.py. HDRP entries were collected the same way from com.unity.render-pipelines.high-definition 17.6 (rule sets in profiles/hdrp.py).",
+  "_comment": "Shader asset GUID -> family/variant table. lilToon entries were collected from the public lilxyzw/lilToon repository (Assets/lilToon/Shader/*.shader.meta). Built-in shaders are referenced by fileID with the all-zero guid; see builtin_file_ids (fileIDs and names were listed from Resources/unity_builtin_extra in Unity 6000.6; alpha follows each shader's RenderType tag). MToon entries were collected from the public vrm-c/UniVRM repository. VRChat Mobile entries were collected from the .shader.meta files of the VRChat SDK (Packages/com.vrchat.base/Runtime/VRCSDK/Sample Assets/Shaders/Mobile) as mirrored in public repositories; their `variant` selects the rule set in profiles/vrchat_mobile.py. URP entries were collected from the .shader.meta files of com.unity.render-pipelines.universal 17.6 bundled with Unity 6000.6; their name selects the rule set in profiles/urp.py. HDRP entries were collected the same way from com.unity.render-pipelines.high-definition 17.6 (rule sets in profiles/hdrp.py).",
   "builtin_guid": "0000000000000000f000000000000000",
   "builtin_file_ids": {
-    "46": {
-      "family": "standard",
-      "name": "Standard"
+    "1": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Diffuse Fast"
     },
-    "45": {
-      "family": "standard",
-      "name": "Standard (Specular setup)"
+    "2": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Bumped Diffuse"
+    },
+    "3": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Specular"
+    },
+    "4": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Bumped Specular"
+    },
+    "5": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Diffuse Detail"
+    },
+    "6": {
+      "family": "legacy",
+      "name": "Legacy Shaders/VertexLit"
     },
     "7": {
       "family": "legacy",
       "name": "Legacy Shaders/Diffuse"
     },
-    "10752": {
+    "8": {
       "family": "legacy",
-      "name": "Unlit/Texture",
+      "name": "Legacy Shaders/Parallax Diffuse"
+    },
+    "9": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Parallax Specular"
+    },
+    "10": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Diffuse"
+    },
+    "11": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Bumped Diffuse"
+    },
+    "12": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Specular"
+    },
+    "13": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Bumped Specular"
+    },
+    "14": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/VertexLit"
+    },
+    "15": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Parallax Diffuse"
+    },
+    "16": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Self-Illumin/Parallax Specular"
+    },
+    "20": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Diffuse"
+    },
+    "21": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Bumped Diffuse"
+    },
+    "22": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Specular"
+    },
+    "23": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Bumped Specular"
+    },
+    "24": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/VertexLit"
+    },
+    "25": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Bumped Unlit",
       "lighting": "unlit"
     },
-    "10755": {
+    "26": {
       "family": "legacy",
-      "name": "Unlit/Color",
+      "name": "Legacy Shaders/Reflective/Bumped VertexLit"
+    },
+    "27": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Parallax Diffuse"
+    },
+    "28": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Reflective/Parallax Specular"
+    },
+    "30": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Diffuse",
+      "alpha": "blend"
+    },
+    "31": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Bumped Diffuse",
+      "alpha": "blend"
+    },
+    "32": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Specular",
+      "alpha": "blend"
+    },
+    "33": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Bumped Specular",
+      "alpha": "blend"
+    },
+    "34": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/VertexLit",
+      "alpha": "blend"
+    },
+    "35": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Parallax Diffuse",
+      "alpha": "blend"
+    },
+    "36": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Parallax Specular",
+      "alpha": "blend"
+    },
+    "40": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Lightmapped/VertexLit"
+    },
+    "41": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Lightmapped/Diffuse"
+    },
+    "42": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Lightmapped/Bumped Diffuse"
+    },
+    "43": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Lightmapped/Specular"
+    },
+    "44": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Lightmapped/Bumped Specular"
+    },
+    "45": {
+      "family": "standard",
+      "name": "Standard (Specular setup)"
+    },
+    "46": {
+      "family": "standard",
+      "name": "Standard"
+    },
+    "50": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/VertexLit",
+      "alpha": "cutout"
+    },
+    "51": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/Diffuse",
+      "alpha": "cutout"
+    },
+    "52": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/Bumped Diffuse",
+      "alpha": "cutout"
+    },
+    "53": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/Specular",
+      "alpha": "cutout"
+    },
+    "54": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/Bumped Specular",
+      "alpha": "cutout"
+    },
+    "200": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Additive",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "201": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/~Additive-Multiply",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "202": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Additive (Soft)",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "203": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Alpha Blended",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "205": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Multiply",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "206": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Multiply (Double)",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "207": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Alpha Blended Premultiply",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "208": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/VertexLit Blended",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "209": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Particles/Anim Alpha Blended",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "210": {
+      "family": "standard",
+      "name": "Particles/Standard Surface"
+    },
+    "211": {
+      "family": "standard",
+      "name": "Particles/Standard Unlit",
+      "lighting": "unlit"
+    },
+    "10509": {
+      "family": "legacy",
+      "name": "Nature/Tree Soft Occlusion Bark"
+    },
+    "10511": {
+      "family": "legacy",
+      "name": "Nature/Tree Soft Occlusion Leaves",
+      "alpha": "cutout"
+    },
+    "10512": {
+      "family": "legacy",
+      "name": "Legacy Shaders/Transparent/Cutout/Soft Edge Unlit",
+      "alpha": "cutout",
+      "lighting": "unlit"
+    },
+    "10600": {
+      "family": "legacy",
+      "name": "Nature/Tree Creator Bark"
+    },
+    "10601": {
+      "family": "legacy",
+      "name": "Nature/Tree Creator Leaves",
+      "alpha": "cutout"
+    },
+    "10606": {
+      "family": "legacy",
+      "name": "Nature/Tree Creator Leaves Fast",
+      "alpha": "cutout"
+    },
+    "10700": {
+      "family": "legacy",
+      "name": "Mobile/Skybox"
+    },
+    "10701": {
+      "family": "legacy",
+      "name": "Mobile/VertexLit"
+    },
+    "10703": {
+      "family": "legacy",
+      "name": "Mobile/Diffuse"
+    },
+    "10704": {
+      "family": "legacy",
+      "name": "Mobile/Bumped Diffuse"
+    },
+    "10705": {
+      "family": "legacy",
+      "name": "Mobile/Bumped Specular"
+    },
+    "10706": {
+      "family": "legacy",
+      "name": "Mobile/Bumped Specular (1 Directional Realtime Light)"
+    },
+    "10707": {
+      "family": "legacy",
+      "name": "Mobile/VertexLit (Only Directional Lights)"
+    },
+    "10708": {
+      "family": "legacy",
+      "name": "Mobile/Unlit (Supports Lightmap)",
+      "lighting": "unlit"
+    },
+    "10720": {
+      "family": "legacy",
+      "name": "Mobile/Particles/Additive",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10721": {
+      "family": "legacy",
+      "name": "Mobile/Particles/Alpha Blended",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10722": {
+      "family": "legacy",
+      "name": "Mobile/Particles/VertexLit Blended",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10723": {
+      "family": "legacy",
+      "name": "Mobile/Particles/Multiply",
+      "alpha": "blend",
       "lighting": "unlit"
     },
     "10750": {
@@ -34,6 +350,120 @@
       "family": "legacy",
       "name": "Unlit/Transparent Cutout",
       "lighting": "unlit",
+      "alpha": "cutout"
+    },
+    "10752": {
+      "family": "legacy",
+      "name": "Unlit/Texture",
+      "lighting": "unlit"
+    },
+    "10753": {
+      "family": "legacy",
+      "name": "Sprites/Default",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10755": {
+      "family": "legacy",
+      "name": "Unlit/Color",
+      "lighting": "unlit"
+    },
+    "10757": {
+      "family": "legacy",
+      "name": "Sprites/Mask",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10760": {
+      "family": "legacy",
+      "name": "UI/Unlit/Transparent",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10761": {
+      "family": "legacy",
+      "name": "UI/Unlit/Detail",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10762": {
+      "family": "legacy",
+      "name": "UI/Unlit/Text",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10763": {
+      "family": "legacy",
+      "name": "UI/Unlit/Text Detail",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10764": {
+      "family": "legacy",
+      "name": "UI/Lit/Transparent",
+      "alpha": "blend"
+    },
+    "10765": {
+      "family": "legacy",
+      "name": "UI/Lit/Bumped",
+      "alpha": "blend"
+    },
+    "10766": {
+      "family": "legacy",
+      "name": "UI/Lit/Detail",
+      "alpha": "blend"
+    },
+    "10767": {
+      "family": "legacy",
+      "name": "UI/Lit/Refraction",
+      "alpha": "blend"
+    },
+    "10768": {
+      "family": "legacy",
+      "name": "UI/Lit/Refraction Detail",
+      "alpha": "blend"
+    },
+    "10770": {
+      "family": "legacy",
+      "name": "UI/Default",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10782": {
+      "family": "legacy",
+      "name": "UI/Default Font",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10783": {
+      "family": "legacy",
+      "name": "UI/DefaultETC1",
+      "alpha": "blend",
+      "lighting": "unlit"
+    },
+    "10800": {
+      "family": "legacy",
+      "name": "Sprites/Diffuse",
+      "alpha": "blend"
+    },
+    "14000": {
+      "family": "legacy",
+      "name": "Nature/SpeedTree",
+      "alpha": "cutout"
+    },
+    "14001": {
+      "family": "legacy",
+      "name": "Nature/SpeedTree Billboard",
+      "alpha": "cutout"
+    },
+    "14002": {
+      "family": "legacy",
+      "name": "Nature/SpeedTree8",
+      "alpha": "cutout"
+    },
+    "14003": {
+      "family": "legacy",
+      "name": "Nature/SpeedTree9",
       "alpha": "cutout"
     }
   },

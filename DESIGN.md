@@ -803,6 +803,11 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 
 **プロファイル判定順**
 1. `shader_guids.json` の GUID 一致（サンプルの 4 GUID は lilToon として登録）
+   - Unity の組み込みシェーダー（GUID が `0000000000000000f000000000000000`）は fileID で引く（`builtin_file_ids`）。Standard・Unlit のほか、
+     Legacy Shaders / Mobile / Particles / Nature / Sprites / UI の fileID と名前を Unity 6000.6 の `Resources/unity_builtin_extra` から書き出して入れた。
+     半透明・切り抜きは各シェーダーの RenderType タグ、ライティング無しは Unlit 系とパーティクル用のものに合わせる。Legacy のシェーダーは
+     半透明かどうかがシェーダーで決まっているので、前に使っていた Standard の `_Mode` が残っていても表の値を使う。以前は Standard と Unlit の
+     7 つだけで、Unity 4 の Transparent/Specular を使う Japanese Phone Booth Clean Dirty Set のガラスが不透明になっていた（Issue #256）
 2. プロパティ指紋（GUID 未登録のシェーダー向け）
    - lilToon: `_BaseMap` と `_MatCapTex` と `_UseShadow` がある
    - URP Lit: `_WorkflowMode` か `_Surface` がある（Standard の残りを持つことが多いので Standard より先に判定する）
