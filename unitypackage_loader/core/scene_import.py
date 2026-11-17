@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from .hierarchy import Hierarchy
 from .placement import ModelPlacement, SceneContents, built_from_renderers
@@ -12,6 +12,9 @@ from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
 __all__ = [
+    "KIND_PREFAB",
+    "KIND_SCENE",
+    "PlacedKind",
     "HiddenParts",
     "PlacementStats",
     "lod_warning",
@@ -23,6 +26,11 @@ __all__ = [
     "unused_in_placement",
     "unused_warning",
 ]
+
+# シーンと同じ処理で置くものの種類（#240）。コレクションのプロパティ（unity_scene / unity_prefab）と警告の頭に使う
+PlacedKind = Literal["scene", "prefab"]
+KIND_SCENE: PlacedKind = "scene"
+KIND_PREFAB: PlacedKind = "prefab"
 
 
 class HiddenParts(NamedTuple):
@@ -183,10 +191,12 @@ class PlacementStats:
         return messages
 
 
-def scene_warnings(pathname: str, contents: SceneContents | None, stats: PlacementStats, kind: str = "scene") -> list[str]:
+def scene_warnings(
+    pathname: str, contents: SceneContents | None, stats: PlacementStats, kind: PlacedKind = KIND_SCENE
+) -> list[str]:
     """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。
 
-    ``kind`` は警告の頭に付ける種類（読む単位 Prefabs で prefab をシーンと同じく置くときは "prefab"。#240）。
+    ``kind`` は警告の頭に付ける種類（読む単位 Prefabs で prefab をシーンと同じく置くときは ``KIND_PREFAB``。#240）。
     """
     prefix = f"{kind} {pathname}: "
     messages: list[str] = []

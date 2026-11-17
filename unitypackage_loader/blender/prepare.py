@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +14,7 @@ from pathlib import Path
 import bpy
 
 from ..core.expander import Expander
-from ..core.hierarchy import Hierarchy, RawAsset, parse_asset, world_matrices
+from ..core.hierarchy import Hierarchy, RawAsset, parse_asset
 from ..core.placement import ModelCatalog
 from ..core.lights import decide_pipeline, pipelines_in_assets
 from ..core.mapping import material_textures, resolve_materials
@@ -96,6 +98,22 @@ class PreparedPackage:
                 self.pkg, self._expander, self.catalog, self.warnings.append, unsupported
             )
         return self._scenes
+
+    def prefab_layout(self, guid: str) -> Hierarchy | None:
+        """読み込む単位 Prefabs で置く、prefab の展開した階層の写し（ルートの位置を原点にし、回転と拡大率は残す。#240）。
+
+        展開は prepare で展開器にキャッシュしたものを使う。読めなかった prefab は None。
+        """
+        if self._expander is None:
+            self._expander = self.catalog.expander(_prefab_reader(self.pkg, self.warnings.append))
+        hierarchy = self._expander.expand_asset(guid)
+        if hierarchy is None:
+            return None
+        hierarchy = copy.deepcopy(hierarchy)  # 展開器のキャッシュはシーンの展開でも使うので、写してから動かす
+        for node in hierarchy.nodes.values():
+            if node.parent is None:
+                node.position = [0.0, 0.0, 0.0]
+        return hierarchy
 
     @property
     def scenes(self) -> list[SceneSummary]:
@@ -317,10 +335,7 @@ def prepare_package(
             placed = catalog.placements(hierarchy)
             analysis = analyze_prefab(hierarchy, placed)
             if catalog.mesh_assets:  # Unity の Mesh を使う Renderer（#216）
-                meshes = [p for p in catalog.summarize(hierarchy).primitives if p.mesh_guid]
-                if meshes:
-                    worlds = world_matrices(hierarchy)
-                    analysis.meshes = [(p, worlds[p.key]) for p in meshes]
+                analysis.meshes = [p for p in catalog.summarize(hierarchy).primitives if p.mesh_guid]
             used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
             warn_skipped(warnings.append, f"could not resolve prefab {entry.pathname}", exc)
@@ -345,7 +360,7 @@ def prepare_package(
         warnings.append(pipeline.warning)
     prefab_tables = {pathname: analysis.tables for pathname, analysis in prefab_analyses.items()}
     prefab_meshes = {
-        pathname: [g for p, _ in analysis.meshes for g in p.materials if g]
+        pathname: [g for p in analysis.meshes for g in p.materials if g]
         for pathname, analysis in prefab_analyses.items() if analysis.meshes
     }
     prefabs = summarize_prefabs(

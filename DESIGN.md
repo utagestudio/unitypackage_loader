@@ -626,6 +626,7 @@ unitypackage_loader/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
 │   │   ├─ standard.py           # Built-in Standard / HDRP Lit
+│   │   ├─ custom_shader.py      # 表に無いシェーダーをシェーダーの定義（ShaderDefaults）と名前（別名・表示名・1 枚だけの画像・上下 2 色・発光）から補う（#262）
 │   │   ├─ urp.py                # URP Lit / Complex Lit / Simple Lit / Unlit / Baked Lit（#116 / #117）
 │   │   ├─ hdrp.py               # HDRP Lit / LayeredLit / Unlit（#119）
 │   │   ├─ mtoon.py              # VRM MToon
@@ -821,6 +822,8 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    （ベースカラーは `_Base_Color` / `_Base_Map` / `_Albedo` / `_Albedo_Map` / `_Diffuse` / `_MainTexture` / `_ColorMap` など、法線は `_Normal` / `_Normal_Map` / `_Bump` など、法線の強さは `_NormalScale` / `_Scale_Normal` / `_NormalStrength` / `_Normal_Amount` など）。
    `_Mask` や `_Color_Tilling` のような別の役割の名前を拾わないよう、部分一致にはしない
    この別名での検索は、シェーダー表に無いシェーダーなら、指紋で選んだプロファイル（URP Lit など）で読んだあとにも行う（`fill_textures_from_aliases`）。
+   以下の名前での補い（1 枚だけの画像・上下 2 色・発光）と、シェーダーの定義の既定を当てる処理は `core/profiles/custom_shader.py` にまとめてあり、
+   `normalize_material` が「定義の既定（`apply_shader_defaults`）→ 名前で補う（`fill_from_custom_names`）」の順に呼ぶ（#262）。
    Shader Graph のマテリアルは URP Lit の `_WorkflowMode` / `_Surface` を持つので指紋で URP Lit と読まれるが、テクスチャは独自の名前で持つことがある
    （Synty の POLYGON シリーズは `_Albedo_Map` / `_Base_Map` / `_Normal_Map` / `_Normal_Amount`。URP Lit の `_BaseMap` だけを読んでいたため、すべて白かった。#158）。
    表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）。
