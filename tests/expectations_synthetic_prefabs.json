@@ -6,7 +6,7 @@
   "warnings_max": 0,
   "split_slots": 3,
   "prefabs": { "count": 7 },
-  "submesh_materials": { "SyntheticPair": ["PairB", "PairA"], "SyntheticPair.001": ["PairA", "PairB"] },
+  "submesh_materials": { "Cone/SyntheticPair": ["PairB", "PairA"], "PairSwap/SyntheticPair": ["PairA", "PairB"] },
   "collections": {
     "Binary": { "objects": 1, "prefab": "Assets/Synthetic/Prefabs/Binary.prefab", "mat_files": ["BinaryMat.mat"] },
     "Cone": { "objects": 3, "prefab": "Assets/Synthetic/Prefabs/Cone.prefab", "mat_files": ["CylinderMat.mat", "NoMatMat.mat", "PairA.mat", "PairB.mat"] },

@@ -137,8 +137,8 @@ Scenes は、シーンをまとめて読み込むと建物やライトが重な�
 
 1 回のインポートで使う単位は 1 つなので、同じモデルを誤って二重に読み込むことはありません。読み込めないものも一覧から外さず、
 灰色にして理由（`no mesh in package`、`.blend import disabled` など）を表示します。最後に選んだ単位と並べ方は次回の既定になります。
-読み込む単位 Prefabs では、prefab の中の配置（子オブジェクトの位置など）は再現せず、prefab のモデルをその Collection の原点に置きます。
-配置ごと読み込むには、その prefab を置いたシーンを読み込みます。
+読み込む単位 Prefabs でも、prefab の中の配置（子オブジェクトの位置・回転・拡大率や、同じモデルの複数の配置）をシーンと同じく再現し、
+prefab のルートをその Collection の原点に置きます。
 
 既定値は Preferences（Edit > Preferences > Add-ons > Unitypackage Importer）で変更できます。選択ダイアログを出すか
 （`Selection Dialog`: `Ask` / `All Models` / `First Model Only`）と、prefab の並べ方（`Arrange Prefabs`）もここで設定します。

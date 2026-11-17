@@ -56,8 +56,10 @@ class SceneImport:
     同じ処理をコピーしていた。シーン 1 つ分の状態をこのクラスのフィールドにし、手順をメソッドに分けた（#198）。
     """
 
-    def __init__(self, session: _ImportSession, scene_summary: SceneSummary):
+    def __init__(self, session: _ImportSession, scene_summary: SceneSummary, kind: str = "scene"):
         self.session = session
+        # "scene" か "prefab"（読む単位 Prefabs で、prefab の中の配置をシーンと同じく再現する。#240）
+        self.kind = kind
         self.opts = session.opts
         self.report = session.report
         self.summary = scene_summary
@@ -75,9 +77,13 @@ class SceneImport:
     def run(self, progress_start: float, progress_span: float) -> None:
         self.target = bpy.data.collections.new(self.summary.name)
         self.session.collection.children.link(self.target)
-        self.target["unity_scene"] = self.pathname
-        self.target["unity_scene_guid"] = self.summary.guid
-        self.report.scenes.append(self.pathname)
+        self.target[f"unity_{self.kind}"] = self.pathname
+        self.target[f"unity_{self.kind}_guid"] = self.summary.guid
+        if self.kind == "prefab":
+            self.report.prefabs.append(self.pathname)
+            self.session.prefab_collections.append(self.target)
+        else:
+            self.report.scenes.append(self.pathname)
 
         count = len(self.summary.placements)
         for index, placement in enumerate(self.summary.placements):
@@ -91,7 +97,7 @@ class SceneImport:
         if self.opts.scene_decals:
             self.place_decals()
         self.place_lights_and_cameras()
-        for message in scene_warnings(self.pathname, self.summary.contents, self.stats):
+        for message in scene_warnings(self.pathname, self.summary.contents, self.stats, self.kind):
             self.report.warn(message)
 
     # --- 共通 ---
@@ -141,7 +147,7 @@ class SceneImport:
         if summary is None:
             skipped = session.model_by_guid.get(placement.model_guid)
             if skipped is not None:
-                self.report.warn(f"scene {self.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+                self.report.warn(f"{self.kind} {self.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
             return
         if summary.guid in session.failed_models:
             return  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
@@ -152,7 +158,7 @@ class SceneImport:
             try:
                 objects = self.import_template(summary, placement, key)
             except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
-                record_failure(self.report, f"scene {self.pathname}: could not import {summary.entry.pathname}: {exc}")
+                record_failure(self.report, f"{self.kind} {self.pathname}: could not import {summary.entry.pathname}: {exc}")
                 return
             template = self.templates[key]
         else:

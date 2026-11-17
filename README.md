@@ -152,9 +152,9 @@ ticked):
 
 One import uses one unit, so the same model is not imported twice by accident. Items that cannot be imported stay in
 the list, greyed out with the reason (for example `no mesh in package` or `.blend import disabled`). The dialog
-remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions of its
-child objects) is not reproduced: every model of a prefab is placed at the origin of the prefab's Collection. Import a
-scene that places the prefab to get the layout.
+remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions,
+rotations and scales of its child objects, and several placements of the same model) is reproduced in the same way as
+in scenes, with the prefab's root at the origin of its Collection.
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer), including whether the
 selection dialog opens (`Selection Dialog`: `Ask` / `All Models` / `First Model Only`) and `Arrange Prefabs`.

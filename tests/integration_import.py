@@ -250,12 +250,26 @@ def check_warnings(ctx: Context) -> None:
         c.eq("split slots", report.split_slots, exp["split_slots"])
 
 
+def _find_mesh(spec: str):
+    """オブジェクト名か、"コレクション/FBX のノード名"（読み込む単位 Prefabs では、prefab の GameObject の Empty が
+    同じ名前を取るので、メッシュには連番が付く。#240）で引く。"""
+    if "/" not in spec:
+        return bpy.data.objects.get(spec)
+    coll_name, node = spec.split("/", 1)
+    coll = bpy.data.collections.get(coll_name)
+    if coll is None:
+        return None
+    return next(
+        (o for o in coll.all_objects if o.type == "MESH" and (o.get("unity_fbx_node") or o.name) == node), None
+    )
+
+
 def check_submesh_materials(ctx: Context) -> None:
     """ポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、
     どのポリゴン群にどのマテリアルが付いたかを確かめる。"""
     c = ctx.c
     for obj_name, names in ctx.exp.get("submesh_materials", {}).items():
-        obj = bpy.data.objects.get(obj_name)
+        obj = _find_mesh(obj_name)
         c.true(f"object {obj_name} exists", obj is not None)
         if obj is None:
             continue
@@ -395,7 +409,9 @@ def check_collections(ctx: Context) -> None:
             continue
         objects = list(coll.all_objects)
         if "objects" in spec:
-            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
+            # Prefabs 単位も prefab の中の GameObject を Empty で再現するので、その Empty（unity_game_object）は数えない（#240）
+            placed = [o for o in objects if not (o.type == "EMPTY" and "unity_game_object" in o)]
+            c.eq(f"{coll_name}.objects", len(placed), spec["objects"])
         if "prefab" in spec:
             c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
         if "mat_files" in spec:
@@ -403,7 +419,9 @@ def check_collections(ctx: Context) -> None:
             c.eq(f"{coll_name}.mat_files", _mat_files(mats), sorted(spec["mat_files"]))
         # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
         for obj_name, part in spec.get("parts", {}).items():
-            obj = next((o for o in objects if o.name == obj_name), None)
+            obj = next((o for o in objects if o.name == obj_name and "unity_game_object" not in o), None) or next(
+                (o for o in objects if o.get("unity_fbx_node") == obj_name), None
+            )
             if part.get("absent"):  # 読み込まないもの（使われていない部品。#152）
                 c.true(f"{coll_name}/{obj_name} absent", obj is None)
                 continue
