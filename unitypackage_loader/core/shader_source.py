@@ -60,6 +60,11 @@ _TAGS = re.compile(r"\bTags\s*\{([^}]*)\}")
 _RENDER_TYPE = re.compile(r"\"RenderType\"\s*=\s*\"\s*(\w+)\s*\"")
 _QUEUE = re.compile(r"\"Queue\"\s*=\s*\"\s*([A-Za-z]+)\s*(?:([+-])\s*(\d+))?\s*\"")
 _CULL = re.compile(r"\bCull\s+(Off|Back|Front)\b", re.I)
+# Shader Graph のターゲット（URP / Built-in / HDRP）の描画の設定。古い形式は JSON の文字列の中なので、引用符の前の "\" も許す（#257）
+_MATERIAL_OVERRIDE = re.compile(r'"m_AllowMaterialOverride"\s*:\s*true')
+_GRAPH_SETTING = re.compile(
+    r'\\?"(m_AlphaClip|m_AlphaTest|m_SurfaceType|m_RenderFace|m_TwoSided|m_DoubleSidedMode)\\?"\s*:\s*(true|false|\d+)'
+)
 
 
 class ShaderSourceError(ValueError):
@@ -94,16 +99,17 @@ class ShaderDefaults:
 
 
 def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
-    """.shader の描画の既定。.shadergraph は描画の設定がマテリアルのプロパティに出るので、プロパティの表示名だけ。
+    """.shader の描画の既定。.shadergraph はターゲットの描画の設定（``_graph_settings``）とプロパティの表示名。
 
     読めないものは空。
     """
     text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
     if ext.lower() == ".shadergraph":
         try:
-            return ShaderDefaults(display_names=graph_display_names(text.lstrip("\ufeff")))
+            names = graph_display_names(text.lstrip("\ufeff"))
         except ShaderSourceError:
-            return ShaderDefaults()
+            names = {}
+        return _graph_settings(text, names)
     if ext.lower() != ".shader":
         return ShaderDefaults()
     text = _COMMENT.sub("", text)
@@ -131,6 +137,45 @@ def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
         cull_off=bool(cull and cull.group(1).lower() == "off"),
         alpha_test=bool(_ALWAYS_ALPHA_TEST.search(body[:end.start()] if end else body)),
         hidden=_hidden_properties(text),
+    )
+
+
+def _graph_settings(text: str, display_names: dict[str, str]) -> ShaderDefaults:
+    """Shader Graph のターゲットに書かれた描画の設定（#257）。
+
+    Graph Settings の Alpha Clipping・Surface Type・Render Face は、Allow Material Override を切っているとマテリアルの
+    プロパティ（_AlphaClip / _Surface / _Cull）に出ず、グラフにだけある。以前は .shadergraph からプロパティの表示名しか
+    読まず、Dreamscape Nature Meadows の草・花（Alpha Clipping が有効な Foliage.shadergraph）が切り抜かれず板になり、
+    木の葉（Render Face が Both の Leaves.shadergraph）が片面になっていた。
+
+    どれかのターゲットで有効なら有効とする（同じグラフに URP と Built-in のターゲットを並べたものは、同じ設定にするのが普通）。
+    Render Face は URP / Built-in の列挙（Front = 2, Back = 1, Both = 0）、古い形式のマスターノードは m_TwoSided、
+    HDRP は m_DoubleSidedMode（0 が片面）。
+    """
+    alpha_test = transparent = two_sided = False
+    settings = []
+    # 新しい形式はオブジェクトを空行で並べる。Allow Material Override を入れたターゲットはマテリアルの _Surface などが
+    # 優先されるので、そのターゲットの設定は使わない（Synty の Generic_Basic は Alpha Clipping を入れたうえで上書きを許し、
+    # 大半のマテリアルは _AlphaClip を 0 にしている）
+    for chunk in re.split(r"\n\s*\n", text):
+        if _MATERIAL_OVERRIDE.search(chunk):
+            continue
+        settings.extend(_GRAPH_SETTING.findall(chunk))
+    for name, value in settings:
+        on = value == "true" or (value.isdigit() and int(value) != 0)
+        if name in ("m_AlphaClip", "m_AlphaTest"):
+            alpha_test |= value == "true"
+        elif name == "m_SurfaceType":
+            transparent |= value == "1"
+        elif name == "m_RenderFace":
+            two_sided |= value == "0"
+        elif name in ("m_TwoSided", "m_DoubleSidedMode"):
+            two_sided |= on
+    return ShaderDefaults(
+        render_type="Transparent" if transparent else None,
+        cull_off=two_sided,
+        alpha_test=alpha_test,
+        display_names=display_names,
     )
 
 

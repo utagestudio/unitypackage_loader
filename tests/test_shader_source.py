@@ -427,6 +427,61 @@ class GraphDisplayNameTests(unittest.TestCase):
         self.assertIsNone(n.base_color_tex)
 
 
+def graph_with_target(**settings):
+    """新しい形式の Shader Graph に、URP のターゲットの描画の設定を足したもの（Dreamscape の Foliage / Leaves と同じ形。#257）。"""
+    target = {"m_Type": "UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget", "m_ObjectId": "t",
+              "m_SurfaceType": 0, "m_AlphaClip": False, "m_RenderFace": 2, "m_AllowMaterialOverride": False}
+    target.update(settings)
+    return graph_v2("_Foliage_Map") + "\n\n" + json.dumps(target, indent=4)
+
+
+class GraphTargetSettingsTests(unittest.TestCase):
+    def test_alpha_clip_and_render_face(self):
+        defaults = shader_defaults(graph_with_target(m_AlphaClip=True, m_RenderFace=0), ".shadergraph")
+        self.assertEqual((defaults.alpha_mode, defaults.cull_off), ("cutout", True))
+        self.assertEqual(shader_defaults(graph_with_target(), ".shadergraph").alpha_mode, None)
+        self.assertFalse(shader_defaults(graph_with_target(m_RenderFace=2), ".shadergraph").cull_off)  # Front
+        self.assertEqual(shader_defaults(graph_with_target(m_SurfaceType=1), ".shadergraph").alpha_mode, "blend")
+        # マテリアルでの上書きを許すターゲットは、マテリアルの _Surface / _AlphaClip に任せる
+        allowed = graph_with_target(m_AlphaClip=True, m_RenderFace=0, m_AllowMaterialOverride=True)
+        self.assertEqual((shader_defaults(allowed, ".shadergraph").alpha_mode, shader_defaults(allowed, ".shadergraph").cull_off), (None, False))
+
+    def test_old_master_node(self):
+        # 古い形式は JSONnodeData の文字列の中に書かれる
+        node = {"typeInfo": {"fullName": "UnityEditor.ShaderGraph.PBRMasterNode"},
+                "JSONnodeData": json.dumps({"m_SurfaceType": 1, "m_TwoSided": True})}
+        defaults = shader_defaults(json.dumps({"m_SerializableNodes": [node]}, indent=4), ".shadergraph")
+        self.assertEqual((defaults.alpha_mode, defaults.cull_off), ("blend", True))
+
+    def test_grass_without_material_override(self):
+        # マテリアルには _AlphaClip / _Cull が無い（Allow Material Override が切ってある）
+        graph = graph_with_target(m_AlphaClip=True, m_RenderFace=0)
+        text = mat_yaml("M_Grass_01", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"),
+                               defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual((n.alpha_mode, n.alpha_from_texture, n.cull_backface), ("cutout", True, False))
+
+    def test_gradient_colors_tint_the_leaves(self):
+        # Dreamscape の Foliage / Leaves: 白黒の葉の画像に、高さで上下の色を混ぜる。平均を色にする
+        graph = graph_v2("_Foliage_Map", "_Color_Top", "_Color_Base", "_Wind_Large_Speed")
+        text = mat_yaml("M_Grass_01", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))],
+                        colors=[("_Color_Top", (0.4, 0.6, 0.2, 1)), ("_Color_Base", (0.2, 0.4, 0.0, 1)), ("_Wind_Large_Speed", (0.1, 2, 0, 0))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertEqual([round(c, 3) for c in n.base_color], [0.3, 0.5, 0.1, 1.0])
+        # 組が決まらなければ当てない（上が 2 つ）
+        graph = graph_v2("_Foliage_Map", "_Color_Top", "_Tint_Top", "_Color_Bottom")
+        text = mat_yaml("M", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))],
+                        colors=[("_Color_Top", (0.4, 0.6, 0.2, 1)), ("_Tint_Top", (0, 0, 1, 1)), ("_Color_Bottom", (0.2, 0.4, 0.0, 1))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 1.0))
+
+    def test_builtin_target_keywords(self):
+        text = mat_yaml("M_Bushes_01", GRAPH, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], keywords=["_BUILTIN_ALPHATEST_ON"])
+        self.assertEqual(normalize_material(parse_material(text)).alpha_mode, "cutout")
+        text = mat_yaml("Glass", GRAPH, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], keywords=["_BUILTIN_SURFACE_TYPE_TRANSPARENT"])
+        self.assertEqual(normalize_material(parse_material(text)).alpha_mode, "blend")
+
+
 # Toon Harbor Pack の TH_CustomToon（Amplify のトゥーン）。色は _TextureSample1、陰の段階は _TextureRamp
 TOON = """Shader "Toon/TH_CustomToon"
 {

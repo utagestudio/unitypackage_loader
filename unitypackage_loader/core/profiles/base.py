@@ -99,9 +99,10 @@ def alpha_mode_from_blend_state(mat: UnityMaterial, default: AlphaMode = "opaque
         return "blend"  # additive
     if mat.render_queue >= 3000:
         return "blend"
-    if "_ALPHABLEND_ON" in mat.keywords or "_ALPHAPREMULTIPLY_ON" in mat.keywords or "_SURFACE_TYPE_TRANSPARENT" in mat.keywords:
+    # _BUILTIN_* は Shader Graph の Built-in ターゲットのキーワード（#257）
+    if any(k in mat.keywords for k in ("_ALPHABLEND_ON", "_ALPHAPREMULTIPLY_ON", "_SURFACE_TYPE_TRANSPARENT", "_BUILTIN_SURFACE_TYPE_TRANSPARENT")):
         return "blend"
-    if 2450 <= mat.render_queue < 3000 or "_ALPHATEST_ON" in mat.keywords or mat.flag("_AlphaToMask"):
+    if 2450 <= mat.render_queue < 3000 or any(k in mat.keywords for k in ("_ALPHATEST_ON", "_BUILTIN_ALPHATEST_ON")) or mat.flag("_AlphaToMask"):
         return "cutout"
     return default
 
@@ -232,13 +233,15 @@ def normalize_material(
     if info is None:
         # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
         from .standard import (
-            GenericProfile, fill_emission_from_aliases, fill_sole_texture, fill_textures_from_aliases, scale_emission_by_alias,
+            GenericProfile, fill_emission_from_aliases, fill_gradient_color, fill_sole_texture, fill_textures_from_aliases,
+            scale_emission_by_alias,
         )
 
         display_names = defaults.display_names if defaults is not None else None
         fill_textures_from_aliases(mat, norm, display_names)
         if declared and custom:  # 前のシェーダーの残りを外したときだけ（残りがあると 1 枚に決められない）
             fill_sole_texture(mat, norm, display_names)
+            fill_gradient_color(mat, norm)  # 同じく、前のシェーダーの色が残っていると組を決められない
         # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）。generic は自分で済ませている
         if norm.lighting != "toon" and not isinstance(profile, GenericProfile):
             if norm.has_emission:

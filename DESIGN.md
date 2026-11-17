@@ -873,6 +873,18 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 - `[HideInInspector]` で宣言されたプロパティも覚え（`ShaderDefaults.hidden`）、`_EmissionColor` が隠されていて発光の画像も無ければ、発光として読まない。
   Amplify の URP テンプレートは、使わなくても白い `_EmissionColor` を隠して宣言し、マテリアルにも白が残る（Basilica の葉が真っ白に光っていた。#235）。
   手元の 71 パッケージで読み方が変わったのは Corals・Basilica・Dreamscape Nature Meadows・Water Caustics の 62 マテリアル。
+- `.shadergraph` からは、ターゲット（URP / Built-in / HDRP）の描画の設定を読む（`_graph_settings`、Issue #257）。Alpha Clipping（`m_AlphaClip`、HDRP は `m_AlphaTest`）、
+  Surface Type（`m_SurfaceType` が 1 なら半透明）、Render Face（`m_RenderFace` が 0 = Both なら両面。古い形式のマスターノードは `m_TwoSided`、HDRP は `m_DoubleSidedMode`）。
+  どれかのターゲットで有効なら有効とする。Allow Material Override を入れたターゲット（`m_AllowMaterialOverride: true`）はマテリアルの `_Surface` / `_AlphaClip` / `_Cull` が
+  優先されるので使わない（新しい形式はオブジェクトを空行で並べるので、そのまとまりごとに判定する）。使い方は `.shader` のタグと同じ（表に無いシェーダーで、マテリアルからは
+  不透明としか読めず、キューが既定のままなら）。以前は .shadergraph からプロパティの表示名しか読まず、Dreamscape Nature Meadows の草・花（Foliage.shadergraph）が
+  切り抜かれず板になり、木の葉（Leaves.shadergraph）が片面になっていた。Shader Graph の Built-in ターゲットのキーワード `_BUILTIN_ALPHATEST_ON` /
+  `_BUILTIN_SURFACE_TYPE_TRANSPARENT` も、`_ALPHATEST_ON` / `_SURFACE_TYPE_TRANSPARENT` と同じに扱う。手元の 91 パッケージで変わったのは、Synty の Decals
+  （116 個。URP のターゲットが Transparent）、Dreamscape の植物と炎、Haunted House のおばけと霧、Water Caustics のデモのマテリアル。
+- 色が白のままで、名前に「上」（top / upper）と「下」（bottom / lower / base）を含む色の組が 1 つだけあれば、その平均を色にする（`fill_gradient_color`、#257）。
+  様式化した植物のシェーダーは、白黒の葉の画像に高さで上下の色を混ぜて塗る（Dreamscape の `_Color_Top` / `_Color_Base`、`_Foliage_Color_Top` / `_Foliage_Color_Bottom`、
+  Thalassophobia の Seagrass の `_TopColor` / `_BottomColor`）。高さで混ぜることは再現できないので平均で近づける。宣言の分かる自作シェーダーだけに使う
+  （前のシェーダーの色が残っていると組を決められない）。URP の `_BaseColor` は「下」に数えない。
 
 **Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
 
