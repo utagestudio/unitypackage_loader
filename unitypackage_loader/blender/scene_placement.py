@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import bpy
 from mathutils import Matrix
 
-from ..core.fbx_units import read_unit_scale
+from ..core.fbx_units import read_axes, read_unit_scale
 from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, CLASS_TERRAIN, SOLE_NODE
 from ..core.placement import built_from_renderers
 from ..core.hierarchy import components as scene_components
@@ -25,6 +25,7 @@ from .model_import import node_name
 from .unity_meshes import make_mesh_object
 from .prepare import ModelSummary
 from .scene_objects import (
+    ModelUnits,
     SceneTemplate,
     apply_collapsed_root,
     apply_node_transforms,
@@ -68,7 +69,7 @@ class SceneImport:
         self.templates: dict[tuple, SceneTemplate] = {}  # 配置の key → 最初に読み込んだオブジェクト（以後は複製する）
         self.matchers: dict[tuple, PartMatcher | None] = {}  # 配置の key → 中のオブジェクトの fileID の計算（#172）
         self.removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
-        self.unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor（FBX 以外は None）
+        self.unit_scales: dict[str, ModelUnits | None] = {}  # モデルの GUID → FBX の単位と軸（FBX 以外は None）
         self.stats = PlacementStats()
 
     def run(self, progress_start: float, progress_span: float) -> None:
@@ -119,12 +120,16 @@ class SceneImport:
         if not visible:
             defer_hide(obj, self.session.hidden_objects)
 
-    def unit_scale(self, summary: ModelSummary) -> float | None:
+    def unit_scale(self, summary: ModelSummary) -> ModelUnits | None:
+        """モデルの FBX の単位と軸（配置の計算の fileScale と軸の変換に使う。#53 / #240）。FBX 以外は None。"""
         if summary.guid not in self.unit_scales:
-            fbx = summary.entry.ext == ".fbx"
-            unit = read_unit_scale(self.session.paths[summary.guid]) if fbx else None
-            # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
-            self.unit_scales[summary.guid] = summary.info.unity_unit_scale(unit) if fbx else None
+            path = self.session.paths[summary.guid]
+            if summary.entry.ext == ".fbx":
+                # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
+                unit = summary.info.unity_unit_scale(read_unit_scale(path))
+                self.unit_scales[summary.guid] = ModelUnits(unit, read_axes(path), summary.info.global_scale)
+            else:
+                self.unit_scales[summary.guid] = None
         return self.unit_scales[summary.guid]
 
     # --- モデルの配置 ---

@@ -19,6 +19,8 @@
   Z に 3 動いている）。Prefabs/StripB.prefab は Strips.fbx を展開して Strip.001 だけを使う（GameObject も Strip.001）。シーンでは
   先に Other.fbx を置くので、Strips.fbx を読むときには Strip.001 という名前が使われている（Blender が付け替える。#237）。
   StripB は X に 8 動かして置く。
+- Models/Tall.fbx は Z を上にして書き出した縦長の箱（3ds Max の FBX と同じ軸。UpAxis 2）。Prefabs/Tall.prefab は展開して
+  そのノード Tall だけを置く。Unity は Y と Z を入れ替えて縦に立てる（#240）。シーンでは Z に -10 動かして置く。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
 """
@@ -91,6 +93,19 @@ def export_strips_fbx(path: Path, names: list[tuple[str, tuple[float, float, flo
         obj = bpy.context.active_object
         obj.name = obj.data.name = name
     bpy.ops.export_scene.fbx(filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False)
+
+
+def export_tall_fbx(path: Path) -> None:
+    """Z を上にした FBX（UpAxis 2）。0.5 × 0.5 × 2 の縦長の箱（#240）。"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    obj = bpy.context.active_object
+    obj.name = obj.data.name = "Tall"
+    obj.scale = (0.5, 0.5, 2.0)
+    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.export_scene.fbx(
+        filepath=str(path), use_selection=False, add_leaf_bones=False, bake_anim=False, axis_up="Z", axis_forward="-Y",
+    )
 
 
 def main() -> None:
@@ -186,10 +201,20 @@ def main() -> None:
         game_object(10, "Strip.001"), transform(11, 10), _renderer(12, 13, 10, strip_ref, [mesh_mat]),
     ])).encode(), prefab_meta(strip_prefab_path))
 
+    export_tall_fbx(tmp / "tall.fbx")
+    tall_path = "Assets/Synthetic/Models/Tall.fbx"
+    tall = add(tall_path, (tmp / "tall.fbx").read_bytes(), model_meta(guid_of(tall_path), {}))
+    tall_prefab_path = "Assets/Synthetic/Prefabs/Tall.prefab"
+    tall_ref = f"{{fileID: {mesh_file_id('Tall')}, guid: {tall}, type: 3}}"
+    tall_prefab = add(tall_prefab_path, (HEADER + "".join([
+        game_object(10, "Tall"), transform(11, 10), _renderer(12, 13, 10, tall_ref, [mesh_mat]),
+    ])).encode(), prefab_meta(tall_prefab_path))
+
     scene_path = "Assets/Synthetic/Scenes/Meshes.unity"
     scene = HEADER + "".join([
         instance(700, other, 0, [mod(ROOT_TRANSFORM, other, "m_LocalPosition.x", -8)]),
         instance(800, strip_prefab, 0, [mod(11, strip_prefab, "m_LocalPosition.x", 8)]),
+        instance(900, tall_prefab, 0, [mod(11, tall_prefab, "m_LocalPosition.z", -10)]),
         instance(100, wedge_prefab, 0, [mod(11, wedge_prefab, "m_LocalPosition.x", 5)]),
         instance(200, embedded, 0, [mod(11, embedded, "m_LocalPosition.z", 5)]),
         game_object(600, "ShadowPlane"), transform(601, 600, pos=(-5, 0, -5)),

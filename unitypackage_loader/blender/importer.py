@@ -17,6 +17,7 @@ from pathlib import Path
 import bpy
 from mathutils import Matrix
 
+from ..core.fbx_units import read_axes
 from ..core.decals import Decal, decal_from_body
 from ..core.exposure import exposure_settings, global_volumes, scene_exposure
 from ..core.hierarchy import CLASS_CAMERA, CLASS_MONO_BEHAVIOUR, PartState, effective_active, world_matrices
@@ -62,7 +63,8 @@ from .prepare import (
     prepare_package,
 )
 from .scene_objects import (
-    arrange_collections, defer_hide, find_layer_collection, hide_objects, make_shadows_only, move_collection_contents, remove_parts,
+    arrange_collections, axis_correction, defer_hide, find_layer_collection, hide_objects, make_shadows_only,
+    move_collection_contents, remove_parts,
 )
 from .scene_placement import SceneImport
 from .session_materials import SessionMaterials
@@ -683,6 +685,13 @@ class _ImportSession:
             for obj in target.all_objects:
                 if FBX_NODE_PROP not in obj:
                     obj[FBX_NODE_PROP] = obj.name
+        if model.ext == ".fbx" and not delegated:
+            # Y が上でない FBX（3ds Max の Z が上）は、Unity と同じ向きにそろえる（#240）
+            correction = axis_correction(read_axes(self.paths[model.guid]))
+            if correction is not None:
+                for obj in target.all_objects:
+                    if obj.parent is None:
+                        obj.matrix_basis = correction @ obj.matrix_basis
         return delegated
 
     def fbx_node_names_of(self, model: AssetEntry):

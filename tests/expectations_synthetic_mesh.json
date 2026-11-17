@@ -104,6 +104,20 @@
         0.0
       ],
       "node_only": true
+    },
+    {
+      "top": "Tall",
+      "object": "Tall",
+      "hidden": false,
+      "bbox": [
+        -0.003,
+        9.998,
+        -0.01,
+        0.003,
+        10.002,
+        0.01
+      ],
+      "node_only": true
     }
   ],
   "shared_meshes": [
