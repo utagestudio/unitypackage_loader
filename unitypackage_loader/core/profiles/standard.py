@@ -226,6 +226,38 @@ def fill_sole_texture(mat: UnityMaterial, n: NormalizedMaterial, display_names: 
         n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
 
 
+_GRADIENT_TOP_WORDS = ("top", "upper")
+_GRADIENT_BOTTOM_WORDS = ("bottom", "lower", "base")
+_COLOR_WORDS = ("color", "colour", "tint")
+
+
+def fill_gradient_color(mat: UnityMaterial, n: NormalizedMaterial) -> None:
+    """色が白のままで、上下 2 色のグラデーション（``_Color_Top`` と ``_Color_Base`` など）があれば、その平均を色にする（#257）。
+
+    様式化した植物のシェーダーは、白黒の葉の画像に高さで上下の色を混ぜて塗る（Dreamscape Nature Meadows の Foliage /
+    Leaves の Shader Graph は ``_Color_Top`` / ``_Color_Base``、``_Foliage_Color_Top`` / ``_Foliage_Color_Bottom``）。
+    以前は色の項目を一般名でしか探さず、葉が真っ白になっていた。高さで混ぜることは再現できないので平均で近づける。
+    上と下の組が 1 つに決まるときだけ当てる。
+    """
+    if any(abs(c - 1.0) > 1e-6 for c in n.base_color[:3]):
+        return
+    tops: list[str] = []
+    bottoms: list[str] = []
+    for name in mat.colors:
+        key = _alias_key(name)
+        if not any(word in key for word in _COLOR_WORDS) or name in _EMISSION_STANDARD_NAMES:
+            continue
+        if any(word in key for word in _GRADIENT_TOP_WORDS):
+            tops.append(name)
+        elif any(word in key for word in _GRADIENT_BOTTOM_WORDS) and key != "basecolor":  # _BaseColor は URP の色
+            bottoms.append(name)
+    if len(tops) != 1 or len(bottoms) != 1:
+        return
+    top, bottom = mat.colors[tops[0]], mat.colors[bottoms[0]]
+    n.base_color = tuple((a + b) / 2 for a, b in zip(top[:3], bottom[:3])) + (n.base_color[3],)
+    n.extras["gradient_color"] = [tops[0], bottoms[0]]
+
+
 def scale_emission_by_alias(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     """一般名（``_EmissionColor``）で読んだ発光に、独自の名前の強さを掛ける（自作シェーダー向け。#241）。
 
