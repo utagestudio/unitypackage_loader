@@ -74,6 +74,9 @@ class SessionMaterials:
         )
         self.built_by_guid: dict[str, bpy.types.Material] = {}  # .mat の GUID → この回で組んだマテリアル（#77）
         self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
+        # スロットが無く、prefab・シーンの割り当ても無かったメッシュ（モデル名, オブジェクト）。使われていない部品として
+        # 後で消すものもあるので、警告は読み込みの最後に、残ったものにだけ出す（``warn_slotless``。#213）
+        self.slotless: list[tuple[str, bpy.types.Object]] = []
 
     # --- 画像 ---
 
@@ -242,12 +245,9 @@ class SessionMaterials:
         )
         assignments = slot_assignments(object_slots, prefab_table, self.unity_mats, submesh_order)
         # マテリアルを 1 つも持たないモデルは、prefab の割り当てしか手掛かりが無い（#102）
-        for obj_name, slots in object_slots.items():
-            if not slots and (obj_name, 0) not in assignments:
-                self.report.warn(
-                    f"{model.name}: mesh {obj_name!r} has no material slots and no prefab assignment; "
-                    "it is left without a material"
-                )
+        for obj in mesh_objects:
+            if not object_slots[obj.name] and (obj.name, 0) not in assignments:
+                self.slotless.append((model.name, obj))
         # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
         replaced = fully_replaced_materials(object_slots, assignments, resolution)
         # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
@@ -278,6 +278,16 @@ class SessionMaterials:
             if split:
                 self.report.split_slots += split
                 self.drop_replaced_materials(remaining)
+
+    def warn_slotless(self) -> None:
+        """スロットも割り当ても無く、読み込みの最後までマテリアルの無いまま残ったメッシュを警告する。"""
+        for model_name, obj in self.slotless:
+            if is_removed(obj) or any(slot.material for slot in obj.material_slots):
+                continue
+            self.report.warn(
+                f"{model_name}: mesh {obj.name!r} has no material slots and no prefab assignment; it is left without a material"
+            )
+        self.slotless = []
 
     def keep_material(self, bmat, guid: str | None, mrep: MaterialReport, delegated: bool) -> None:
         """インポーター（VRM add-on・同梱 .blend）が作ったマテリアルをそのまま使い、Unity の情報だけを残す。"""

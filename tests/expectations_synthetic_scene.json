@@ -429,6 +429,19 @@
       "mat_files": [
         "DecalMat.mat"
       ]
+    },
+    {
+      "top": "Ring Renamed",
+      "object": "Ring",
+      "hidden": false,
+      "mat_files": [
+        "ProbeRed.mat"
+      ]
+    },
+    {
+      "top": "Ring Renamed",
+      "object": "Rod",
+      "absent": true
     }
   ],
   "shared_meshes": [
@@ -590,7 +603,7 @@
   ],
   "warnings_contain": [
     "Booth.fbx: 1 material override(s) on objects inside the model could not be matched",
-    "scene Assets/Synthetic/Scenes/Probe.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 5 object(s) from model files are not used by the Unity prefabs or scene and were not imported",
     "scene Assets/Synthetic/Scenes/Probe.unity: 1 visibility override(s) or removal(s) on objects inside a model could not be matched",
     "scene Assets/Synthetic/Scenes/Probe.unity: 1 decal projector(s) were skipped"
   ],

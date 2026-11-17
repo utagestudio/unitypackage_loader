@@ -166,8 +166,12 @@ class SceneImport:
         """配置のモデルを読み込み、以後の配置で複製するテンプレートにする。"""
         session = self.session
         parts = placement.parts
+        # メッシュ参照の fileID も渡す。GameObject の名前を変えてあると名前では引けないので、表を引くとき（``find_renderer``）に
+        # オブジェクト名のハッシュと照合する（#213）
         table = {
-            name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
+            name: RendererMaterials(
+                name, list(r.materials), r.renderer_class, placement.model_guid, r.mesh_file_id, r.lod_level
+            )
             for name, r in placement.renderers.items()
         }
         objects = session.import_model(summary, table, self.target, with_parts=bool(parts))
