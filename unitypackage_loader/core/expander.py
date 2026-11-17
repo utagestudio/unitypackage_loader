@@ -162,6 +162,11 @@ class Expander:
         ):
             h.transforms[file_uid(transform_id)] = root.key
             h.game_objects[file_uid(game_object_id)] = root.key
+        # 古い形式のルート（100000 / 400000、または表の //RootNode）も向ける。prefab の中に置いたモデルのルートを、外側から
+        # 「中の PrefabInstance の fileID XOR 元の fileID」で指す上書きが、古い形式の番号で書かれている（Destroyed Building Kit。#244）
+        for legacy_id, root_id in self.legacy_roots(guid).items():
+            table = h.transforms if root_id == MODEL_ROOT_TRANSFORM else h.game_objects
+            table.setdefault(file_uid(legacy_id), root.key)
         return h
 
     def _build(self, raw: RawAsset, stack: tuple[str, ...], own_guid: str | None = None) -> Hierarchy:
