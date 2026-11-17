@@ -331,14 +331,78 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     gone = [obj for obj in objects if obj.name in names]
     used = {obj.data for obj in kept if obj.data is not None}
     orphans = {obj.data for obj in gone if obj.data is not None} - used
-    for obj in gone:
-        bpy.data.objects.remove(obj)
-    for data in orphans:
-        if isinstance(data, bpy.types.Mesh):
-            bpy.data.meshes.remove(data)
-        elif isinstance(data, bpy.types.Armature):
-            bpy.data.armatures.remove(data)
+    # 1 つずつ remove すると、そのたびに全データを調べて参照を外すので、シーンでは何万回も呼んで重い。まとめて消す（#219）
+    bpy.data.batch_remove(gone + [d for d in orphans if isinstance(d, (bpy.types.Mesh, bpy.types.Armature))])
     return kept
+
+
+_BATCH_HIDE_MIN = 200  # これより多く隠すときだけ、まとめて隠す
+
+
+def _view3d(context):
+    """まとめて隠すオペレーターに渡す 3D ビュー（ウィンドウ・エリア・リージョン）。無ければ None（ヘッドレスなど）。"""
+    for window in getattr(context.window_manager, "windows", []):
+        screen = window.screen
+        for area in screen.areas if screen is not None else []:
+            if area.type == "VIEW_3D":
+                region = next((r for r in area.regions if r.type == "WINDOW"), None)
+                if region is not None:
+                    return window, area, region
+    return None
+
+
+def _hidden(obj: bpy.types.Object) -> bool:
+    try:
+        return obj.hide_get()
+    except RuntimeError:  # ビューレイヤーに無い（隠せない）
+        return True
+
+
+def hide_objects(context, objects: list[bpy.types.Object]) -> None:
+    """オブジェクトをビューレイヤーで隠す（``hide_set(True)`` と同じ）。
+
+    ``hide_set`` は 1 回ごとにビューレイヤーを同期し直すので、オブジェクトの多いシーンで何万回も呼ぶと 2 乗のオーダーで遅い
+    （Shibuya では 4 万個を隠すのに約 220 秒）。3D ビューがあれば、選択してから ``object.hide_view_set`` で 1 回で隠す
+    （GUI で 6 万個のうち 2 万個を 3 秒）。選択は元に戻す。3D ビューが無いとき（ヘッドレス）と、まとめて隠せなかったものは
+    1 つずつ隠す（#219）。
+    """
+    remaining = objects
+    view = _view3d(context) if len(objects) >= _BATCH_HIDE_MIN and context.mode == "OBJECT" else None
+    if view is not None:
+        view_layer = context.view_layer
+        selected = list(view_layer.objects.selected)
+        active = view_layer.objects.active
+        try:
+            for obj in selected:
+                obj.select_set(False)
+            for obj in objects:
+                try:
+                    obj.select_set(True)
+                except RuntimeError:  # ビューレイヤーに無い（除外したコレクションの中など）
+                    pass
+            window, area, region = view
+            with context.temp_override(window=window, area=area, region=region):
+                bpy.ops.object.hide_view_set(unselected=False)
+        except RuntimeError:
+            pass
+        finally:
+            for obj in view_layer.objects.selected:
+                obj.select_set(False)
+            for obj in selected:
+                try:
+                    obj.select_set(True)
+                except (RuntimeError, ReferenceError):
+                    pass
+            try:
+                view_layer.objects.active = active
+            except (RuntimeError, ReferenceError):
+                pass
+        remaining = [obj for obj in objects if not _hidden(obj)]
+    for obj in remaining:
+        try:
+            obj.hide_set(True)
+        except RuntimeError:  # ビューレイヤーに無い
+            pass
 
 
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
@@ -352,9 +416,13 @@ def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
 
 def move_collection_contents(source: bpy.types.Collection, target: bpy.types.Collection) -> None:
     """``source`` のオブジェクトと子コレクションを ``target`` へ移す（先にリンクしてから外す）。"""
+    # 名前での「含まれるか」は、オブジェクトの多いコレクションでは毎回すべてをなめるので重い（シーンでは何千回も呼ぶ。#219）。
+    # リンク済みなら link が RuntimeError を送るので、それで判断する
     for obj in list(source.objects):
-        if obj.name not in target.objects:
+        try:
             target.objects.link(obj)
+        except RuntimeError:
+            pass
         source.objects.unlink(obj)
     for child in list(source.children):
         if child.name not in target.children:
