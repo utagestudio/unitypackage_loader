@@ -29,6 +29,8 @@ from ..core.units import PrefabSummary, SceneSummary, choice_count, summarize_pr
 from .log import log_exception, warn_skipped
 from .model_import import operator_available
 
+OBJ_DEFAULT_NAME = "default"  # グループの無い OBJ の中のメッシュに Unity が付ける名前（#214）
+
 # 読み込めるモデル形式
 SUPPORTED_MODEL_EXTS = frozenset({".fbx", ".obj", ".gltf", ".glb", ".vrm", ".dae", ".blend"})
 
@@ -260,6 +262,9 @@ def prepare_package(
     models: list[ModelSummary] = []
     for entry in pkg.models():
         info = _model_info(entry, warnings.append)
+        if entry.ext == ".obj" and entry.obj_groups == []:
+            # グループの無い OBJ は、Unity では中のメッシュが "default"、Blender ではファイル名のオブジェクトになる（#214）
+            info.recycle_names = {k: (Path(entry.pathname).stem if v == OBJ_DEFAULT_NAME else v) for k, v in info.recycle_names.items()}
         names = list(info.external_materials)
         resolution = resolve_materials(names, info, unity_mats, entry.pathname)
         resolved = sum(1 for r in resolution.values() if r.guid)

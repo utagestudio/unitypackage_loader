@@ -76,6 +76,8 @@ class AssetEntry:
     fbx_top_node: str = ""
     # FBX のマテリアルの名前（出てくる順）。scan で中身を読めた .fbx だけ（それ以外は None。#164）
     fbx_materials: list[str] | None = None
+    # OBJ のグループ（``g``）の名前（出てくる順・重複なし）。scan で中身を読めた .obj だけ（それ以外は None。#214）
+    obj_groups: list[str] | None = None
     _cache: bytes | None = field(default=None, repr=False)
 
     @property
@@ -294,11 +296,25 @@ def _open_for_write(target: Path):
     return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
+def obj_group_names(data: bytes) -> list[str]:
+    """OBJ のグループ（``g`` の行）の名前。Unity はグループごとにメッシュを作り、グループが無ければ ``default`` 1 つにする（#214）。"""
+    names: dict[str, None] = {}
+    for line in data.splitlines():
+        if line.startswith(b"g ") or line.startswith(b"g\t"):
+            name = line[2:].strip().decode("utf-8", "replace")
+            if name:
+                names.setdefault(name, None)
+    return list(names)
+
+
 def _note_fbx(entry: AssetEntry, data: bytes) -> None:
     """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。
 
-    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。
+    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。OBJ はグループの名前を覚える（#214）。
     """
+    if entry.ext == ".obj":
+        entry.obj_groups = obj_group_names(data)
+        return
     if entry.ext != ".fbx":
         return
     try:
@@ -389,7 +405,7 @@ class UnityPackage:
                             entry._cache = tar.extractfile(member).read()
                             if not known:
                                 held = entry
-                        elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext == ".fbx":
+                        elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext in (".fbx", ".obj"):
                             _note_fbx(entry, tar.extractfile(member).read())
                     if progress is not None:
                         progress(0.0, entry.pathname or guid)

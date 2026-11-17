@@ -436,6 +436,29 @@ class FbxSoleNodeTests(unittest.TestCase):
         self.assertEqual(pkg.entries[GUID_FBX].fbx_sole_node, "")
 
 
+class ObjGroupTests(unittest.TestCase):
+    """scan で OBJ のグループ（g）の名前を覚える。Unity はグループごとにメッシュを作り、無ければ default 1 つ（#214）。"""
+
+    def test_group_names(self):
+        data = b"mtllib a.mtl\no Ignored\ng Wall_01\nusemtl m\nf 1 2 3\ng Object001\ng Wall_01\ng\n"
+        self.assertEqual(package_module.obj_group_names(data), ["Wall_01", "Object001"])
+        self.assertEqual(package_module.obj_group_names(b"o amulet1_amulets\nusemtl a\n"), [])
+
+    def test_scan_records_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "obj.unitypackage"
+            with tarfile.open(path, "w:gz") as tar:
+                _add(tar, f"{GUID_FBX}/asset", b"o Plane\nv 0 0 0\n")
+                _add(tar, f"{GUID_FBX}/pathname", b"Assets/Meshes/floor.obj")
+                _add(tar, f"{GUID_MAT}/pathname", b"Assets/Meshes/wall.OBJ")
+                _add(tar, f"{GUID_MAT}/asset", b"g Wall_01\ng Tile\n")
+            pkg = UnityPackage(path)
+            pkg.scan()
+            self.assertEqual(pkg.entries[GUID_FBX].obj_groups, [])
+            self.assertEqual(pkg.entries[GUID_MAT].obj_groups, ["Wall_01", "Tile"])
+            self.assertIsNone(pkg.entries[GUID_FBX]._cache)
+
+
 class ExtractBudgetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
