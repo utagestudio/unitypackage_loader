@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -32,6 +34,7 @@ from ..core.report import ImportReport
 from ..core.scene_import import PlacementStats, parts_to_remove, prefab_warnings
 from ..core.transform import unity_to_blender
 from ..core.unity_yaml import parse_documents
+from ..core.unity_binary import load_documents
 from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
 from .log import record_failure, warn_skipped
@@ -276,8 +279,13 @@ class _ImportSession:
     def run(self) -> None:
         self.step(0.0, "Scanning package")
         self.analyze()
-        groups = [] if self.opts.unit == UNIT_SCENES else _plan_groups(self.prepared, self.opts)
-        scenes = _select_scenes(self.prepared, self.opts) if self.opts.unit == UNIT_SCENES else []
+        if self.opts.unit == UNIT_SCENES:
+            groups, scenes = [], _select_scenes(self.prepared, self.opts)
+        elif self.opts.unit == UNIT_PREFABS:
+            # prefab もシーンと同じく展開して置く（中のモデルの位置・回転・拡大率と、同じモデルの複数の配置。#240）
+            groups, scenes = [], self.prefab_scenes(_select_prefabs(self.prepared, self.opts))
+        else:
+            groups, scenes = _plan_groups(self.prepared, self.opts), []
         models = self.models_to_import(groups, scenes)
         needed_tex, written = self.extract(groups, scenes, models)
         self.step(0.5, "Loading textures")
@@ -294,10 +302,11 @@ class _ImportSession:
                 self.import_group(group, done, total)
                 done += len(group.models)
             for scene_summary in scenes:
+                kind = "prefab" if self.opts.unit == UNIT_PREFABS else "scene"
                 try:
-                    self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1))
+                    self.import_scene(scene_summary, 0.55 + 0.4 * done / max(total, 1), 0.4 / max(total, 1), kind)
                 except Exception as exc:  # noqa: BLE001 - そのシーンの残りだけを外して続ける（#70）
-                    record_failure(self.report, f"could not import scene {scene_summary.pathname}: {exc}")
+                    record_failure(self.report, f"could not import {kind} {scene_summary.pathname}: {exc}")
                 done += 1
         self.fill_missed_textures()
         self.materials.warn_slotless()
@@ -815,7 +824,7 @@ class _ImportSession:
             return 1.0
         pathname = scene_summary.pathname
         try:
-            documents = parse_documents(self.pkg.read_text(scene_summary.guid))
+            documents = load_documents(self.pkg.read_asset(scene_summary.guid))  # バイナリの prefab もある（#240）
             volumes = global_volumes(documents)
             profiles = self.pkg.read_assets(v.profile_guid for v in volumes)
             camera = next((d.body for d in documents if d.class_id == CLASS_CAMERA), None)
@@ -843,6 +852,34 @@ class _ImportSession:
         )
         return result.light_scale
 
-    def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float) -> None:
+    def import_scene(self, scene_summary: SceneSummary, progress_start: float, progress_span: float, kind: str = "scene") -> None:
         """シーンのモデルを配置どおりに読み込む。同じモデル・同じ割り当ての配置は、メッシュを共有した複製にする。"""
-        SceneImport(self, scene_summary).run(progress_start, progress_span)
+        SceneImport(self, scene_summary, kind).run(progress_start, progress_span)
+
+    def prefab_scenes(self, prefabs: list[PrefabSummary]) -> list[SceneSummary]:
+        """読み込む単位 Prefabs で、prefab をシーンと同じく置くための要約（#240）。
+
+        展開した階層（prepare で展開器にキャッシュしたもの）を写し、prefab のルートの位置を原点にする（回転と拡大率は残す）。
+        以前の Prefabs 単位は prefab の中の配置を再現せず、中のモデルをすべて原点に置いていた（Cardboard Boxes Pack の箱の
+        シールが原点に重なり、同じモデルの 2 つ目の配置も出なかった）。
+        """
+        expander = self.prepared._expander
+        result = []
+        for prefab in prefabs:
+            hierarchy = expander.expand_asset(prefab.guid) if expander is not None else None
+            if hierarchy is None:
+                self.report.warn(f"prefab {prefab.pathname}: could not be expanded")
+                continue
+            hierarchy = copy.deepcopy(hierarchy)
+            for node in hierarchy.nodes.values():
+                if node.parent is None:
+                    node.position = [0.0, 0.0, 0.0]
+            try:
+                contents = self.prepared.catalog.summarize(hierarchy)
+            except Exception as exc:  # noqa: BLE001 - その prefab だけを外して続ける（#70）
+                record_failure(self.report, f"could not import prefab {prefab.pathname}: {exc}")
+                continue
+            self.prepared.scene_hierarchies[prefab.guid] = hierarchy
+            self._scene_frames.pop(prefab.guid, None)
+            result.append(SceneSummary(prefab.guid, prefab.pathname, contents))
+        return result

@@ -184,9 +184,12 @@ class PlacementStats:
         return messages
 
 
-def scene_warnings(pathname: str, contents: SceneContents | None, stats: PlacementStats) -> list[str]:
-    """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。"""
-    prefix = f"scene {pathname}: "
+def scene_warnings(pathname: str, contents: SceneContents | None, stats: PlacementStats, kind: str = "scene") -> list[str]:
+    """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。
+
+    ``kind`` は警告の頭に付ける種類（読む単位 Prefabs で prefab をシーンと同じく置くときは "prefab"。#240）。
+    """
+    prefix = f"{kind} {pathname}: "
     messages: list[str] = []
     if stats.baked_lights:
         messages.append(

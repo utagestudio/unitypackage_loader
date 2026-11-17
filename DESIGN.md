@@ -48,7 +48,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 **prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。表は `hierarchy.Expander` で展開した prefab の配置（`placements`）から作るので、名前の決め方（Unity の複製番号「 (N)」を外す、.meta の表で引いたメッシュ名を優先する）も Scenes 単位と同じ。名前で引けないとき（prefab で GameObject の名前を変えたもの）は、オブジェクト名から求めたメッシュの fileID を Renderer のメッシュ参照と照合する。それでも引けなければ、表の名前の連番も外して比べ、該当する行が 1 つだけならそれを使う（`prefab.find_renderer`。Issue #155）。FBX のノード名がもともと `Base-Ring.001` のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が `Base-Ring.002` に付け替え、オブジェクト名の連番を外しただけでは表の `Base-Ring.001` と一致しないため（以前は 2 回目以降の色違いの prefab で .mat が当たらず、FBX のマテリアルのままだった）。連番を外すと同じになる行が複数あれば（`Body` と `Body.001` が両方ある FBX）、どれか決められないので引かない。Scenes 単位の LOD の段と無効な Renderer の判定（`scene_import.parts_to_hide`）も同じ形で照合し、使われていない部品の判定は、表の名前の連番を外した形が 1 つでも一致すれば使っている側に倒す。**FBX のノードとしての名前**（Issue #237）: Unity のデータとの照合は、オブジェクト名ではなく読み込んだときの FBX のノード名（カスタムプロパティ `unity_fbx_node`、`model_import.node_name`）で行う。FBX のノード名と同じ名前の既存オブジェクトがあれば、読み込む間だけ一時的な名前にして、新しいオブジェクトにノード名そのままの名前を付けさせ、それを記録してから既存の名前を戻す（`ID.rename(mode='ALWAYS')` で新しいほうに連番が付く。`reserve_names` / `restore_names`）。複製した配置のオブジェクトも同じ名前を持つ。NewGen Sci-Fi Slums の FBX は Blender から書き出したもので、ノード名がもともと `Plane.010` や `RoadDecals.002` のような連番の形をしていて、先に読んだ別の FBX と重なると付け替えられ、連番を外しても元の名前に戻せなかった（1 ノードの FBX のノードの変換が残り、prefab のマテリアルと使われていない部品の照合が外れていた。Unity と突き合わせた一致は 1,829 個中 657 → 1,829）。使われていない部品の判定（`unused_in_placement`）は、名前がそのまま一致するオブジェクトの無い行だけを連番を外した形で比べる（`RoadDecals` / `.001` / `.002` / `.003` が全部同じ名前にならないように）。表の無い、最上位のノードが複数ある FBX を展開した GameObject が配置のルートで、その名前が最上位のノードの 1 つなら、そのノードを単位行列にする（`AssetEntry.fbx_top_nodes`、`ModelCatalog.top_level_nodes`）。FBX を置いただけの PrefabInstance で、中へのマテリアルの上書きが 1 つも無いものは表に入れない。Models 単位の統合は、名前に加えてメッシュ参照の fileID でも先勝ちにする（Prefab Variant で名前を変えた行と、後の prefab の元の名前の行が並んだとき、パス順で先の prefab の割り当てを使うため）（Issue #71）。
 
-**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。prefab で表示されていない部品（非アクティブな GameObject の下にあるか、Renderer が無効なもの。表の行の `RendererMaterials.visible`）は、読み込んだうえで隠す（Scenes 単位の `PlacedRenderer.visible` と同じ扱い。件数は警告に出さない）。同じモデルの配置が prefab の中に複数あれば、どれかで表示されていれば表示する。prefab の中の配置がすべて非アクティブなモデル（非アクティブな GameObject の下に FBX を丸ごと置いたもの。`prefab.inactive_models`）は、すべての部品を隠す。以前は Prefabs 単位にこの処理が無く、Synty のキャラクターの展開済み prefab（27 体分の GameObject を持ち、自分以外を非アクティブにしている）で全員が重なって表示されていた（Issue #177）。
+**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。1.17.0 からは prefab をシーンと同じく展開して置く（§3.3 の後の「読み込む単位 Prefabs でも…」、Issue #240）。以下の表示・部品の扱いは、シーンの配置の処理（`SceneImport`）でそのまま行われる。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。prefab で表示されていない部品（非アクティブな GameObject の下にあるか、Renderer が無効なもの。表の行の `RendererMaterials.visible`）は、読み込んだうえで隠す（Scenes 単位の `PlacedRenderer.visible` と同じ扱い。件数は警告に出さない）。同じモデルの配置が prefab の中に複数あれば、どれかで表示されていれば表示する。prefab の中の配置がすべて非アクティブなモデル（非アクティブな GameObject の下に FBX を丸ごと置いたもの。`prefab.inactive_models`）は、すべての部品を隠す。以前は Prefabs 単位にこの処理が無く、Synty のキャラクターの展開済み prefab（27 体分の GameObject を持ち、自分以外を非アクティブにしている）で全員が重なって表示されていた（Issue #177）。
 
 **読み込む単位 Scenes**（§3.3、Issue #48）: .unity を展開し（`core/expander.py`）、モデルの配置を求めて（`core/placement.py`）読み込む。1 つのアセットの読み取りと展開した階層のデータは `core/hierarchy.py`。
 
@@ -72,7 +72,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     `node_transforms` を付ける。Expander（中への上書きの照合）とモデルの PrefabInstance の配置（#111）には使わない。以前は、ノードが原点から離れた FBX の
     メッシュを直接指す prefab で、ノードの移動・回転が残っていた。UnityJapanOffice の NoonA の `Cussion_01`（0.76 m）、Synty Starter の Overview の岩（9〜17 m）、
     Japanese Street の `AE_Tablet_08`（向きが 90 度違い、隣の札と面がそろわなかった）。メッシュのワールド座標を前後で比べ、動いたのはこれらだけだった
-    （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs は prefab の中の位置で並べないので対象外。
+    （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs も、下記のとおり Scenes と同じ置き方をする（#240）。
   - 最上位のノードが 1 つだけで子を持つ FBX（Issue #185）: Unity は子があってもそのノードをルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
     走査のときに FBX の Connections（`C: "OO", 子, 親`。親が 0 なら最上位）から最上位のノードを求め（`model_ids.parse_fbx_top_nodes`）、1 つだけならその名前を
     `AssetEntry.fbx_top_node` に残して `placements` の `top_nodes` で渡す。Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer の
@@ -106,7 +106,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     パーティクルの親の GameObject に Cube とマテリアルの無い MeshRenderer を付けていて、白い箱が出ていた）。
   - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
     以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
-  - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
+  - 読み込む単位 Prefabs でも、prefab をシーンと同じく置くので同じように置く（#240。以前は Scenes 単位だけだった）。
     prefab で見つかった組み込みメッシュの参照（Synty の FX の Cube など）は MeshRenderer ではなかった。
 - URP / HDRP の DecalProjector（Issue #165）: シーンに MonoBehaviour として保存されている。スクリプトの GUID ではなく、フィールドの形
   （`m_Material` / `m_Size` / `m_UVScale` / `m_UVBias`。URP と HDRP 10 以降で同じ名前）で見分け、ライト・カメラと同じく中身ごと Node の
@@ -162,7 +162,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
   - `ModelCatalog.mesh_assets`（Mesh を持つ .asset と、Mesh のドキュメントを持つ prefab・シーン）のメッシュを使う MeshRenderer を、
     組み込みメッシュと同じ `PrimitivePlacement`（`kind` が空で `mesh_guid` / `mesh_file_id` を持つ）にし、同じ置き方で置く。
     サブメッシュ i のスロットに `m_Materials[i]` を付ける。同じ Mesh は 1 回の読み込みの中で 1 つのメッシュを共有する（`blender/unity_meshes.py`）。
-  - Prefabs 単位でも、Mesh を使う Renderer を prefab のルートを原点にしたワールド行列で置く（`PrefabAnalysis.meshes`）。Mesh だけの prefab・シーンも
+  - Prefabs 単位でも、prefab をシーンと同じく置くので、Mesh を使う Renderer も同じ置き方になる（#240）。Mesh だけの prefab・シーンも
     読み込める候補にする。マテリアルを `.asset`（mainObjectFileID 2100000）に入れたものも .mat と同じに読む。
 - 読み込まないもの: UI、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
@@ -538,7 +538,12 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   Scenes が既定になりうるとき（前回が Scenes か、ほかに読み込めるものが無い）はダイアログを開くときに、それ以外は Scenes タブに切り替えたときに展開して
   行を加える（`PreparedPackage.ensure_scenes`。Japanese Street で `prepare_package` が 13.6 秒から 10.2 秒になった。Issue #75）。
 - **並べ方**（Prefabs で 2 つ以上選んだとき有効）: `Side by Side` は prefab ごとのコレクションのワールド座標の外形を求め、1 つ目を動かさずに +X へ並べる。5 つ以上は ceil(√n) 列の格子に折り返し、次の行を +Y に置く。行の中では手前側（Y の最小）を揃える。間隔は最大の幅・奥行きの 25%（最小 0.1 m）（`core/arrange.py`）。動かすのは親を持たないオブジェクト。`Stack at Origin` は動かさない。行を出し入れするとダイアログの高さと Import ボタンの位置が変わるので、Prefabs では常に表示し、選択が 1 つ以下なら淡色にする。
-- 読み込む単位 Prefabs では prefab 内の配置（子オブジェクトの位置など）は再現せず、prefab のモデルはすべてそのコレクションの原点に置く。配置を再現するのは Scenes だけ。
+- 読み込む単位 Prefabs でも、prefab の中の配置（子オブジェクトの位置・回転・拡大率、同じモデルの複数の配置）を Scenes と同じく再現する（#240）。
+  選んだ prefab ごとに、展開した階層（prepare で `Expander` にキャッシュしたもの）を写し、ルートの位置だけを原点にして（回転と拡大率は残す）
+  シーンの要約を作り（`_ImportSession.prefab_scenes`）、`SceneImport` を `kind="prefab"` で回す。コレクションのプロパティは `unity_prefab` /
+  `unity_prefab_guid`、警告の頭は `prefab <パス>:`。以前は prefab の表を当ててモデルを原点に読むだけで、Cardboard Boxes Pack の `box001.prefab` では
+  中に置いたシールの FBX が原点に重なり、同じシールの 2 つ目も出ず、箱に .meta の globalScale（2.54）も掛からなかった。Unity 6 で prefab を開いて
+  書き出した Renderer と、18 個すべての位置と大きさが一致する。
 - 一覧は `UIList` + `CollectionProperty`（WindowManager 側。All / None ボタンから書き換えるため）。表示中の単位への絞り込みは `filter_items` で行う（名前での絞り込みも併用）。単位の enum は候補数入りのラベルを動的 items で出すので、文字列をモジュールで保持する。パッケージ由来の pathname は表示用に `sanitize_display` を通し、選択結果は GUID で持つ。
 - スクリプトからは、オペレーターの非表示プロパティ `unit`（`SCENES` / `PREFABS` / `MODELS`）と `arrange` で指定できる。ダイアログを出さない場合は、その単位の読み込める候補をすべて読む。
 
