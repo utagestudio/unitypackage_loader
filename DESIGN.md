@@ -122,6 +122,10 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る `_MetallicGlossMap` / `_Smoothness: 1` は使わず、
     金属感 0・ラフネス 0.8 にする（Shibuya の点字ブロックが黒い鏡面になっていた）。
     ベースのテクスチャが無いもの・パッケージに無い .mat を指すものは置かずに件数を警告に出す。板は影を落とさない。
+    2026-11-15 にダウンロードし直した版の Shibuya は、DecalProjector の .mat 48 個がデカール用でない Lit の Shader Graph（`M_BaseMaterial`）に
+    変わっていて、画像は前のシェーダーの名残の `Base_Map` にしか無い（宣言に無いので読まない）。Unity 6000.6.9f1（URP）に取り込んで確かめると、
+    どのマテリアルもデカールのパス（DBufferProjector / DecalScreenSpaceProjector / DecalGBufferProjector）を持たず、Unity でも描画されない。
+    なので置かずに警告に出すままにした（#165 で確かめたのは、デカール用の Shader Graph だった前の版）。
   - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
     オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
   - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。

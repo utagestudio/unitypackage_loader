@@ -226,7 +226,7 @@ def scene_warnings(
         if stats.skipped_decals:
             messages.append(
                 f"{stats.skipped_decals} decal projector(s) were skipped (their material is not in the package "
-                "or has no base color texture)"
+                "or has no base color texture; a projector with a material that is not a decal shader is not drawn in Unity either)"
             )
         messages.extend(stats.part_warnings())
         if stats.skipped_nodes:
