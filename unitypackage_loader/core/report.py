@@ -29,7 +29,7 @@ class MaterialReport:
     blender_name: str
     fbx_name: str
     guid: str | None
-    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split / shared
+    method: str  # external / name / prefab / none / reused / kept / delegated / replaced / prefab-split / shared / unused
     family: str = ""
     shader_name: str = ""
     alpha_mode: str = ""
@@ -57,6 +57,7 @@ class ImportReport:
     lights: int = 0  # シーンから作ったライト
     cameras: int = 0  # シーンから作ったカメラ
     decals: int = 0  # シーンの DecalProjector から作った板（#165）
+    terrains: int = 0  # シーンの Terrain から作ったメッシュ（#205）
     exposures: list[str] = field(default_factory=list)  # HDRP の Volume の露出をライトに反映したシーンごとの内容（#130）
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -66,8 +67,8 @@ class ImportReport:
             self.warnings.append(message)
 
     # 別のマテリアルに置き換わり、Blender 上に独立して残っていない行（replaced: prefab の割り当てで使われなくなった、
-    # shared: 同じモデルを別の prefab 用に読み直し、組み立て済みのマテリアルを使った）
-    _INACTIVE_METHODS = frozenset({"replaced", "shared"})
+    # shared: 同じモデルを別の prefab 用に読み直し、組み立て済みのマテリアルを使った、unused: 使われていない部品と一緒に消した。#221）
+    _INACTIVE_METHODS = frozenset({"replaced", "shared", "unused"})
 
     @property
     def mapped_count(self) -> int:
@@ -91,6 +92,8 @@ class ImportReport:
             parts.append(f"{self.lights} lights, {self.cameras} cameras")
         if self.decals:
             parts.append(f"{self.decals} decals")
+        if self.terrains:
+            parts.append(f"{self.terrains} terrains")
         text = ", ".join(parts)
         problems = [f"{len(self.errors)} error(s)"] if self.errors else []
         if self.warnings:
@@ -126,6 +129,8 @@ class ImportReport:
             lines.append(f"  lights: {self.lights}, cameras: {self.cameras}")
         if self.decals:
             lines.append(f"  decals: {self.decals}")
+        if self.terrains:
+            lines.append(f"  terrains: {self.terrains}")
         if self.exposures:
             lines.append(f"  exposure ({len(self.exposures)}):")
             lines += [f"    - {e}" for e in self.exposures]

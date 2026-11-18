@@ -94,8 +94,13 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 A summary appears in the Info bar. The "UPI" tab in the 3D View sidebar (N key) shows counts,
 per-material resolution status, and warnings. The system console prints details (the matched .mat for each
 material, textures used, and warnings). A Collection named after the package is created and the objects are placed in it.
+Armature objects are displayed as wire (Object > Viewport Display > Display As) so that they don't cover the meshes.
 
 ### Choosing what to import
+
+Packages that only bundle other `.unitypackage` files (one per render pipeline, such as `BuiltIn.unitypackage` and
+`URP.unitypackage`, with no models, prefabs or scenes outside) first open a dialog to choose the one to import. The chosen
+package is written to the extract folder and imported together with the meshes and textures of the outer package.
 
 When the package has more than one scene, prefab or model to choose from, a selection dialog opens after the options.
 Choose the unit at the top, then tick what to import in the list. In Scenes only the first importable scene is ticked
@@ -110,7 +115,9 @@ ticked):
   pieces of a model file that bundles many props, or parts a prefab or the scene removed from a model) are not imported, matched by the mesh each Unity renderer references
   (turn off **Unused Parts** in the dialog to import them hidden instead). Where Unity has an LODGroup, only the most
   detailed level (LOD0) stays visible: the distant levels are imported and hidden (toggle this with **LODs** in the
-  dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property).
+  dialog; the hidden objects stay in the file and keep their level in the `unity_lod` custom property). Objects imported from model files keep their FBX node name in the `unity_fbx_node` custom property (Blender adds a numeric suffix when an object with the same name already exists).
+  Renderers set to cast shadows only in Unity (Cast Shadows: Shadows Only) become objects that the camera does not see
+  but that still cast shadows, drawn as wireframe in the viewport (Scenes and Prefabs).
   Lights and cameras are imported too (toggle them with "Also Import"): light intensity is converted from values
   measured in Unity (Built-in and URP) and Blender's EEVEE, and the original values are kept as custom properties.
   The render pipeline is detected from the URP / HDRP additional data on lights and cameras, and from the materials'
@@ -119,11 +126,18 @@ ticked):
   unchanged, so scenes from different pipelines can be mixed in one Blender scene.
   Lights that only affect lightmaps in Unity (baked and area lights) become real-time lights and are listed in the
   warnings. Unity's built-in meshes (Cube, Sphere, Capsule, Cylinder, Plane and Quad, such as a Quad laid as the
-  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. URP / HDRP Decal
+  ground) are rebuilt with the same shape, size and UVs and get their assigned materials. Renderers that use a Unity
+  Mesh asset instead of a model file (a `.asset`, or a mesh embedded in a prefab by tools such as UModeler) are built
+  from that mesh too, also with the Prefabs unit. URP / HDRP Decal
   Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
   the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
   close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are
-  approximations. UI, terrain and other
+  approximations. A Decal Projector whose material is not a decal shader is not drawn in Unity either, so it is skipped
+  and counted in the warnings. Unity Terrains become meshes built from the heightmap, with a material that blends the layers'
+  textures (diffuse, normal and mask) by the alphamaps. A fine heightmap is thinned out to the number of vertices per
+  side chosen with Terrain under "Also Import" in the dialog (129, 257, 513, 1025 or full; 513 by default), and holes
+  are left open. Scenes that hold only a Terrain and no models can be imported too. Terrain trees and grass are not
+  imported and are counted in the warnings. UI and other
   meshes that are not in the package are not imported and are reported as warnings. For a model file (FBX) placed directly, the position of its root is read. Changes to
   objects inside it (materials, positions of parts such as open doors) are applied when the model's `.meta` is in the
   format of Unity 2018.2 and earlier, which has a name table; otherwise they are counted in the warnings.
@@ -140,9 +154,9 @@ ticked):
 
 One import uses one unit, so the same model is not imported twice by accident. Items that cannot be imported stay in
 the list, greyed out with the reason (for example `no mesh in package` or `.blend import disabled`). The dialog
-remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions of its
-child objects) is not reproduced: every model of a prefab is placed at the origin of the prefab's Collection. Import a
-scene that places the prefab to get the layout.
+remembers the unit and the arrangement chosen last. With the Prefabs unit, the layout inside a prefab (positions,
+rotations and scales of its child objects, and several placements of the same model) is reproduced in the same way as
+in scenes, with the prefab's root at the origin of its Collection.
 
 Defaults can be changed in Preferences (Edit > Preferences > Add-ons > Unitypackage Importer), including whether the
 selection dialog opens (`Selection Dialog`: `Ask` / `All Models` / `First Model Only`) and `Arrange Prefabs`.
@@ -266,9 +280,9 @@ unitypackage_loader/         The Extension itself
   blender_manifest.toml
   core/                      bpy-independent: package index, Unity YAML / binary readers, .meta, material normalization
                              and shader profiles, mesh-to-material mapping, prefab / scene expansion and placement,
-                             lights, exposure, decals, built-in meshes
+                             lights, exposure, decals, built-in meshes, terrains
   blender/                   bpy-dependent: import flow, model import, materials and nodes, textures, scene objects
-                             and placement, toon node group, outlines
+                             and placement, terrains, toon node group, outlines
   operators/                 File > Import, the selection dialog, rebuilding materials, outlines
   ui/                        Preferences and the "UPI" sidebar panel
 tests/                       Unit tests, integration tests, synthetic package generation

@@ -372,12 +372,21 @@ class ScanCacheTests(unittest.TestCase):
         self.assertEqual(pkg.read_asset(GUID_OTHER), self.PREFAB)
 
     def test_assets_over_read_limit_are_not_cached(self):
-        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64):
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64), \
+             mock.patch.object(package_module, "_LARGE_ASSET_MAX_SIZE", 64):
             pkg = UnityPackage(self.path)
             pkg.scan()
             self.assertIsNone(pkg.entries[GUID_SCENE]._cache)
             with self.assertRaises(PackageError):
                 pkg.read_asset(GUID_SCENE)
+
+    def test_scenes_and_prefabs_have_a_larger_limit(self):
+        # シーン・prefab は .mat などより大きくても読む（#218）
+        with mock.patch.object(package_module, "_READ_ASSET_MAX_SIZE", 64):
+            pkg = UnityPackage(self.path)
+            pkg.scan()
+            self.assertEqual(pkg.entries[GUID_SCENE]._cache, self.SCENE)
+            self.assertEqual(pkg.read_asset(GUID_SCENE), self.SCENE)
 
 
 class FbxSoleNodeTests(unittest.TestCase):
@@ -434,6 +443,114 @@ class FbxSoleNodeTests(unittest.TestCase):
             pkg = UnityPackage(self.path)
             pkg.scan()
         self.assertEqual(pkg.entries[GUID_FBX].fbx_sole_node, "")
+
+
+class ObjGroupTests(unittest.TestCase):
+    """scan で OBJ のグループ（g）の名前を覚える。Unity はグループごとにメッシュを作り、無ければ default 1 つ（#214）。"""
+
+    def test_group_names(self):
+        data = b"mtllib a.mtl\no Ignored\ng Wall_01\nusemtl m\nf 1 2 3\ng Object001\ng Wall_01\ng\n"
+        self.assertEqual(package_module.obj_group_names(data), ["Wall_01", "Object001"])
+        self.assertEqual(package_module.obj_group_names(b"o amulet1_amulets\nusemtl a\n"), [])
+
+    def test_scan_records_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "obj.unitypackage"
+            with tarfile.open(path, "w:gz") as tar:
+                _add(tar, f"{GUID_FBX}/asset", b"o Plane\nv 0 0 0\n")
+                _add(tar, f"{GUID_FBX}/pathname", b"Assets/Meshes/floor.obj")
+                _add(tar, f"{GUID_MAT}/pathname", b"Assets/Meshes/wall.OBJ")
+                _add(tar, f"{GUID_MAT}/asset", b"g Wall_01\ng Tile\n")
+            pkg = UnityPackage(path)
+            pkg.scan()
+            self.assertEqual(pkg.entries[GUID_FBX].obj_groups, [])
+            self.assertEqual(pkg.entries[GUID_MAT].obj_groups, ["Wall_01", "Tile"])
+            self.assertIsNone(pkg.entries[GUID_FBX]._cache)
+
+
+class LegacyMetaDataTests(unittest.TestCase):
+    """Unity 4 以前のパッケージは asset.meta の代わりに metaData（バイナリ）を持つ。モデルの表だけを読む（#225 の続き）。"""
+
+    def test_scan_reads_model_tables(self):
+        from tests.test_meta import LegacyMetaDataTests as MetaTests
+
+        model = MetaTests.meta_data("ModelImporter", 1040, MetaTests.TABLE)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unity4.unitypackage"
+            with tarfile.open(path, "w:gz") as tar:
+                # Unity 4 が書き出す順（asset → metaData → preview.png → pathname）
+                _add(tar, f"{GUID_FBX}/asset", b"fbx")
+                _add(tar, f"{GUID_FBX}/metaData", model)
+                _add(tar, f"{GUID_FBX}/pathname", b"Assets/Mesh/window.fbx")
+                _add(tar, f"{GUID_TEX}/pathname", b"Assets/Texture/window.png")
+                _add(tar, f"{GUID_TEX}/metaData", model)  # モデル以外の metaData は読まない
+                _add(tar, f"{GUID_OTHER}/asset", b"fbx")
+                _add(tar, f"{GUID_OTHER}/metaData", b"broken")
+                _add(tar, f"{GUID_OTHER}/pathname", b"Assets/Mesh/broken.fbx")
+            pkg = UnityPackage(path)
+            pkg.scan()
+            fbx = pkg.entries[GUID_FBX]
+            self.assertEqual(fbx.legacy_meta.data["fileIDToRecycleName"], dict(MetaTests.TABLE))
+            self.assertIsNone(fbx.meta_text)
+            self.assertIsNone(fbx._legacy_raw)
+            self.assertIsNone(pkg.entries[GUID_TEX].legacy_meta)
+            self.assertIsNone(pkg.entries[GUID_OTHER].legacy_meta)
+            self.assertEqual(len(pkg.warnings), 1)
+            self.assertIn("broken.fbx", pkg.warnings[0])
+
+
+class NestedPackageTests(unittest.TestCase):
+    """中に .unitypackage だけを持つパッケージ（パイプライン別の中身。#217）。"""
+
+    def _package(self, tmp: str, extra: dict[str, bytes]) -> UnityPackage:
+        path = Path(tmp) / "outer.unitypackage"
+        with tarfile.open(path, "w:gz") as tar:
+            for i, (pathname, data) in enumerate(extra.items()):
+                guid = f"{i:032x}"
+                _add(tar, f"{guid}/pathname", pathname.encode())
+                _add(tar, f"{guid}/asset", data)
+        pkg = UnityPackage(path)
+        pkg.scan()
+        return pkg
+
+    def test_nested_packages_and_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = self._package(tmp, {
+                "Assets/Pack/HDRP.unitypackage": b"x", "Assets/Pack/URP.unitypackage": b"x",
+                "Assets/Pack/BuiltIn_Pack.unitypackage": b"x", "Assets/Pack/ReadMe.txt": b"x",
+            })
+            nested = pkg.nested_packages()
+            self.assertEqual([e.name for e in nested], ["BuiltIn_Pack.unitypackage", "HDRP.unitypackage", "URP.unitypackage"])
+            self.assertEqual(package_module.default_nested_package(nested).name, "BuiltIn_Pack.unitypackage")
+            self.assertEqual(package_module.default_nested_package(nested[1:]).name, "HDRP.unitypackage")
+
+    def test_merge_with_outer_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner_path = Path(tmp) / "inner.unitypackage"
+            with tarfile.open(inner_path, "w:gz") as tar:
+                _add(tar, f"{'a' * 32}/pathname", b"Assets/Pack/Tree.prefab")
+                _add(tar, f"{'a' * 32}/asset", b"prefab")
+                _add(tar, f"{'b' * 32}/pathname", b"Assets/Pack/Shared.mat")
+                _add(tar, f"{'b' * 32}/asset", b"inner")
+            outer = self._package(tmp, {"Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/ReadMe.txt": b"x"})
+            dest = Path(tmp) / "merged.unitypackage"
+            self.assertIsNone(package_module.merge_nested_package(outer, inner_path, dest))  # 外側に足すものが無い
+            outer = self._package(tmp, {
+                "Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/Mesh.asset": b"mesh",
+            })
+            merged = package_module.merge_nested_package(outer, inner_path, dest)
+            self.assertEqual(merged, dest)
+            pkg = UnityPackage(merged)
+            pkg.scan()
+            self.assertEqual(sorted(e.pathname for e in pkg.entries.values()), [
+                "Assets/Pack/Mesh.asset", "Assets/Pack/Shared.mat", "Assets/Pack/Tree.prefab",
+            ])
+            self.assertEqual(pkg.read_asset("b" * 32), b"inner")
+
+    def test_not_nested_when_outer_has_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = self._package(tmp, {"Assets/Pack/URP.unitypackage": b"x", "Assets/Pack/Cube.fbx": b"x"})
+            self.assertEqual(pkg.nested_packages(), [])
 
 
 class ExtractBudgetTests(unittest.TestCase):

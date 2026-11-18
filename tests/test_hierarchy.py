@@ -737,12 +737,169 @@ class LegacyFormatTest(unittest.TestCase):
         self.assertEqual(placement.renderers["Lid"].materials, [None, MAT_A])
         self.assertEqual(h.unresolved_overrides, 1)
 
+    # Unity 4 のモデル: //RootNode が後ろの番号で、100000 / 400000 は中のノード Frame（Japanese School Cafeteria）
+    UNITY4_TABLE = {
+        100000: "Frame", 100006: "//RootNode", 400000: "Frame", 400006: "//RootNode",
+        2300000: "Frame", 3300000: "Frame", 4300000: "Frame",
+    }
+
+    def test_root_is_found_by_the_recycle_table(self):
+        scene = HEADER + self.legacy_instance(2000, MODEL, 0, [
+            mod(400006, MODEL, "m_LocalPosition.x", 2),
+            mod(400000, MODEL, "m_LocalPosition.y", 0.3),
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Window"}, {MODEL: self.UNITY4_TABLE})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (2.0, 0.0, 0.0))
+        self.assertEqual(placement.node_transforms, {"Frame": {"position": [None, 0.3, None]}})
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    @staticmethod
+    def linked(doc: str, instance_id: int, source_id: int = 0) -> str:
+        """ドキュメントに Unity 4 の展開済みの PrefabInstance とのつながり（m_PrefabParentObject / m_PrefabInternal）を足す。"""
+        header, kind, rest = doc.split("\n", 2)
+        source = f"{{fileID: {source_id}, guid: {MODEL}, type: 3}}" if source_id else "{fileID: 0}"
+        return f"{header}\n{kind}\n  m_PrefabParentObject: {source}\n  m_PrefabInternal: {{fileID: {instance_id}}}\n{rest}"
+
+    def test_exploded_instance_is_not_duplicated(self):
+        # Unity 4 のシーンは PrefabInstance の中身を stripped にせず丸ごと保存する（m_IsExploded: 1）
+        scene = HEADER + "".join([
+            game_object(1000, "Room"),
+            transform(1001, 1000, pos=(0, 0, 5)),
+            self.legacy_instance(2000, MODEL, 1001, [
+                mod(400006, MODEL, "m_LocalPosition.x", 2),
+                mod(400000, MODEL, "m_LocalPosition.y", 0.3),
+            ]) + "  m_IsExploded: 1\n",
+            self.linked(game_object(2100, "Window"), 2000, 100006),
+            self.linked(transform(2101, 2100, father=1001, pos=(2, 0, 0)), 2000, 400006),
+            self.linked(game_object(2200, "Frame"), 2000, 100000),
+            self.linked(transform(2201, 2200, father=2101, pos=(0, 0.3, 0)), 2000, 400000),
+            # この PrefabInstance で足した GameObject（元を持たない）はシーンのものとして残る
+            self.linked(game_object(3000, "Flower"), 2000),
+            self.linked(transform(3001, 3000, father=2101, pos=(0, 1, 0)), 2000),
+        ])
+        exp = Expander(lambda g: None, {MODEL: "Window"}, {MODEL: self.UNITY4_TABLE})
+        h = exp.expand_raw(parse_asset(scene))
+        self.assertEqual(sorted(n.name for n in h.nodes.values()), ["Flower", "Room", "Window"])
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (2.0, 0.0, 5.0))
+        self.assertEqual(placement.node_transforms, {"Frame": {"position": [None, 0.3, None]}})
+        flower = next(n for n in h.nodes.values() if n.name == "Flower")
+        self.assertEqual(h.nodes[flower.parent].name, "Window")
+        self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+    def test_outer_override_reaches_nested_legacy_model_root(self):
+        # prefab の中に古い形式のモデルを置き（PrefabInstance 2000）、シーンが prefab の上から「2000 XOR 100000 / 400000」で
+        # そのルートを隠し、動かす（Destroyed Building Kit の DBK_Cinderblock_Building の rubble。#244）
+        prefab = HEADER + game_object(10, "Building") + transform(11, 10) + self.legacy_instance(2000, MODEL, 11, [
+            mod(100000, MODEL, "m_Name", "rubble"),
+        ])
+        scene = HEADER + instance(3000, NESTED, 0, [
+            mod(2000 ^ 100000, NESTED, "m_IsActive", 0),
+            mod(2000 ^ 400000, NESTED, "m_LocalPosition.y", 3),
+        ])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Tile"})
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, [MODEL])[0]
+        self.assertEqual(h.nodes[placement.root].name, "rubble")
+        self.assertFalse(placement.active)
+        self.assertEqual(transform_point(placement.world, (0, 0, 0)), (0.0, 3.0, 0.0))
+        # Unity 4 の表で //RootNode が後ろの番号なら、その番号で指す
+        scene4 = HEADER + instance(3000, NESTED, 0, [mod(2000 ^ 100006, NESTED, "m_IsActive", 0)])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Tile"}, {MODEL: self.UNITY4_TABLE})
+        self.assertFalse(placements(exp.expand_raw(parse_asset(scene4)), [MODEL])[0].active)
+
     def test_child_of_legacy_model_instance_uses_stripped_alias(self):
         exp = Expander(lambda g: None, {MODEL: "Probe"})
         h = exp.expand_raw(parse_asset(self.scene()))
         flower = next(n for n in h.nodes.values() if n.name == "Flower")
         self.assertEqual(h.nodes[flower.parent].name, "Pot")
         self.assertEqual(transform_point(world_matrices(h)[flower.key], (0, 0, 0)), (2.0, 1.0, 5.0))
+
+
+class TopLevelNodeTest(unittest.TestCase):
+    """表の無い、最上位のノードが複数ある FBX を展開した GameObject を、そのノードとして置く（#237）。"""
+
+    def test_root_game_object_is_a_top_level_node(self):
+        # MeshDecals.fbx の RoadDecals.002 だけを使う prefab を置いた。ルートの GameObject がそのノードなので単位行列にする
+        prefab = HEADER + game_object(10, "RoadDecals.002") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A)
+        scene = HEADER + instance(3000, NESTED, 0, [mod(10, NESTED, "m_Name", "RoadDecals.002 (27)")])
+        h = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "MeshDecals"}).expand_raw(parse_asset(scene))
+        tops = {MODEL: frozenset({"RoadDecals", "RoadDecals.001", "RoadDecals.002", "RoadDecals.003"})}
+        # 読み込み側は表の無いモデルにも空の表を渡す
+        placement = placements(h, {MODEL: "MeshDecals"}, {MODEL: {}}, top_level_nodes=tops)[0]
+        self.assertEqual(list(placement.node_transforms), ["RoadDecals.002"])
+        # 最上位のノードの名前でなければ触らない
+        placement = placements(h, {MODEL: "MeshDecals"}, top_level_nodes={MODEL: frozenset({"Other", "Another"})})[0]
+        self.assertEqual(placement.node_transforms, {})
+
+
+class MeshSwapTest(unittest.TestCase):
+    """MeshFilter のメッシュの差し替え（m_Mesh の上書き。Destroyed Building Kit。#242）。"""
+
+    OTHER = "d" * 32
+    ONE_MESH = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 3300000: "//RootNode", 4300000: "Rubble_A"}
+    OTHER_ONE_MESH = {100000: "//RootNode", 400000: "//RootNode", 2300000: "//RootNode", 3300000: "//RootNode", 4300000: "Rubble_C"}
+
+    def test_prefab_renderer(self):
+        prefab = HEADER + game_object(10, "Wall") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A)
+        scene = HEADER + instance(3000, NESTED, 0, [mod(12, NESTED, "m_Mesh", "", f"{{fileID: 4300002, guid: {self.OTHER}, type: 3}}")])
+        h = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "A", self.OTHER: "B"}).expand_raw(parse_asset(scene))
+        renderer = next(n.renderer for n in h.nodes.values() if n.renderer)
+        self.assertEqual((renderer.mesh_guid, renderer.mesh_file_id), (self.OTHER, 4300002))
+
+    def test_model_instance_with_one_mesh_models(self):
+        # 瓦礫の FBX（Rubble_A）を置いて、メッシュを別の 1 メッシュの FBX（Rubble_C）に差し替える。位置とマテリアルの上書きは引き継ぐ
+        scene = HEADER + LegacyFormatTest.legacy_instance(2000, MODEL, 0, [
+            mod(400000, MODEL, "m_LocalPosition.x", 2),
+            mod(2300000, MODEL, "m_Materials.Array.data[0]", "", f"{{fileID: 2100000, guid: {MAT_B}, type: 2}}"),
+            mod(3300000, MODEL, "m_Mesh", "", f"{{fileID: 4300000, guid: {self.OTHER}, type: 3}}"),
+        ])
+        tables = {MODEL: self.ONE_MESH, self.OTHER: self.OTHER_ONE_MESH}
+        exp = Expander(lambda g: None, {MODEL: "Rubble_A", self.OTHER: "Rubble_C"}, tables)
+        h = exp.expand_raw(parse_asset(scene))
+        placement = placements(h, {MODEL: "Rubble_A", self.OTHER: "Rubble_C"}, tables)[0]
+        self.assertEqual(placement.model_guid, self.OTHER)
+        self.assertEqual(placement.root_node, "Rubble_C")
+        self.assertEqual(placement.node_transforms["Rubble_C"]["position"], [2.0, None, None])
+        self.assertEqual(placement.renderers["Rubble_C"].materials, [MAT_B])
+        self.assertEqual(h.unresolved_overrides, 0)
+
+    def test_multi_mesh_target_is_not_swapped(self):
+        scene = HEADER + LegacyFormatTest.legacy_instance(2000, MODEL, 0, [
+            mod(3300000, MODEL, "m_Mesh", "", f"{{fileID: 4300002, guid: {self.OTHER}, type: 3}}"),
+        ])
+        tables = {MODEL: self.ONE_MESH, self.OTHER: {100000: "//RootNode", 100002: "Lid", 100004: "Pot", 4300002: "Lid", 4300004: "Pot"}}
+        exp = Expander(lambda g: None, {MODEL: "Rubble_A", self.OTHER: "Set"}, tables)
+        placement = placements(exp.expand_raw(parse_asset(scene)), {MODEL: "Rubble_A", self.OTHER: "Set"}, tables)[0]
+        self.assertEqual(placement.model_guid, MODEL)
+
+
+class ShadowsOnlyTest(unittest.TestCase):
+    """Renderer の m_CastShadows が Shadows Only（3）なら、影だけを落とし本体は描かない（Japanese Hotel Room。#232）。"""
+
+    def test_renderer_value_and_prefab_override(self):
+        prefab = HEADER + game_object(10, "Shadow") + transform(11, 10) + mesh_renderer(12, 13, 10, MODEL, MAT_A).replace(
+            "  m_Enabled: 1\n", "  m_Enabled: 1\n  m_CastShadows: 3\n"
+        ) + game_object(20, "Room") + transform(21, 20) + mesh_renderer(22, 23, 20, MODEL, MAT_A, mesh_file_id=4300002)
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(prefab))
+        renderers = {r.name: r for p in placements(h, [MODEL]) for r in p.renderers.values()}
+        self.assertTrue(renderers["Shadow"].shadows_only)
+        self.assertFalse(renderers["Room"].shadows_only)
+        # シーンが prefab の上から切り替える
+        scene = HEADER + instance(3000, NESTED, 0, [mod(13, NESTED, "m_CastShadows", 1), mod(23, NESTED, "m_CastShadows", 3)])
+        exp = Expander(lambda g: parse_asset(prefab) if g == NESTED else None, {MODEL: "Probe"})
+        h = exp.expand_raw(parse_asset(scene))
+        renderers = {r.name: r for p in placements(h, [MODEL]) for r in p.renderers.values()}
+        self.assertEqual((renderers["Shadow"].shadows_only, renderers["Room"].shadows_only), (False, True))
+
+    def test_override_inside_a_model_is_recorded(self):
+        # FBX を置いた PrefabInstance の中の Renderer への上書き（hotel_room_shadow.fbx の 2300000）
+        scene = HEADER + instance(2000, MODEL, 0, [mod(2300000, MODEL, "m_CastShadows", 3)])
+        h = Expander(lambda g: None, {MODEL: "Probe"}).expand_raw(parse_asset(scene))
+        self.assertEqual(placements(h, [MODEL])[0].parts, {pending_renderer(2300000): PartState(shadows_only=True)})
+        self.assertEqual(h.unresolved_overrides, 0)
 
 
 class ModelPartsTest(unittest.TestCase):
@@ -895,6 +1052,30 @@ class DecalTest(unittest.TestCase):
         self.assertEqual([(c.name, c.body["m_Material"].guid) for c in found], [("Graffiti", MAT_B), ("Sign", "3" * 32)])
         self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (0.0, 2.0, 0.0))
         self.assertEqual(summarize(hierarchy, {}).decals, 2)
+        self.assertEqual(components(hierarchy), [])  # ライト・カメラだけを引くときは出てこない
+
+
+class TerrainTest(unittest.TestCase):
+    """Terrain のコンポーネントは中身ごと持ち、TerrainData の参照を概要に出す（#205）。"""
+
+    TERRAIN = (
+        "--- !u!218 &{id}\nTerrain:\n  m_GameObject: {{fileID: {go}}}\n  m_Enabled: 1\n"
+        "  m_TerrainData: {{fileID: 15600000, guid: {data}, type: 2}}\n  m_DrawHeightmap: 1\n"
+    )
+
+    def test_terrain_components_and_data(self):
+        scene = HEADER + "".join([
+            game_object(10, "Terrain"), transform(11, 10, pos=(-200, 0, -200)), self.TERRAIN.format(id=12, go=10, data="a" * 32),
+            game_object(20, "Terrain (1)"), transform(21, 20), self.TERRAIN.format(id=22, go=20, data="a" * 32),
+            game_object(30, "Other"), transform(31, 30), self.TERRAIN.format(id=32, go=30, data="b" * 32),
+        ])
+        hierarchy = Expander(lambda g: None, {}).expand_raw(parse_asset(scene))
+        found = components(hierarchy, [218])
+        self.assertEqual([c.name for c in found], ["Terrain", "Terrain (1)", "Other"])
+        self.assertEqual(transform_point(found[0].world, (0, 0, 0)), (-200.0, 0.0, -200.0))
+        contents = summarize(hierarchy, {})
+        self.assertEqual(contents.terrains, 3)
+        self.assertEqual(contents.terrain_data, ["a" * 32, "b" * 32])
         self.assertEqual(components(hierarchy), [])  # ライト・カメラだけを引くときは出てこない
 
 

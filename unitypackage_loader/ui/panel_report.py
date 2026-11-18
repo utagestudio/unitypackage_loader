@@ -66,6 +66,8 @@ class UNITYPKG_PT_report(bpy.types.Panel):
             col.label(text=f"Lights: {report.lights}  Cameras: {report.cameras}")
         if report.decals:
             col.label(text=f"Decals: {report.decals}")
+        if report.terrains:
+            col.label(text=f"Terrains: {report.terrains}")
         if report.prefabs:
             col.label(text=f"Prefabs: {len(report.prefabs)}")
         if report.models:

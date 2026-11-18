@@ -1,0 +1,27 @@
+{
+  "options": {
+    "unit": "PREFABS",
+    "material_mode": "AUTO",
+    "arrange": "STACK"
+  },
+  "prefabs": {
+    "count": 4
+  },
+  "collections": {
+    "Wedge": {
+      "objects": 1,
+      "prefab": "Assets/Synthetic/Prefabs/Wedge.prefab",
+      "mat_files": [
+        "AssetMat.asset",
+        "MeshMat.mat"
+      ]
+    },
+    "Embedded": {
+      "objects": 1,
+      "prefab": "Assets/Synthetic/Prefabs/Embedded.prefab",
+      "mat_files": [
+        "MeshMat.mat"
+      ]
+    }
+  }
+}

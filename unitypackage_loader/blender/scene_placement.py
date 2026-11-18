@@ -8,19 +8,24 @@ from typing import TYPE_CHECKING
 import bpy
 from mathutils import Matrix
 
-from ..core.fbx_units import read_unit_scale
-from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, SOLE_NODE
+from ..core.fbx_units import read_axes, read_unit_scale
+from ..core.hierarchy import CLASS_CAMERA, CLASS_LIGHT, CLASS_TERRAIN, SOLE_NODE
 from ..core.placement import built_from_renderers
 from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light
 from ..core.model_ids import PartMatch, PartMatcher
 from ..core.prefab import RendererMaterials
-from ..core.scene_import import PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
-from ..core.transform import unity_to_blender
+from ..core.scene_import import KIND_PREFAB, KIND_SCENE, PlacedKind, PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
+from ..core.terrain import terrain_data_ref, terrain_local
+from ..core.transform import inverse_affine, multiply, unity_to_blender
+from ..core.unity_yaml import to_float
 from ..core.units import SceneSummary
 from .log import record_failure
+from .model_import import node_name
+from .unity_meshes import make_mesh_object
 from .prepare import ModelSummary
 from .scene_objects import (
+    ModelUnits,
     SceneTemplate,
     apply_collapsed_root,
     apply_node_transforms,
@@ -34,6 +39,7 @@ from .scene_objects import (
     make_camera,
     make_light,
     make_primitive,
+    make_shadows_only,
     primitive_mesh,
     scene_empty,
 )
@@ -50,8 +56,10 @@ class SceneImport:
     同じ処理をコピーしていた。シーン 1 つ分の状態をこのクラスのフィールドにし、手順をメソッドに分けた（#198）。
     """
 
-    def __init__(self, session: _ImportSession, scene_summary: SceneSummary):
+    def __init__(self, session: _ImportSession, scene_summary: SceneSummary, kind: PlacedKind = KIND_SCENE):
         self.session = session
+        # KIND_SCENE か KIND_PREFAB（読む単位 Prefabs で、prefab の中の配置をシーンと同じく再現する。#240）
+        self.kind = kind
         self.opts = session.opts
         self.report = session.report
         self.summary = scene_summary
@@ -63,15 +71,19 @@ class SceneImport:
         self.templates: dict[tuple, SceneTemplate] = {}  # 配置の key → 最初に読み込んだオブジェクト（以後は複製する）
         self.matchers: dict[tuple, PartMatcher | None] = {}  # 配置の key → 中のオブジェクトの fileID の計算（#172）
         self.removed_by_key: dict[tuple, int] = {}  # テンプレートを作るときに消した部品の数（以後の配置でも同じ数を数える）
-        self.unit_scales: dict[str, float | None] = {}  # モデルの GUID → FBX の UnitScaleFactor（FBX 以外は None）
+        self.unit_scales: dict[str, ModelUnits | None] = {}  # モデルの GUID → FBX の単位と軸（FBX 以外は None）
         self.stats = PlacementStats()
 
     def run(self, progress_start: float, progress_span: float) -> None:
         self.target = bpy.data.collections.new(self.summary.name)
         self.session.collection.children.link(self.target)
-        self.target["unity_scene"] = self.pathname
-        self.target["unity_scene_guid"] = self.summary.guid
-        self.report.scenes.append(self.pathname)
+        self.target[f"unity_{self.kind}"] = self.pathname
+        self.target[f"unity_{self.kind}_guid"] = self.summary.guid
+        if self.kind == KIND_PREFAB:
+            self.report.prefabs.append(self.pathname)
+            self.session.prefab_collections.append(self.target)
+        else:
+            self.report.scenes.append(self.pathname)
 
         count = len(self.summary.placements)
         for index, placement in enumerate(self.summary.placements):
@@ -79,10 +91,13 @@ class SceneImport:
                 self.session.step(progress_start + progress_span * index / max(count, 1), f"Placing {index}/{count} in {self.summary.name}")
             self.place_model(placement)
         self.place_primitives()
+        if self.opts.terrain_points is not None:
+            self.stats.terrains_imported = True
+            self.place_terrains()
         if self.opts.scene_decals:
             self.place_decals()
         self.place_lights_and_cameras()
-        for message in scene_warnings(self.pathname, self.summary.contents, self.stats):
+        for message in scene_warnings(self.pathname, self.summary.contents, self.stats, self.kind):
             self.report.warn(message)
 
     # --- 共通 ---
@@ -111,10 +126,18 @@ class SceneImport:
         if not visible:
             defer_hide(obj, self.session.hidden_objects)
 
-    def unit_scale(self, summary: ModelSummary) -> float | None:
+    def unit_scale(self, summary: ModelSummary) -> ModelUnits | None:
+        """モデルの FBX の単位と軸（配置の計算の fileScale と軸の変換に使う。#53 / #240）。FBX 以外は None。"""
         if summary.guid not in self.unit_scales:
-            fbx = summary.entry.ext == ".fbx"
-            self.unit_scales[summary.guid] = read_unit_scale(self.session.paths[summary.guid]) if fbx else None
+            path = self.session.paths[summary.guid]
+            if summary.entry.ext == ".fbx":
+                # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
+                unit = summary.info.unity_unit_scale(read_unit_scale(path))
+                # 軸の変換を考えるのは Bake Axis Conversion を入れたモデルだけ（入れていなければ Y が上と同じに扱って合う。#240）
+                axes = read_axes(path) if summary.info.bake_axis_conversion else None
+                self.unit_scales[summary.guid] = ModelUnits(unit, axes, summary.info.global_scale)
+            else:
+                self.unit_scales[summary.guid] = None
         return self.unit_scales[summary.guid]
 
     # --- モデルの配置 ---
@@ -126,7 +149,7 @@ class SceneImport:
         if summary is None:
             skipped = session.model_by_guid.get(placement.model_guid)
             if skipped is not None:
-                self.report.warn(f"scene {self.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
+                self.report.warn(f"{self.kind} {self.pathname}: skipped {skipped.entry.pathname}: {skipped.skip_reason}")
             return
         if summary.guid in session.failed_models:
             return  # 読み込みに失敗したモデルの配置は飛ばす（エラーは最初の 1 回だけ記録する）
@@ -137,7 +160,7 @@ class SceneImport:
             try:
                 objects = self.import_template(summary, placement, key)
             except Exception as exc:  # noqa: BLE001 - そのモデルの配置だけを外して続ける（#70）
-                record_failure(self.report, f"scene {self.pathname}: could not import {summary.entry.pathname}: {exc}")
+                record_failure(self.report, f"{self.kind} {self.pathname}: could not import {summary.entry.pathname}: {exc}")
                 return
             template = self.templates[key]
         else:
@@ -161,8 +184,12 @@ class SceneImport:
         """配置のモデルを読み込み、以後の配置で複製するテンプレートにする。"""
         session = self.session
         parts = placement.parts
+        # メッシュ参照の fileID も渡す。GameObject の名前を変えてあると名前では引けないので、表を引くとき（``find_renderer``）に
+        # オブジェクト名のハッシュと照合する（#213）
         table = {
-            name: RendererMaterials(name, list(r.materials), r.renderer_class, placement.model_guid)
+            name: RendererMaterials(
+                name, list(r.materials), r.renderer_class, placement.model_guid, r.mesh_file_id, r.lod_level
+            )
             for name, r in placement.renderers.items()
         }
         objects = session.import_model(summary, table, self.target, with_parts=bool(parts))
@@ -170,7 +197,7 @@ class SceneImport:
         if self.opts.skip_unused_parts:
             # 最初に読み込んだものから消しておけば、以後の配置では必要な分だけを複製する（#152）。
             # シーン・prefab がモデルの中から消したオブジェクトも Unity に無いので、同じく消す（#172）
-            unused = unused_in_placement(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects])
+            unused = unused_in_placement(self.hierarchy, placement, [(node_name(o), o.type == "MESH") for o in objects])
             if parts and session.last_matcher is not None:
                 unused |= session.last_matcher.match(parts).removed
             objects, self.removed_by_key[key] = session.remove_unused(objects, unused)
@@ -188,8 +215,8 @@ class SceneImport:
                 # そうでなければルートの Transform は単位行列が基準なので、展開した行列のままでよい
                 overrides = {k: v for k, v in overrides.items() if k != SOLE_NODE}
                 if len(objects) == 1 and not objects[0].children:
-                    overrides[objects[0].name] = placement.node_transforms[SOLE_NODE]
-                    root_node = objects[0].name
+                    overrides[node_name(objects[0])] = placement.node_transforms[SOLE_NODE]
+                    root_node = node_name(objects[0])
                 else:
                     root_node = ""
             if root_node:  # 1 メッシュの FBX のモデルの PrefabInstance（#99）
@@ -207,21 +234,26 @@ class SceneImport:
     def hide_parts(self, placement, key: tuple, template: SceneTemplate, objects) -> None:
         """配置に合わせて、使われていない部品・表示されていない部品・遠景用の LOD を隠し、数える。"""
         stats = self.stats
-        hidden = parts_to_hide(self.hierarchy, placement, [(o.name, o.type == "MESH") for o in objects], self.opts.hide_lods)
-        # モデルの中への表示の上書きと削除（#172）。fileID はテンプレートのオブジェクトの名前で計算してあるので、
-        # 複製した配置では並び順で対応させる
+        # 照合はオブジェクトの FBX のノードとしての名前で行う。複製した配置のオブジェクトも、テンプレートと同じ名前を持つ（#237）
+        hidden = parts_to_hide(self.hierarchy, placement, [(node_name(o), o.type == "MESH") for o in objects], self.opts.hide_lods)
+        # モデルの中への表示の上書きと削除（#172）
         parts = placement.parts
         matcher = self.matchers.get(key)
         match = matcher.match(parts) if parts and matcher is not None else PartMatch()
         stats.unmatched_parts += match.unmatched
-        own = {t.name: o.name for t, o in zip(template.objects, objects)}
-        removed_here = {own[n] for n in match.removed if n in own}  # 読み込まない設定でも、子孫を残すため残ったもの
-        hide_here = {own[n] for n in match.hidden if n in own} | removed_here
+        present = {node_name(o) for o in objects}
+        removed_here = match.removed & present  # 読み込まない設定でも、子孫を残すため残ったもの
+        hide_here = (match.hidden & present) | removed_here
+        shadows_here = (set(hidden.shadows_only) | match.shadows_only) - hide_here
         for obj in objects:
-            if obj.name in hidden.lods:
-                obj["unity_lod"] = hidden.lods[obj.name]
-            if obj.name in hidden.names or obj.name in hide_here:
+            name = node_name(obj)
+            if name in hidden.lods:
+                obj["unity_lod"] = hidden.lods[name]
+            if name in hidden.names or name in hide_here:
                 defer_hide(obj, self.session.hidden_objects)
+            elif name in shadows_here and obj.type == "MESH":
+                make_shadows_only(obj)  # Unity の Shadows Only（#232）
+                stats.shadows_only += 1
         stats.hidden_unused += hidden.unused
         if placement.active:  # 消した部品は使われていない部品と同じく数える（非アクティブな配置は数えない）
             stats.hidden_unused += len(removed_here - hidden.names)
@@ -234,13 +266,53 @@ class SceneImport:
         """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う Renderer（#190）。"""
         session = self.session
         primitives = self.summary.contents.primitives if self.summary.contents is not None else []
+        session.meshes.prefetch({p.mesh_guid for p in primitives if p.mesh_guid})
         for primitive in primitives:
             node = self.hierarchy.nodes[primitive.key]
             parent, local = self.parent_and_local(primitive.key)
-            obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.materials.material_for(primitive.materials))
+            if primitive.mesh_guid:  # パッケージの Unity の Mesh（#216）
+                mesh = session.meshes.mesh(primitive.mesh_guid, primitive.mesh_file_id)
+                if mesh is None:
+                    continue
+                obj = make_mesh_object(node.name, mesh, [session.materials.material_for([g]) for g in primitive.materials])
+            else:
+                obj = make_primitive(node.name, primitive_mesh(primitive.kind, session.primitive_meshes), session.materials.material_for(primitive.materials))
             obj["unity_game_object"] = node.name
             self.link(obj, parent, local, primitive.visible)
+            if primitive.visible and primitive.shadows_only:
+                make_shadows_only(obj)  # Unity の Shadows Only（Japanese Hotel Room の Quad_shadow。#232）
+                self.stats.shadows_only += 1
             self.empties.setdefault(primitive.key, obj)  # 子の GameObject（ライトなど）はこの下に置く
+
+    def place_terrains(self) -> None:
+        """Terrain をメッシュにする（#205）。Terrain は回転・拡大縮小を受けないので、ワールドの位置だけで置く。"""
+        session = self.session
+        for component in scene_components(self.hierarchy, [CLASS_TERRAIN], self.worlds, self.active):
+            guid = terrain_data_ref(component.body)
+            if not guid:
+                continue
+            built = session.terrains.build(guid, self.pathname)
+            if built is None:
+                continue
+            key = component.node
+            node = self.hierarchy.nodes[key]
+            # 親の空間で、ワールドでは位置だけの行列（world · terrain_local(world)）になるように置く
+            world = self.worlds[key]
+            placed = multiply(world, terrain_local(world))
+            if key in self.empties:
+                parent, frame = self.empties[key], world
+            elif node.parent is not None:
+                parent, frame = self.empty(node.parent), self.worlds[node.parent]
+            else:
+                parent, frame = None, None
+            inverse = inverse_affine(frame) if frame is not None else None
+            local = multiply(inverse, placed) if inverse is not None else placed
+            obj = bpy.data.objects.new(node.name, built.mesh)
+            obj["unity_game_object"] = node.name
+            obj["unity_terrain"] = json_text(component.body)
+            visible = component.active and to_float(component.body.get("m_DrawHeightmap"), 1.0) != 0
+            self.link(obj, parent, Matrix(unity_to_blender(local)), visible)
+            self.report.terrains += 1
 
     def place_decals(self) -> None:
         """DecalProjector を板にする（#165）。"""

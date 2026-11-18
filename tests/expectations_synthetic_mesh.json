@@ -1,0 +1,169 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "AUTO"
+  },
+  "scenes": {
+    "count": 1
+  },
+  "warnings_exclude": [
+    "could not read",
+    "is not in",
+    "no importable"
+  ],
+  "placed_objects": [
+    {
+      "top": "Wedge",
+      "object": "Wedge",
+      "hidden": false,
+      "vertices": 4,
+      "faces": 2,
+      "bbox": [
+        -5.5,
+        0.0,
+        0.5,
+        -4.5,
+        0.0,
+        1.5
+      ],
+      "mat_files": [
+        "AssetMat.asset",
+        "MeshMat.mat"
+      ]
+    },
+    {
+      "top": "Panel",
+      "object": "Panel",
+      "hidden": false,
+      "faces": 2,
+      "bbox": [
+        -0.5,
+        -5.0,
+        -0.5,
+        0.5,
+        -5.0,
+        0.5
+      ],
+      "mat_files": [
+        "MeshMat.mat"
+      ]
+    },
+    {
+      "top": "Direct",
+      "object": "Direct",
+      "hidden": false,
+      "bbox": [
+        -1.0,
+        0.0,
+        -1.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "mat_files": [
+        "BrokenPsdMat.mat",
+        "PsdMat.mat"
+      ]
+    },
+    {
+      "top": "Strip",
+      "object": "Strip.001",
+      "hidden": false,
+      "bbox": [
+        -8.005,
+        -0.0,
+        -0.005,
+        -7.995,
+        0.0,
+        0.005
+      ],
+      "node_only": true
+    },
+    {
+      "top": "Strip",
+      "object": "Strip",
+      "absent": true,
+      "node_only": true
+    },
+    {
+      "top": "Strip",
+      "object": "Strip.002",
+      "absent": true,
+      "node_only": true
+    },
+    {
+      "top": "Other",
+      "object": "Strip.001",
+      "hidden": false,
+      "bbox": [
+        7.5,
+        -0.5,
+        0.0,
+        8.5,
+        0.5,
+        0.0
+      ],
+      "node_only": true
+    },
+    {
+      "top": "Tall",
+      "object": "Tall",
+      "hidden": false,
+      "bbox": [
+        -0.003,
+        9.998,
+        -0.01,
+        0.003,
+        10.002,
+        0.01
+      ],
+      "node_only": true
+    }
+  ],
+  "shared_meshes": [
+    {
+      "objects": [
+        {
+          "top": "Wedge",
+          "object": "Wedge"
+        },
+        {
+          "top": "Direct",
+          "object": "Direct"
+        }
+      ],
+      "shared": true
+    }
+  ],
+  "material_checks": [
+    {
+      "name": "AssetMat",
+      "mode": "PRINCIPLED",
+      "shader_name": "Standard"
+    },
+    {
+      "name": "PsdMat",
+      "base_image": "PsdColor.psd"
+    },
+    {
+      "name": "BrokenPsdMat",
+      "base_image": null
+    },
+    {
+      "name": "LeafMat",
+      "alpha_mode": "cutout",
+      "alpha_linked": true,
+      "emission_strength": 0.0
+    },
+    {
+      "name": "ToonMat",
+      "base_image": "MeshColor.png"
+    }
+  ],
+  "warnings_contain": [
+    "could not load texture Assets/Synthetic/Textures/Broken.psd"
+  ],
+  "shadows_only": [
+    "ShadowPlane"
+  ]
+}

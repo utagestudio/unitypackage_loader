@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from .meta import MetaInfo, legacy_meta
 from .model_ids import parse_fbx_material_names, parse_fbx_node_names, parse_fbx_top_nodes
 
 __all__ = [
@@ -46,13 +47,23 @@ SCENE_EXTS = frozenset({".unity"})
 # tar では ``asset`` が ``pathname`` より先に来るのが普通なので、種類の分からない ``asset`` はいったん読んで保持し、
 # 同じ GUID の ``pathname`` で拡張子が分かった時点で残すか捨てるかを決める（保持するのは常に 1 件。#75）。
 # ``pathname`` が続けて来ないパッケージでは、保持したものを ``_CACHE_MAX_SIZE`` 以下に限って残す（超えたものは read_asset で再走査）
-# シェーダーは宣言の読み取り用（#118）、サブグラフは UV の Tiling & Offset をたどるため（#193）
-_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph", ".shadersubgraph"})
+# シェーダーは宣言の読み取り用（#118）、サブグラフは UV の Tiling & Offset をたどるため（#193）、
+# .terrainlayer は Terrain のレイヤーのテクスチャを展開の前に知るため（#205）
+_CACHE_EXTS = frozenset({".mat", ".prefab", ".unity", ".shader", ".shadergraph", ".shadersubgraph", ".terrainlayer"})
 _CACHE_MAX_SIZE = 2 << 20  # 2 MiB
 # メモリへ丸ごと読むメンバーの上限。tar ヘッダーのサイズで判定するので、gzip / sparse で
 # 小さく見せた巨大メンバーでも展開前に弾ける。超えたものは警告して無視する
 _METADATA_MAX_SIZE = 16 << 20  # pathname / asset.meta（通常は数 KB）
 _READ_ASSET_MAX_SIZE = 64 << 20  # read_asset（.mat / .prefab のテキスト解析用）
+# シーンと prefab の上限。配置の多いシーンや、ライトマップのデータなどを抱えた prefab は 64 MiB を超える（Destroyed Building Kit の
+# DBK_Big_Scene.unity は 134 MB。読むのは 1 秒弱）。細工されたパッケージへの備えとして上限は残す（#218）
+_LARGE_ASSET_EXTS = frozenset({".unity", ".prefab"})
+_LARGE_ASSET_MAX_SIZE = 512 << 20
+
+
+def _read_limit(entry: "AssetEntry") -> int:
+    """メモリへ丸ごと読んでよい大きさ（拡張子が分からなければ小さいほう）。"""
+    return _LARGE_ASSET_MAX_SIZE if entry.ext in _LARGE_ASSET_EXTS else _READ_ASSET_MAX_SIZE
 
 ProgressFn = Callable[[float, str], None]
 
@@ -73,9 +84,16 @@ class AssetEntry:
     fbx_sole_node: str = ""
     # FBX の最上位のノードが 1 つだけなら、その名前（子があってもよい。Unity はこのノードをルートに畳む。#185）
     fbx_top_node: str = ""
+    # FBX の最上位のノードが複数あるなら、その名前（scan で中身を読めた .fbx だけ。#237）
+    fbx_top_nodes: tuple[str, ...] = ()
     # FBX のマテリアルの名前（出てくる順）。scan で中身を読めた .fbx だけ（それ以外は None。#164）
     fbx_materials: list[str] | None = None
+    # OBJ のグループ（``g``）の名前（出てくる順・重複なし）。scan で中身を読めた .obj だけ（それ以外は None。#214）
+    obj_groups: list[str] | None = None
+    # Unity 4 以前のパッケージで asset.meta の代わりにある metaData から読んだ、モデルのインポーターの表（#225 の続き）
+    legacy_meta: MetaInfo | None = None
     _cache: bytes | None = field(default=None, repr=False)
+    _legacy_raw: bytes | None = field(default=None, repr=False)  # 拡張子が分かるまで保持する metaData
 
     @property
     def name(self) -> str:
@@ -293,11 +311,25 @@ def _open_for_write(target: Path):
     return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
+def obj_group_names(data: bytes) -> list[str]:
+    """OBJ のグループ（``g`` の行）の名前。Unity はグループごとにメッシュを作り、グループが無ければ ``default`` 1 つにする（#214）。"""
+    names: dict[str, None] = {}
+    for line in data.splitlines():
+        if line.startswith(b"g ") or line.startswith(b"g\t"):
+            name = line[2:].strip().decode("utf-8", "replace")
+            if name:
+                names.setdefault(name, None)
+    return list(names)
+
+
 def _note_fbx(entry: AssetEntry, data: bytes) -> None:
     """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。
 
-    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。
+    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。OBJ はグループの名前を覚える（#214）。
     """
+    if entry.ext == ".obj":
+        entry.obj_groups = obj_group_names(data)
+        return
     if entry.ext != ".fbx":
         return
     try:
@@ -313,6 +345,8 @@ def _note_fbx(entry: AssetEntry, data: bytes) -> None:
         entry.fbx_sole_node = next(iter(names))
     if tops is not None and len(tops) == 1:
         entry.fbx_top_node = tops[0]
+    elif tops:
+        entry.fbx_top_nodes = tuple(tops)
 
 
 def _drop_cache(entry: AssetEntry) -> None:
@@ -331,6 +365,76 @@ def _settle_cache(entry: AssetEntry) -> None:
             _drop_cache(entry)
     elif len(entry._cache) > _CACHE_MAX_SIZE:
         entry._cache = None
+
+
+def _settle_legacy_meta(entry: AssetEntry, warnings: list[str]) -> None:
+    """保持している metaData を、モデルなら読み、それ以外なら捨てる。拡張子が分からないうちは保持する。"""
+    raw = entry._legacy_raw
+    if raw is None or not entry.pathname:
+        return
+    entry._legacy_raw = None
+    if entry.ext not in MODEL_EXTS or entry.meta_text:
+        return
+    try:
+        entry.legacy_meta = legacy_meta(raw)
+    except ValueError as exc:  # 補助データなので、読めなければ表の無いモデルとして続ける
+        warnings.append(f"ignored metaData of {entry.pathname}: {exc}")
+
+
+# 入れ子のパッケージを選ばなかったときに優先する中身（Blender のマテリアルにもっとも近い Built-in のもの。#217）
+_NESTED_PREFERRED = ("builtin", "built-in", "birp", "standard", "3d")
+
+
+def default_nested_package(entries: list[AssetEntry]) -> AssetEntry:
+    """入れ子のパッケージのうち、選ばなかったときに読むもの（Built-in 向けらしい名前のもの、無ければ pathname 順の最初）。"""
+    for entry in entries:
+        if any(key in PurePosixPath(entry.pathname).stem.lower() for key in _NESTED_PREFERRED):
+            return entry
+    return entries[0]
+
+
+# 外側のパッケージにあっても読み込みに使わないもの（説明書など）
+_DOCUMENT_EXTS = frozenset({".txt", ".pdf", ".md", ".rtf", ".html", ".htm", ".url"})
+
+
+def merge_nested_package(outer: "UnityPackage", inner_path: Path, dest: Path) -> Path | None:
+    """入れ子のパッケージ ``inner_path`` に、外側のパッケージのアセット（入れ子のパッケージと説明書を除く）を足した
+    パッケージを ``dest`` に書く。外側に足すものが無ければ書かずに None。
+
+    中身の prefab が外側のメッシュやテクスチャを使うことがある（Conifers BOTD の BIRP / URP / HDRP の中身は prefab とマテリアルだけで、
+    メッシュは外側の Sources にある。#217）。中身にある GUID は中身のものを使う。``dest`` が両方より新しければ書き直さない。
+    """
+    outer._require_scan()
+    extra = {
+        e.guid for e in outer.entries.values()
+        if e.has_asset and e.ext != ".unitypackage" and e.ext not in _DOCUMENT_EXTS
+    }
+    if not extra:
+        return None
+    if dest.is_file() and dest.stat().st_mtime >= max(inner_path.stat().st_mtime, outer.path.stat().st_mtime):
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".partial")
+    inner_guids: set[str] = set()
+    try:
+        with tarfile.open(partial, "w:gz", compresslevel=1) as out:
+            for source, wanted in ((inner_path, None), (outer.path, extra)):
+                with tarfile.open(source, "r:*") as tar:
+                    for member in tar:
+                        split = _split_member(member.name)
+                        if split is None or not member.isfile():
+                            continue
+                        guid = split[0]
+                        if wanted is None:
+                            inner_guids.add(guid)
+                        elif guid not in wanted or guid in inner_guids:
+                            continue
+                        out.addfile(member, tar.extractfile(member))
+        partial.replace(dest)
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        partial.unlink(missing_ok=True)
+        raise PackageError(f"cannot combine {inner_path.name} with {outer.path.name}: {exc}") from exc
+    return dest
 
 
 def human_size(size: float) -> str:
@@ -368,7 +472,7 @@ class UnityPackage:
                     if held is not None and held is not entry:
                         _settle_cache(held)  # 別の GUID に移った。pathname は後から来ないものとして扱う
                         held = None
-                    if part in ("pathname", "asset.meta") and member.size > _METADATA_MAX_SIZE:
+                    if part in ("pathname", "asset.meta", "metaData") and member.size > _METADATA_MAX_SIZE:
                         self.warnings.append(
                             f"ignored {member.name}: {member.size} bytes exceeds the {_METADATA_MAX_SIZE} byte limit"
                         )
@@ -376,19 +480,23 @@ class UnityPackage:
                         text = tar.extractfile(member).read().decode("utf-8", "replace")
                         entry.pathname = text.splitlines()[0].strip() if text.strip() else ""
                         _settle_cache(entry)
+                        _settle_legacy_meta(entry, self.warnings)
                         held = None
                     elif part == "asset.meta":
                         entry.meta_text = tar.extractfile(member).read().decode("utf-8", "replace")
+                    elif part == "metaData" and (not entry.pathname or entry.ext in MODEL_EXTS):
+                        entry._legacy_raw = tar.extractfile(member).read()
+                        _settle_legacy_meta(entry, self.warnings)
                     elif part == "asset":
                         entry.has_asset = True
                         entry.size = member.size
                         entry.mtime = int(member.mtime)
                         known = bool(entry.pathname)
-                        if member.size <= _READ_ASSET_MAX_SIZE and (not known or entry.ext in _CACHE_EXTS):
+                        if member.size <= (_read_limit(entry) if known else _READ_ASSET_MAX_SIZE) and (not known or entry.ext in _CACHE_EXTS):
                             entry._cache = tar.extractfile(member).read()
                             if not known:
                                 held = entry
-                        elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext == ".fbx":
+                        elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext in (".fbx", ".obj"):
                             _note_fbx(entry, tar.extractfile(member).read())
                     if progress is not None:
                         progress(0.0, entry.pathname or guid)
@@ -402,9 +510,20 @@ class UnityPackage:
         for entry in entries.values():
             if entry._cache is not None and entry.ext not in _CACHE_EXTS:
                 _drop_cache(entry)
+            _settle_legacy_meta(entry, self.warnings)
+            entry._legacy_raw = None
 
         self.entries = entries
         self._scanned = True
+        # pathname より先に来た大きなシーン・prefab は、拡張子が分からないうちは小さいほうの上限で読まなかった。
+        # まとめて 1 回の再走査で読んでおく（シーンごとに走査し直さない。#218）
+        large = [
+            e.guid for e in entries.values()
+            if e.ext in _LARGE_ASSET_EXTS and e.has_asset and e._cache is None and _READ_ASSET_MAX_SIZE < e.size <= _LARGE_ASSET_MAX_SIZE
+        ]
+        if large:
+            for guid, data in self.read_assets(large).items():
+                entries[guid]._cache = data
         return entries
 
     # ---------------------------------------------------------------- lookup
@@ -431,6 +550,13 @@ class UnityPackage:
     def scenes(self) -> list[AssetEntry]:
         return self.by_kind("scene")
 
+    def nested_packages(self) -> list[AssetEntry]:
+        """中に入れ子になった .unitypackage。モデル・prefab・シーンが 1 つも無いときだけ（パイプライン別の中身を
+        .unitypackage のまま同梱したパッケージ。外側には読み込めるものが無い。#217）。pathname 順。"""
+        if self.models() or self.prefabs() or self.scenes():
+            return []
+        return sorted((e for e in self.entries.values() if e.has_asset and e.ext == ".unitypackage"), key=lambda e: e.pathname)
+
     def get(self, guid: str) -> AssetEntry | None:
         self._require_scan()
         return self.entries.get(guid.lower())
@@ -454,10 +580,11 @@ class UnityPackage:
             raise KeyError(guid)
         if entry._cache is not None:
             return entry._cache
-        if entry.size > _READ_ASSET_MAX_SIZE:
+        limit = _read_limit(entry)
+        if entry.size > limit:
             raise PackageError(
                 f"{entry.pathname or guid} is too large to read into memory "
-                f"({entry.size} bytes > {_READ_ASSET_MAX_SIZE} byte limit)"
+                f"({entry.size} bytes > {limit} byte limit)"
             )
         target = f"{entry.guid}/asset"
         try:
@@ -465,7 +592,7 @@ class UnityPackage:
                 for member in tar:
                     split = _split_member(member.name)
                     if split and split[0] == entry.guid and split[1] == "asset":
-                        if member.size > _READ_ASSET_MAX_SIZE:  # 索引と食い違う場合の保険
+                        if member.size > limit:  # 索引と食い違う場合の保険
                             raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
                         return tar.extractfile(member).read()
         except (tarfile.TarError, EOFError, OSError) as exc:  # scan と同じく PackageError に揃える
@@ -486,7 +613,7 @@ class UnityPackage:
         wanted: set[str] = set()
         for guid in guids:
             entry = self.get(guid)
-            if entry is None or not entry.has_asset or entry.size > _READ_ASSET_MAX_SIZE:
+            if entry is None or not entry.has_asset or entry.size > _read_limit(entry):
                 continue
             if entry._cache is not None:
                 result[entry.guid] = entry._cache
@@ -498,7 +625,7 @@ class UnityPackage:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
                     split = _split_member(member.name)
-                    if split and split[1] == "asset" and split[0] in wanted and member.size <= _READ_ASSET_MAX_SIZE:
+                    if split and split[1] == "asset" and split[0] in wanted and member.size <= _read_limit(self.entries[split[0]]):
                         result[split[0]] = tar.extractfile(member).read()
                         wanted.discard(split[0])
                         if not wanted:

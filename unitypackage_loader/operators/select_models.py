@@ -30,7 +30,7 @@ from ..core.units import (
 )
 from ..blender import log
 from .common import report_level
-from ..ui.preferences import ARRANGE_ITEMS, UNIT_ITEMS, get_prefs
+from ..ui.preferences import ARRANGE_ITEMS, TERRAIN_ITEMS, UNIT_ITEMS, get_prefs
 
 if TYPE_CHECKING:
     from ..blender.importer import ImportOptions, PreparedPackage
@@ -122,6 +122,8 @@ def add_scene_items(items, prepared) -> None:
         if s.supported:
             models = len(s.contents.model_guids) if s.contents is not None else 0
             item.detail_text = f"{len(s.placements)} placed · {_plural(models, 'model')}"
+            if s.contents is not None and s.contents.terrains:
+                item.detail_text += f" · {_plural(s.contents.terrains, 'terrain')}"
         else:
             item.detail_text = _short_reason(s.skip_reason)
         item.supported = s.supported
@@ -222,6 +224,7 @@ _LIGHTS_PROP = "unitypkg_select_lights"
 _CAMERAS_PROP = "unitypkg_select_cameras"
 _EXPOSURE_PROP = "unitypkg_select_exposure"
 _DECALS_PROP = "unitypkg_select_decals"
+_TERRAIN_PROP = "unitypkg_select_terrain"
 _LODS_PROP = "unitypkg_select_hide_lods"
 _UNUSED_PROP = "unitypkg_select_skip_unused"
 
@@ -306,6 +309,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
             row.prop(wm, _CAMERAS_PROP, toggle=True, icon="CAMERA_DATA")
             row.prop(wm, _EXPOSURE_PROP, toggle=True, icon="LIGHT_SUN")
             row.prop(wm, _DECALS_PROP, toggle=True, icon="MESH_PLANE")
+            row.prop(wm, _TERRAIN_PROP, text="", icon="MESH_GRID")
 
         if unit in (UNIT_PREFABS, UNIT_SCENES):
             # LODGroup を持つ prefab・シーンだけに効く。タブを切り替えても高さが変わらないよう、両方に出す
@@ -360,6 +364,7 @@ class IMPORT_SCENE_OT_unitypackage_select(bpy.types.Operator):
         opts.scene_cameras = getattr(wm, _CAMERAS_PROP)
         opts.scene_exposure = getattr(wm, _EXPOSURE_PROP)
         opts.scene_decals = getattr(wm, _DECALS_PROP)
+        opts.scene_terrain = getattr(wm, _TERRAIN_PROP)
         opts.hide_lods = getattr(wm, _LODS_PROP)
         opts.skip_unused_parts = getattr(wm, _UNUSED_PROP)
         opts.scene_paths = opts.prefab_paths = opts.model_guids = None
@@ -457,6 +462,15 @@ def _window_manager_props() -> dict:
             description=(
                 "Import the scene's URP / HDRP Decal Projectors as flat planes with the decal material, "
                 "placed in the middle of each projector's box. Good for decals on flat walls and roads"
+            ),
+        ),
+        _TERRAIN_PROP: EnumProperty(
+            name="Terrain",
+            items=TERRAIN_ITEMS,
+            default="513",
+            description=(
+                "Import the scene's Unity Terrains as meshes with their painted layers. A finer heightmap is thinned "
+                "out to the chosen number of vertices per side. Trees and grass are not imported"
             ),
         ),
         _LODS_PROP: BoolProperty(

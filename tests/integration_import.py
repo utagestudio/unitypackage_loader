@@ -111,10 +111,13 @@ def _strip_suffix(name: str) -> str:
     return base if dot and suffix.isdigit() and len(suffix) == 3 else name
 
 
-def _find_placed(top: str, name: str, parent: str | None = None) -> list:
+def _find_placed(top: str, name: str, parent: str | None = None, node_only: bool = False) -> list:
     found = []
     for obj in bpy.data.objects:
-        if _strip_suffix(obj.name) != name:
+        # 名前は連番を除いたオブジェクト名か、FBX のノードとしての名前（ノード名がもともと連番の形のとき。#237）。
+        # node_only ならノードとしての名前だけで探す（連番を外すと同じ名前になるノードを区別する）
+        node = obj.get("unity_fbx_node")
+        if node != name and (node_only or _strip_suffix(obj.name) != name):
             continue
         if parent is not None and (obj.parent is None or _strip_suffix(obj.parent.name) != parent):
             continue
@@ -188,6 +191,9 @@ def check_objects(ctx: Context) -> None:
         c.eq("mesh count", sum(1 for o in bpy.data.objects if o.type == "MESH"), objs["mesh_count"])
     if "armature_count" in objs:
         c.eq("armature count", sum(1 for o in bpy.data.objects if o.type == "ARMATURE"), objs["armature_count"])
+        # 読み込んだアーマチュアは線で表示する（#260）
+        displays = {o.display_type for o in bpy.data.objects if o.type == "ARMATURE"}
+        c.true("armatures are displayed as wire", displays <= {"WIRE"})
 
 
 def check_materials(ctx: Context) -> None:
@@ -208,10 +214,31 @@ def check_images(ctx: Context) -> None:
     c, images = ctx.c, ctx.exp.get("images", {})
     if "count" in images:
         c.eq("image count", len(ctx.report.images), images["count"])
+    if "missing" in images:
+        # ファイルの見つからない画像（モデルの中のパスが作者の PC のものなど。#220）
+        missing = [
+            i.name for i in bpy.data.images
+            if i.source == "FILE" and not i.packed_file and i.filepath and not Path(bpy.path.abspath(i.filepath)).is_file()
+        ]
+        c.eq("images with missing files", len(missing), images["missing"])
     if "packed" in images:
         # レポートに載った画像（このアドオンが読み込んだもの）がすべて .blend に取り込まれているか
         unpacked = [n for n in ctx.report.images if bpy.data.images.get(n) is None or bpy.data.images[n].packed_file is None]
         c.eq("images not packed", unpacked if images["packed"] else [], [])
+
+
+def check_shadows_only(ctx: Context) -> None:
+    """Shadows Only の Renderer（#232）: カメラなどから見えず、影だけを落とすオブジェクト（名前の連番は外して比べる）。"""
+    if "shadows_only" not in ctx.exp:
+        return
+    from unitypackage_loader.core.meta import strip_numeric_suffix
+
+    c = ctx.c
+    found = sorted({
+        strip_numeric_suffix(o.name) for o in bpy.data.objects
+        if o.get("unity_shadows_only") and not o.visible_camera and o.visible_shadow
+    })
+    c.eq("shadows-only objects", found, sorted(ctx.exp["shadows_only"]))
 
 
 def check_warnings(ctx: Context) -> None:
@@ -226,12 +253,26 @@ def check_warnings(ctx: Context) -> None:
         c.eq("split slots", report.split_slots, exp["split_slots"])
 
 
+def _find_mesh(spec: str):
+    """オブジェクト名か、"コレクション/FBX のノード名"（読み込む単位 Prefabs では、prefab の GameObject の Empty が
+    同じ名前を取るので、メッシュには連番が付く。#240）で引く。"""
+    if "/" not in spec:
+        return bpy.data.objects.get(spec)
+    coll_name, node = spec.split("/", 1)
+    coll = bpy.data.collections.get(coll_name)
+    if coll is None:
+        return None
+    return next(
+        (o for o in coll.all_objects if o.type == "MESH" and (o.get("unity_fbx_node") or o.name) == node), None
+    )
+
+
 def check_submesh_materials(ctx: Context) -> None:
     """ポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、
     どのポリゴン群にどのマテリアルが付いたかを確かめる。"""
     c = ctx.c
     for obj_name, names in ctx.exp.get("submesh_materials", {}).items():
-        obj = bpy.data.objects.get(obj_name)
+        obj = _find_mesh(obj_name)
         c.true(f"object {obj_name} exists", obj is not None)
         if obj is None:
             continue
@@ -371,7 +412,9 @@ def check_collections(ctx: Context) -> None:
             continue
         objects = list(coll.all_objects)
         if "objects" in spec:
-            c.eq(f"{coll_name}.objects", len(objects), spec["objects"])
+            # Prefabs 単位も prefab の中の GameObject を Empty で再現するので、その Empty（unity_game_object）は数えない（#240）
+            placed = [o for o in objects if not (o.type == "EMPTY" and "unity_game_object" in o)]
+            c.eq(f"{coll_name}.objects", len(placed), spec["objects"])
         if "prefab" in spec:
             c.eq(f"{coll_name}.unity_prefab", coll.get("unity_prefab"), spec["prefab"])
         if "mat_files" in spec:
@@ -379,7 +422,9 @@ def check_collections(ctx: Context) -> None:
             c.eq(f"{coll_name}.mat_files", _mat_files(mats), sorted(spec["mat_files"]))
         # コレクションの中の個々のオブジェクト（非表示か、LODGroup の段）
         for obj_name, part in spec.get("parts", {}).items():
-            obj = next((o for o in objects if o.name == obj_name), None)
+            obj = next((o for o in objects if o.name == obj_name and "unity_game_object" not in o), None) or next(
+                (o for o in objects if o.get("unity_fbx_node") == obj_name), None
+            )
             if part.get("absent"):  # 読み込まないもの（使われていない部品。#152）
                 c.true(f"{coll_name}/{obj_name} absent", obj is None)
                 continue
@@ -420,6 +465,9 @@ def check_prefab_overlap(ctx: Context) -> None:
 
 
 def check_scenes(ctx: Context) -> None:
+    if "package_collection" in ctx.exp:  # パッケージのコレクションの名前（入れ子のパッケージは「外側 (中身)」。#217）
+        ctx.c.true("package collection", ctx.exp["package_collection"] in bpy.data.collections,
+                   f"collections: {[c.name for c in bpy.data.collections]}")
     if "count" in ctx.exp.get("scenes", {}):
         ctx.c.eq("scene count", len(ctx.report.scenes), ctx.exp["scenes"]["count"])
 
@@ -431,7 +479,7 @@ def check_placed_objects(ctx: Context) -> None:
     c = ctx.c
     for spec in ctx.exp.get("placed_objects", []):
         label = "/".join(filter(None, (spec["top"], spec.get("parent"), spec["object"])))
-        found = _find_placed(spec["top"], spec["object"], spec.get("parent"))
+        found = _find_placed(spec["top"], spec["object"], spec.get("parent"), spec.get("node_only", False))
         if spec.get("absent"):  # 読み込まないもの（使われていない部品。#152）
             c.eq(f"{label} found", len(found), 0)
             continue
@@ -451,6 +499,10 @@ def check_placed_objects(ctx: Context) -> None:
             c.near(f"{label}.normal", (obj.matrix_world.to_3x3() @ obj.data.polygons[0].normal).normalized(), spec["normal"])
         if "hidden" in spec:
             c.eq(f"{label}.hidden", obj.hide_get(), spec["hidden"])
+        if "vertices" in spec:  # メッシュの頂点数と面数（Terrain の間引きと穴。#205）
+            c.eq(f"{label}.vertices", len(obj.data.vertices), spec["vertices"])
+        if "faces" in spec:
+            c.eq(f"{label}.faces", len(obj.data.polygons), spec["faces"])
         if "lod" in spec:
             c.eq(f"{label}.lod", obj.get("unity_lod"), spec["lod"])
         if "mat_files" in spec:
@@ -526,6 +578,8 @@ def check_scene_settings(ctx: Context) -> None:
         c.eq("report cameras", report.cameras, exp["camera_count"])
     if "decal_count" in exp:
         c.eq("report decals", report.decals, exp["decal_count"])
+    if "terrain_count" in exp:
+        c.eq("report terrains", report.terrains, exp["terrain_count"])
 
 
 def check_shared_meshes(ctx: Context) -> None:
@@ -555,6 +609,7 @@ CHECKS: list[Callable[[Context], None]] = [
     check_objects,
     check_materials,
     check_images,
+    check_shadows_only,
     check_warnings,
     check_submesh_materials,
     check_material_checks,

@@ -1,9 +1,11 @@
 import unittest
 
 from tests import _paths  # noqa: F401
+from tests import unity_binary_writer as w
 from unitypackage_loader.core.meta import (
     ModelImporterInfo,
     TextureImporterInfo,
+    legacy_meta,
     parse_meta,
     strip_numeric_suffix,
 )
@@ -75,6 +77,14 @@ class ModelImporterTests(unittest.TestCase):
         self.assertAlmostEqual(info.global_scale, 0.01)
         self.assertFalse(info.use_file_scale)
         self.assertTrue(info.import_blend_shapes)
+        self.assertFalse(info.bake_axis_conversion)  # 書かれていなければ無効（Unity の既定）
+
+    def test_bake_axis_conversion(self):
+        # Cardboard Boxes Pack の箱は有効、Shibuya の Unreal 由来の FBX は無効（#240）
+        info = ModelImporterInfo.from_meta("ModelImporter:\n  meshes:\n    bakeAxisConversion: 1\n")
+        self.assertTrue(info.bake_axis_conversion)
+        info = ModelImporterInfo.from_meta("ModelImporter:\n  meshes:\n    bakeAxisConversion: 0\n")
+        self.assertFalse(info.bake_axis_conversion)
 
     def test_resolve_material(self):
         info = ModelImporterInfo.from_meta(MODEL_META)
@@ -140,6 +150,58 @@ ModelImporter:
 
     def test_new_format_has_empty_table(self):
         self.assertEqual(ModelImporterInfo.from_meta(MODEL_META).recycle_names, {})
+
+
+class LegacyMetaDataTests(unittest.TestCase):
+    """Unity 4 以前のパッケージの metaData（バイナリの SerializedFile + プレビューの PNG。#225 の続き）。"""
+
+    # Unity 4 は //RootNode を後ろに置くことがあり、100000 / 400000 が中のノードを指す
+    TABLE = [(100000, "frame"), (100002, "//RootNode"), (400000, "frame"), (400002, "//RootNode"), (4300000, "frame")]
+
+    @staticmethod
+    def meta_data(
+        importer: str, class_id: int, table: list[tuple[int, str]], big_endian: bool = False, global_scale: float = 0.01
+    ) -> bytes:
+        tree = w.cls(
+            importer, "Base", w.string("m_Name"),
+            w.map_("m_FileIDToRecycleName", w.prim("SInt64", "first"), w.string("second")), w.prim("float", "m_GlobalScale"),
+        )
+        data = w.build_serialized_file(
+            [(3, class_id, tree, {"m_Name": "", "m_FileIDToRecycleName": table, "m_GlobalScale": global_scale})],
+            version=9, big_endian=big_endian, unity_version="4.6.1f1",
+        )
+        return data + b"\x89PNG\r\n\x1a\n" + bytes(64)  # 後ろに続くプレビュー
+
+    def test_model_table_is_read(self):
+        for big_endian in (False, True):
+            with self.subTest(big_endian=big_endian):
+                meta = legacy_meta(self.meta_data("ModelImporter", 1040, self.TABLE, big_endian))
+                info = ModelImporterInfo.from_meta(meta)
+                self.assertEqual(info.recycle_names, dict(self.TABLE))
+                self.assertAlmostEqual(info.legacy_global_scale, 0.01)
+
+    def test_unity4_scale_ignores_fbx_units(self):
+        # Japanese School Cafeteria: cm の FBX（頂点 80 → 0.8 m）も m の FBX（頂点 150 → 1.5 m）も m_GlobalScale 0.01 だけ。
+        # Blender は UnitScaleFactor / 100 を掛けるので、その差を読み込みで掛ける
+        info = ModelImporterInfo.from_meta(legacy_meta(self.meta_data("ModelImporter", 1040, self.TABLE)))
+        self.assertAlmostEqual(info.import_scale(1.0), 1.0)
+        self.assertAlmostEqual(info.import_scale(100.0), 0.01)
+        self.assertAlmostEqual(info.import_scale(None), 1.0)  # 単位が無い FBX は Blender と同じく cm とみなす
+        self.assertAlmostEqual(info.unity_unit_scale(100.0), 1.0)  # 配置の計算の fileScale は m_GlobalScale
+        # Unity 5 以降のモデル（テキストの .meta）は今までどおり
+        text = ModelImporterInfo.from_meta(LegacyRecycleNameTests.META)
+        self.assertIsNone(text.legacy_global_scale)
+        self.assertEqual((text.import_scale(100.0), text.unity_unit_scale(100.0)), (1.0, 100.0))
+
+    def test_other_importers_are_ignored(self):
+        self.assertIsNone(legacy_meta(self.meta_data("TextureImporter", 1006, [])))
+
+    def test_broken_data_raises_value_error(self):
+        data = self.meta_data("ModelImporter", 1040, self.TABLE)
+        for broken in (b"", data[:10], data[:4] + b"\xff\xff\xff\xff" + data[8:], data[:200]):
+            with self.subTest(size=len(broken)):
+                with self.assertRaises(ValueError):
+                    legacy_meta(broken)
 
 
 class TextureImporterTests(unittest.TestCase):

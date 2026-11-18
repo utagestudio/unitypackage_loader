@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from .decals import is_decal_projector
 from .transform import IDENTITY, Mat4, multiply, trs
 from .unity_binary import load_documents
-from .unity_yaml import UnityRef, ref_guid, to_float
+from .unity_yaml import UnityDocument, UnityRef, ref_guid, to_float
 
 CLASS_GAME_OBJECT = 1
 CLASS_TRANSFORM = 4
@@ -37,8 +37,8 @@ CLASS_PREFAB_INSTANCE = 1001
 
 _TRANSFORM_CLASSES = (CLASS_TRANSFORM, CLASS_RECT_TRANSFORM)
 RENDERER_CLASSES = (CLASS_MESH_RENDERER, CLASS_SKINNED_MESH_RENDERER)
-# 中身をそのまま持ち、上書きを当ててから読むコンポーネント。ほかに、DecalProjector の形をした MonoBehaviour も持つ
-# （``parse_asset``。#165）。``components()`` の既定はライト・カメラだけ
+# 中身をそのまま持ち、上書きを当ててから読むコンポーネント。ほかに、DecalProjector の形をした MonoBehaviour（#165）と
+# Terrain（#205）も持つ（``parse_asset``）。``components()`` の既定はライト・カメラだけ
 COMPONENT_CLASSES = (CLASS_LIGHT, CLASS_CAMERA)
 
 # モデル（FBX 等）の PrefabInstance で、ルートの GameObject / Transform を指す fileID（FBX によらず定数。Issue #31）。
@@ -110,6 +110,7 @@ class PartState:
     enabled: bool | None = None  # Renderer の m_Enabled
     removed_object: bool = False  # m_RemovedGameObjects で消した GameObject（子孫も含めて Unity に無い）
     removed_renderer: bool = False  # m_RemovedComponents で消した Renderer
+    shadows_only: bool | None = None  # Renderer の m_CastShadows が Shadows Only（3）か（影だけを落とし、本体は描かない。#232）
 
     @property
     def removed(self) -> bool:
@@ -151,6 +152,20 @@ def legacy_class(file_id: int) -> int:
     return file_id // _LEGACY_ID_STRIDE
 
 
+def legacy_root_ids(table: dict[int, str]) -> dict[int, int]:
+    """古い形式のモデルで、ルートの GameObject / Transform を指す fileID → 新しい形式のルートの fileID。
+
+    ふつうは 100000 / 400000 だが、Unity 4 では名前順などで番号が振られ、``//RootNode`` が 100006 / 400006 のように
+    後ろになり、100000 が中のノードを指すこともある（Japanese School Cafeteria）。表にルートの行があればそれを使い、
+    無ければ（表が無い・一部の行しか無い）100000 / 400000 とみなす。
+    """
+    roots = {CLASS_GAME_OBJECT: MODEL_ROOT_GAME_OBJECT, CLASS_TRANSFORM: MODEL_ROOT_TRANSFORM}
+    found = {k: roots[legacy_class(k)] for k, name in table.items() if name == ROOT_NODE_NAME and legacy_class(k) in roots}
+    if {legacy_class(k) for k in found} == set(roots):
+        return found
+    return dict(LEGACY_MODEL_IDS)
+
+
 # ---------------------------------------------------------------------------
 # 1 アセットの読み取り
 # ---------------------------------------------------------------------------
@@ -164,6 +179,14 @@ class RendererInfo:
     enabled: bool = True
     mesh_file_id: int = 0  # メッシュ参照の fileID（モデルの中のどのメッシュか）
     lod_level: int = 0  # LODGroup の段（0 = もっとも細かい LOD0、または LODGroup が無い）
+    shadows_only: bool = False  # m_CastShadows が Shadows Only（3）。影だけを落とし、本体は描かない（#232）
+
+
+SHADOWS_ONLY = 3  # Renderer の m_CastShadows の値（Off 0 / On 1 / TwoSided 2 / ShadowsOnly 3）
+
+
+def is_shadows_only(value: object) -> bool:
+    return to_float(value, 1.0) == SHADOWS_ONLY
 
 
 @dataclass
@@ -197,8 +220,9 @@ class RawAsset:
     renderers: dict[int, tuple[int, RendererInfo]] = field(default_factory=dict)  # Renderer の fileID → (GameObject, 情報)
     instances: list[_RawInstance] = field(default_factory=list)
     aliases: dict[int, tuple[int, int]] = field(default_factory=dict)  # stripped の fileID → (PrefabInstance, 元の fileID)
-    # コンポーネント（ライト・カメラ・デカール）の fileID → (GameObject, クラス ID, ドキュメントの中身)
+    # コンポーネント（ライト・カメラ・デカール・Terrain）の fileID → (GameObject, クラス ID, ドキュメントの中身)
     components: dict[int, tuple[int, int, dict]] = field(default_factory=dict)
+    mesh_filters: dict[int, int] = field(default_factory=dict)  # MeshFilter の fileID → GameObject（m_Mesh の上書きの対象。#242）
     lod_groups: list[list[list[int]]] = field(default_factory=list)  # LODGroup ごとの、段の順に並べた Renderer の fileID
     collider_meshes: set[str] = field(default_factory=set)  # MeshCollider の m_Mesh が指すアセットの GUID（#166）
     counts: Counter = field(default_factory=Counter)  # stripped でないドキュメントのクラス ID ごとの数
@@ -234,14 +258,41 @@ def _lod_levels(body: dict) -> list[list[int]]:
     return levels
 
 
+def _exploded_instances(docs: list[UnityDocument]) -> set[int]:
+    """中身を展開済み（``m_IsExploded``）で保存した PrefabInstance の fileID。
+
+    Unity 4 のシーンは PrefabInstance の中のオブジェクトを stripped にせず、値ごと丸ごと保存している（Japanese School
+    Cafeteria）。元を差し込むと二重になるので、``parse_asset`` はその中身を stripped と同じく元のオブジェクトの別名として
+    扱い、PrefabInstance の差し込みと上書きで作る。2018.2 以前でも YAML のシーンは stripped を使い、この値を持たない。
+    """
+    return {
+        doc.file_id for doc in docs
+        if doc.class_id == CLASS_PREFAB_INSTANCE and not doc.stripped
+        and ref_guid(doc.body.get("m_ParentPrefab")) and to_float(doc.body.get("m_IsExploded"), 0.0) != 0
+    }
+
+
+def _in_exploded(body: dict, exploded: set[int]) -> bool:
+    """展開済みの PrefabInstance の中にある、元のアセットのオブジェクトか（その PrefabInstance で足したものは除く）。"""
+    if not exploded:
+        return False
+    source, instance = body.get("m_PrefabParentObject"), body.get("m_PrefabInternal")
+    return (
+        isinstance(source, UnityRef) and bool(source.file_id)
+        and isinstance(instance, UnityRef) and instance.file_id in exploded
+    )
+
+
 def parse_asset(data: str | bytes) -> RawAsset:
     """シーンか prefab を読む（テキスト / バイナリは自動判定）。"""
     raw = RawAsset()
     meshes: dict[int, str] = {}  # GameObject → MeshFilter のメッシュの GUID
     renderer_docs = []
-    for doc in load_documents(data):
+    docs = load_documents(data)
+    exploded = _exploded_instances(docs)
+    for doc in docs:
         body = doc.body
-        if doc.stripped:
+        if doc.stripped or _in_exploded(body, exploded):
             # 2018.3 以降は m_CorrespondingSourceObject / m_PrefabInstance、それより前は m_PrefabParentObject / m_PrefabInternal
             source = body.get("m_CorrespondingSourceObject", body.get("m_PrefabParentObject"))
             instance = body.get("m_PrefabInstance", body.get("m_PrefabInternal"))
@@ -264,12 +315,16 @@ def parse_asset(data: str | bytes) -> RawAsset:
                 doc.class_id == CLASS_RECT_TRANSFORM,
             )
         elif doc.class_id == CLASS_MESH_FILTER:
-            mesh = ref_guid(body.get("m_Mesh"))
-            if mesh:
-                meshes[_file_id(body.get("m_GameObject"))] = (mesh, _file_id(body.get("m_Mesh")))
+            raw.mesh_filters[doc.file_id] = _file_id(body.get("m_GameObject"))
+            mesh, mesh_id = ref_guid(body.get("m_Mesh")), _file_id(body.get("m_Mesh"))
+            if mesh or mesh_id:  # GUID の無い参照は同じアセットに埋め込んだ Mesh（展開するときにアセットの GUID にする。#216）
+                meshes[_file_id(body.get("m_GameObject"))] = (mesh, mesh_id)
         elif doc.class_id in RENDERER_CLASSES:
             renderer_docs.append(doc)
-        elif doc.class_id in COMPONENT_CLASSES or (doc.class_id == CLASS_MONO_BEHAVIOUR and is_decal_projector(body)):
+        elif (
+            doc.class_id in COMPONENT_CLASSES or doc.class_id == CLASS_TERRAIN
+            or (doc.class_id == CLASS_MONO_BEHAVIOUR and is_decal_projector(body))
+        ):
             raw.components[doc.file_id] = (_file_id(body.get("m_GameObject")), doc.class_id, body)
         elif doc.class_id == CLASS_MESH_COLLIDER:
             mesh = ref_guid(body.get("m_Mesh"))
@@ -314,7 +369,8 @@ def parse_asset(data: str | bytes) -> RawAsset:
         else:
             mesh, mesh_id = meshes.get(go, (None, 0))
         enabled = to_float(body.get("m_Enabled"), 1.0) != 0
-        raw.renderers[doc.file_id] = (go, RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id))
+        info = RendererInfo(mesh, materials, doc.class_id, enabled, mesh_id, shadows_only=is_shadows_only(body.get("m_CastShadows")))
+        raw.renderers[doc.file_id] = (go, info)
     return raw
 
 
@@ -354,6 +410,8 @@ class Node:
     # 1 メッシュの FBX（表で分かる畳まれたノードの名前）か表の無いモデル（``SOLE_NODE``）のモデルの PrefabInstance のルート。
     # このルートへの位置・回転・スケールの上書きは、どの階層のものも成分付きで ``model_transforms`` に記録する（#99 / #111）
     collapsed_key: str | None = None
+    # モデルの PrefabInstance のルートで、モデルの中の MeshFilter のメッシュを差し替える上書き（対象の fileID → (GUID, fileID)。#242）
+    model_meshes: dict[int, tuple[str | None, int]] = field(default_factory=dict)
     # モデルの PrefabInstance のルートで、モデルの中の fileID から今のアセットでの fileID への XOR（差し込んだ PrefabInstance の
     # fileID を重ねたもの）。prefab を挟んだ外側からの上書きの対象を、モデルの中の fileID に戻すのに使う（#31）
     id_mask: int = 0
@@ -373,6 +431,7 @@ class Node:
             model_materials={k: list(v) for k, v in self.model_materials.items()},
             model_transforms=copy.deepcopy(self.model_transforms),
             model_parts={k: replace(v) for k, v in self.model_parts.items()},
+            model_meshes=dict(self.model_meshes),
             **changes,
         )
 
@@ -385,6 +444,7 @@ class Hierarchy:
     renderers: dict[int, int] = field(default_factory=dict)
     components: dict[int, int] = field(default_factory=dict)  # コンポーネント（ライト・カメラ・デカール）
     transforms: dict[int, int] = field(default_factory=dict)  # 消した Node を指したままのことがある
+    mesh_filters: dict[int, int] = field(default_factory=dict)  # MeshFilter（m_Mesh の上書きの対象。#242）
     counts: Counter = field(default_factory=Counter)  # 展開したドキュメントのクラス ID ごとの数（モデルの中身は含まない）
     unresolved_overrides: int = 0  # モデルの中のオブジェクトを指すため当てられなかった上書き
     unresolved_material_overrides: int = 0  # そのうちマテリアルの上書き（Models / Prefabs 単位の警告に使う）

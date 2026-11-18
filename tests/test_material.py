@@ -165,6 +165,32 @@ class ProfileSelectionTests(unittest.TestCase):
         self.assertIsInstance(profile, StandardProfile)
         self.assertEqual(info.name, "Standard")
 
+    def test_legacy_builtin_transparent_and_cutout(self):
+        """組み込みの Legacy Shaders（fileID は Unity 6000.6 の unity_builtin_extra から。#256）。"""
+
+        def legacy(file_id: int) -> str:
+            return (
+                "%YAML 1.1\n--- !u!21 &2100000\nMaterial:\n  m_Name: Glass\n"
+                f"  m_Shader: {{fileID: {file_id}, guid: 0000000000000000f000000000000000, type: 0}}\n"
+                "  m_SavedProperties:\n    m_TexEnvs:\n    - _MainTex:\n        m_Texture: {fileID: 2800000, guid: "
+                + "c" * 32 + ", type: 3}\n        m_Scale: {x: 1, y: 1}\n        m_Offset: {x: 0, y: 0}\n"
+                "    m_Floats:\n    - _Shininess: 0.6\n    m_Colors:\n    - _Color: {r: 1, g: 1, b: 1, a: 1}\n"
+            )
+
+        # Japanese Phone Booth のガラス（Unity 4.6 の Transparent/Specular）
+        n = normalize_material(parse_material(legacy(32), guid="g" * 32))
+        self.assertEqual((n.family, n.alpha_mode, n.alpha_from_texture), ("legacy", "blend", True))
+        n = normalize_material(parse_material(legacy(51), guid="g" * 32))  # Transparent/Cutout/Diffuse
+        self.assertEqual((n.alpha_mode, n.alpha_from_texture), ("cutout", True))
+        n = normalize_material(parse_material(legacy(203), guid="g" * 32))  # Particles/Alpha Blended
+        self.assertEqual((n.alpha_mode, n.lighting), ("blend", "unlit"))
+        # Standard から切り替えて _Mode（0 = 不透明）が残ったもの（Synty の FX_Default_01）
+        with_mode = legacy(202).replace("    - _Shininess: 0.6\n", "    - _Shininess: 0.6\n    - _Mode: 0\n")
+        n = normalize_material(parse_material(with_mode, guid="g" * 32))  # Particles/Additive (Soft)
+        self.assertEqual((n.alpha_mode, n.lighting), ("blend", "unlit"))
+        n = normalize_material(parse_material(legacy(3), guid="g" * 32))  # Specular（不透明）
+        self.assertEqual((n.family, n.alpha_mode), ("legacy", "opaque"))
+
     def test_unknown_falls_back_to_generic(self):
         profile, info = select_profile(parse_material(UNKNOWN_TOON))
         self.assertIsInstance(profile, GenericProfile)

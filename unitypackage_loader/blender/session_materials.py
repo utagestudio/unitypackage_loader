@@ -17,6 +17,7 @@ from ..core.material import NormalizedMaterial, UnityMaterial
 from ..core.meta import TextureImporterInfo, strip_numeric_suffix
 from ..core.package import UnityPackage
 from ..core.prefab import RendererMaterials
+from .model_import import node_name
 from ..core.report import ImportReport, MaterialReport
 from . import materials as mat_builder
 from .log import log_exception
@@ -74,6 +75,9 @@ class SessionMaterials:
         )
         self.built_by_guid: dict[str, bpy.types.Material] = {}  # .mat の GUID → この回で組んだマテリアル（#77）
         self.decal_materials: dict[str, bpy.types.Material | None] = {}  # .mat の GUID → デカール用に組んだマテリアル
+        # スロットが無く、prefab・シーンの割り当ても無かったメッシュ（モデル名, オブジェクト）。使われていない部品として
+        # 後で消すものもあるので、警告は読み込みの最後に、残ったものにだけ出す（``warn_slotless``。#213）
+        self.slotless: list[tuple[str, bpy.types.Object]] = []
 
     # --- 画像 ---
 
@@ -168,7 +172,7 @@ class SessionMaterials:
         モデルがマテリアルを持たないとスロットは 0 個になるが、Unity では Renderer の ``m_Materials[0]`` で描かれる。
         このときはスロット 0 を作ってから割り当てる（#102）。
         """
-        by_name = {o.name: o for o in objects if o.type == "MESH"}
+        by_name = {node_name(o): o for o in objects if o.type == "MESH"}
         count = 0
         for (obj_name, index), guid in assignments.items():
             obj = by_name.get(obj_name)
@@ -234,20 +238,18 @@ class SessionMaterials:
         model = summary.entry
         objects = new["objects"]
         mesh_objects = [o for o in objects if o.type == "MESH"]
-        object_slots = {o.name: [slot.material.name if slot.material else "" for slot in o.material_slots] for o in mesh_objects}
+        # キーは FBX のノードとしての名前（prefab の表の名前と照合する。#237）
+        object_slots = {node_name(o): [slot.material.name if slot.material else "" for slot in o.material_slots] for o in mesh_objects}
         # prefab の m_Materials は Unity のサブメッシュ順で、Blender のスロット順とは限らない
-        submesh_order = {o.name: submesh_order_of(o) for o in mesh_objects}
+        submesh_order = {node_name(o): submesh_order_of(o) for o in mesh_objects}
         resolution = resolve_materials(
             [m.name for m in new["materials"]], summary.info, self.unity_mats, model.pathname, prefab_table, object_slots, submesh_order
         )
         assignments = slot_assignments(object_slots, prefab_table, self.unity_mats, submesh_order)
         # マテリアルを 1 つも持たないモデルは、prefab の割り当てしか手掛かりが無い（#102）
-        for obj_name, slots in object_slots.items():
-            if not slots and (obj_name, 0) not in assignments:
-                self.report.warn(
-                    f"{model.name}: mesh {obj_name!r} has no material slots and no prefab assignment; "
-                    "it is left without a material"
-                )
+        for obj in mesh_objects:
+            if not object_slots[node_name(obj)] and (node_name(obj), 0) not in assignments:
+                self.slotless.append((model.name, obj))
         # prefab がすべてのスロットで別の .mat に差し替えるマテリアルは、組み立てても捨てるだけなので組まない
         replaced = fully_replaced_materials(object_slots, assignments, resolution)
         # 同梱 .blend の KEEP と VRM add-on 委譲では、インポーターが作ったマテリアルをそのまま使う
@@ -278,6 +280,16 @@ class SessionMaterials:
             if split:
                 self.report.split_slots += split
                 self.drop_replaced_materials(remaining)
+
+    def warn_slotless(self) -> None:
+        """スロットも割り当ても無く、読み込みの最後までマテリアルの無いまま残ったメッシュを警告する。"""
+        for model_name, obj in self.slotless:
+            if is_removed(obj) or any(slot.material for slot in obj.material_slots):
+                continue
+            self.report.warn(
+                f"{model_name}: mesh {obj.name!r} has no material slots and no prefab assignment; it is left without a material"
+            )
+        self.slotless = []
 
     def keep_material(self, bmat, guid: str | None, mrep: MaterialReport, delegated: bool) -> None:
         """インポーター（VRM add-on・同梱 .blend）が作ったマテリアルをそのまま使い、Unity の情報だけを残す。"""
@@ -342,18 +354,42 @@ class SessionMaterials:
         bpy.data.materials.remove(shared)
         self.built_by_guid[guid] = bmat
 
+    def drop_unused_materials(self, materials) -> None:
+        """使われていない部品を消して誰も使わなくなった、この回に組んだマテリアルを消し、レポートの行を "unused" にする（#221）。
+
+        シーンでは何千回も呼ぶので、消す候補が無ければすぐに戻り、削除はまとめて行う（#219）。
+        """
+        candidates = {b.name: b for b in materials if not is_removed(b) and b.users == 0}
+        if not candidates:
+            return
+        rows = [mrep for mrep in self.report.materials if mrep.blender_name in candidates]
+        # 同名の既存のマテリアルを使ったもの（reuse_existing）は、この回より前からあるので消さない
+        protected = {mrep.blender_name for mrep in rows if mrep.method in ("reused", "kept", "delegated")}
+        names = {mrep.blender_name for mrep in rows} - protected
+        if not names:
+            return
+        for mrep in rows:
+            if mrep.blender_name in names and mrep.method not in ("replaced", "shared", "unused"):
+                mrep.method = "unused"
+        gone = [candidates[name] for name in names]
+        for guid in [g for g, m in self.built_by_guid.items() if m.name in names and any(m == b for b in gone)]:
+            del self.built_by_guid[guid]
+        bpy.data.batch_remove(gone)
+
     def drop_replaced_materials(self, remaining: list) -> None:
         """prefab のスロットの差し替えで使われなくなった、インポーターが作ったマテリアルを消し、レポートの行を "replaced" にする。"""
-        for bmat in remaining:
-            if bmat.users != 0:
-                continue
-            for mrep in self.report.materials:
-                if mrep.blender_name == bmat.name and mrep.method != "replaced":
-                    mrep.method = "replaced"
-            # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
-            for guid in [g for g, m in self.built_by_guid.items() if m == bmat]:
-                del self.built_by_guid[guid]
-            bpy.data.materials.remove(bmat)
+        gone = [bmat for bmat in remaining if bmat.users == 0]
+        if not gone:
+            return
+        names = {bmat.name for bmat in gone}
+        for mrep in self.report.materials:
+            if mrep.blender_name in names and mrep.method != "replaced":
+                mrep.method = "replaced"
+        # 組み立て済みの表からも外す。残すと、同じモデルを読み直したときに削除済みのマテリアルを使ってしまう
+        for guid in [g for g, m in self.built_by_guid.items() if m.name in names and any(m == b for b in gone)]:
+            del self.built_by_guid[guid]
+        # 1 つずつ remove すると、そのたびに全データを調べるので、シーンでは何千回も呼んで重い。まとめて消す（#219）
+        bpy.data.batch_remove(gone)
 
 
 def _named_after_mat(candidate: bpy.types.Material, current: bpy.types.Material, umat: UnityMaterial) -> bool:

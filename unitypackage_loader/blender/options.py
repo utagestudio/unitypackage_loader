@@ -20,6 +20,7 @@ class ImportOptions:
     scene_cameras: bool = True  # シーンのカメラを読み込む
     scene_exposure: bool = True  # HDRP のシーンの Volume の露出を、そのシーンの HDRP のライトの強さに反映する（#130）
     scene_decals: bool = True  # シーンの DecalProjector を板にして読み込む（#165）
+    scene_terrain: str = "513"  # シーンの Terrain: NONE / 129 / 257 / 513 / 1025 / FULL（1 辺の点の数の上限。#205）
     hide_lods: bool = True  # LODGroup の遠景用の段（LOD1 以降）を非表示にする（Scenes / Prefabs 単位）
     skip_unused_parts: bool = True  # prefab・シーンが使っていない FBX の部品を読み込まない（Scenes / Prefabs 単位。#152）
     arrange: str = "SIDE_BY_SIDE"  # prefab を複数読み込むときの並べ方: SIDE_BY_SIDE / STACK
@@ -47,3 +48,16 @@ class ImportOptions:
     outline_width_scale: float = 0.01
     shader_table_path: str = ""
     extra_fbx_kwargs: dict = field(default_factory=dict)
+    package_label: str = ""  # パッケージのコレクションの名前（入れ子のパッケージを読むとき、外側の名前を付ける。#217）
+
+    @property
+    def terrain_points(self) -> int | None:
+        """Terrain のメッシュの 1 辺の点の数の上限（0 は元の解像度）。読み込まないなら None。"""
+        if self.scene_terrain == "NONE":
+            return None
+        if self.scene_terrain == "FULL":
+            return 0
+        try:
+            return max(int(self.scene_terrain), 2)
+        except ValueError:
+            return 513

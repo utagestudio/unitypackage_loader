@@ -6,7 +6,9 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 ``unity_yaml.parse_documents`` と同じ ``UnityDocument`` の列に変換する。
 
 形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。
-対応するのは SerializedFile version 14〜22（Unity 5.0 〜 Unity 6 のエディタ出力）で、TypeTree が付いたものだけ。
+対応するのは SerializedFile version 9〜22（Unity 3.5 〜 Unity 6 のエディタ出力）で、TypeTree が付いたものだけ。
+version 9〜13（Unity 4 まで）は、TypeTree が入れ子の古い形（9・11）か、型の表に型ハッシュが無く、オブジェクトの pathID が
+32 ビット（``m_BigIDEnabled`` が 0 のとき）などの違いがある（#215）。
 
 変換の約束（YAML パーサーの出力に揃える）:
 
@@ -18,6 +20,9 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 * ``FastPropertyName``（古い .mat のキー）→ 中の文字列
 * ``bool`` → ``0`` / ``1``、``TypelessData`` → 16 進文字列
 
+``compact=True``（Terrain の高さマップ・アルファマップのような大きなデータ用。#205）では、数値の配列を ``array.array``、
+``TypelessData`` を ``bytes`` にする。要素ごとに Python のオブジェクトを作らないので、1,600 万要素でもメモリを食わない。
+
 壊れた / 細工されたファイルでも ``UnityBinaryError``（``ValueError`` の派生）だけを送出する。
 範囲外の読み取り、ファイルサイズを超える件数、不正な TypeTree の階層はいずれもここで止める。
 """
@@ -25,6 +30,8 @@ TypeTree（フィールド名と型の一覧）が付いているので、それ
 from __future__ import annotations
 
 import struct
+import sys
+from array import array as _NumberArray
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -39,7 +46,7 @@ __all__ = [
     "load_documents",
 ]
 
-MIN_VERSION = 14  # Unity 5.0
+MIN_VERSION = 9  # Unity 3.5 〜 4.x（#215）
 MAX_VERSION = 22  # Unity 2020.1 〜 Unity 6
 
 CLASS_MONO_BEHAVIOUR = 114
@@ -213,6 +220,22 @@ def _read_type_tree(r: _Reader, version: int) -> _Node:
     return root
 
 
+_MAX_TREE_DEPTH = 64  # 古い入れ子の TypeTree の深さの上限（細工されたファイルへの備え）
+
+
+def _read_type_tree_old(r: _Reader, level: int = 0) -> _Node:
+    """version 9 / 11 の入れ子の TypeTree（ノードごとに型名・名前・大きさ・番号・配列か・版・メタフラグ・子の数）。"""
+    if level > _MAX_TREE_DEPTH:
+        raise UnityBinaryError("type tree nested too deeply")
+    type_name = r.cstring()
+    name = r.cstring()
+    _byte_size, _index, _is_array, _node_version, flags = r.unpack("iiiii")
+    node = _Node(type_name, name, level, flags)
+    for _ in range(r.count("type tree child", 21)):
+        node.children.append(_read_type_tree_old(r, level + 1))
+    return node
+
+
 @dataclass
 class _SerializedType:
     class_id: int
@@ -225,12 +248,13 @@ def _read_type(r: _Reader, version: int, has_tree: bool) -> _SerializedType:
     stripped = bool(r.one("B")) if version >= 16 else False
     if version >= 17:
         r.one("h")  # script_type_index
-    if (version < 16 and class_id < 0) or (version >= 16 and class_id == CLASS_MONO_BEHAVIOUR):
-        r.bytes(16)  # script id
-    r.bytes(16)  # old type hash
+    if version >= 13:  # 型ハッシュは version 13 から
+        if (version < 16 and class_id < 0) or (version >= 16 and class_id == CLASS_MONO_BEHAVIOUR):
+            r.bytes(16)  # script id
+        r.bytes(16)  # old type hash
     tree = None
     if has_tree:
-        tree = _read_type_tree(r, version)
+        tree = _read_type_tree(r, version) if version >= 12 or version == 10 else _read_type_tree_old(r)
         if version >= 21:
             r.bytes(4 * r.count("type dependency", 4))
     return _SerializedType(class_id, stripped, tree)
@@ -253,10 +277,15 @@ class _External:
     path: str
 
 
+# struct の書式 → array の型コード（compact のとき）。bool は 0 / 1 の 1 バイト
+_ARRAY_CODES = {"b": "b", "B": "B", "h": "h", "H": "H", "i": "i", "I": "I", "q": "q", "Q": "Q", "f": "f", "d": "d", "?": "B"}
+
+
 class _ValueReader:
-    def __init__(self, r: _Reader, externals: list[_External]):
+    def __init__(self, r: _Reader, externals: list[_External], compact: bool = False):
         self.r = r
         self.externals = externals
+        self.compact = compact
         self._min_sizes: dict[int, int] = {}  # id(node) → 値の最小バイト数
 
     def _min_size(self, node: _Node) -> int:
@@ -285,7 +314,8 @@ class _ValueReader:
             value = r.bytes(r.count("string byte")).decode("utf-8", "replace")
             align = True
         elif node.type == "TypelessData":
-            value = r.bytes(r.count("byte")).hex()
+            raw = r.bytes(r.count("byte"))
+            value = raw if self.compact else raw.hex()
         elif node.type == "pair" and len(node.children) == 2:
             value = (self.read(node.children[0]), self.read(node.children[1]))
         elif node.is_array_wrapper:
@@ -312,6 +342,15 @@ class _ValueReader:
             raise UnityBinaryError(f"invalid {node.name!r} element count {size} for empty elements")
         fmt = _PRIMITIVES.get(element.type)
         if fmt is not None and not element.children and not element.aligned:
+            if self.compact:
+                code = _ARRAY_CODES[fmt]
+                values = _NumberArray(code)
+                if values.itemsize != struct.calcsize(fmt):
+                    raise UnityBinaryError(f"unsupported element size for {node.name!r}")
+                values.frombytes(self.r.bytes(values.itemsize * size))
+                if (self.r.endian == ">") != (sys.byteorder == "big"):
+                    values.byteswap()
+                return values
             st = struct.Struct(f"{self.r.endian}{size}{fmt}")
             values = list(st.unpack(self.r.bytes(st.size)))
             return [int(v) for v in values] if fmt == "?" else values
@@ -382,8 +421,8 @@ def is_serialized_file(data: bytes) -> bool:
     return 9 <= version and struct.unpack_from(">I", data, 4)[0] == len(data)
 
 
-def parse_serialized_file(data: bytes) -> list[UnityDocument]:
-    """SerializedFile の全オブジェクトを ``UnityDocument`` の列にする。
+def parse_serialized_file(data: bytes, compact: bool = False) -> list[UnityDocument]:
+    """SerializedFile の全オブジェクトを ``UnityDocument`` の列にする（``compact`` はモジュールの説明を参照）。
 
     1 つのオブジェクトだけが読めない場合（参照型のデータなど）はそのオブジェクトを飛ばす。
     1 つも読めなければ最初のエラーを送出する。
@@ -393,15 +432,17 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
     r = _Reader(data, header.endian, header.metadata_offset, header.data_offset)
     r.cstring()  # Unity のバージョン文字列
     r.one("i")  # target platform
-    if not r.one("B"):
+    if version >= 13 and not r.one("B"):  # 12 以前は常に TypeTree が付く
         raise UnityBinaryError("binary serialized file without a type tree is not supported")
 
-    types = [_read_type(r, version, True) for _ in range(r.count("type", 24))]
+    types = [_read_type(r, version, True) for _ in range(r.count("type", 24 if version >= 13 else 4))]
+    big_ids = bool(r.one("i")) if 7 <= version < 14 else True  # 14 からは常に 64 ビット
 
     objects: list[tuple[int, int, int, _SerializedType, bool]] = []
-    for _ in range(r.count("object", 20)):
-        r.align()
-        path_id = r.one("q")
+    for _ in range(r.count("object", 20 if version >= 14 else 16)):
+        if version >= 14:
+            r.align()
+        path_id = r.one("q" if big_ids else "i")
         byte_start = r.one("q" if version >= 22 else "I")
         byte_size, type_id = r.unpack("Ii")
         stripped = False
@@ -418,10 +459,14 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
             raise UnityBinaryError(f"object {path_id} refers to unknown type {type_id}")
         objects.append((path_id, header.data_offset + byte_start, byte_size, typ, stripped))
 
-    for _ in range(r.count("script type", 12)):
-        r.one("i")
-        r.align()
-        r.one("q")
+    if version >= 11:
+        for _ in range(r.count("script type", 12 if version >= 14 else 8)):
+            r.one("i")
+            if version >= 14:
+                r.align()
+                r.one("q")
+            else:
+                r.one("i")
 
     externals: list[_External] = []
     for _ in range(r.count("external", 21)):
@@ -438,7 +483,7 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
         try:
             if start < header.data_offset or start + size > len(data):
                 raise UnityBinaryError(f"object {path_id} lies outside the file")
-            reader = _ValueReader(_Reader(data, header.endian, start, start + size), externals)
+            reader = _ValueReader(_Reader(data, header.endian, start, start + size), externals, compact)
             tree = typ.tree
             assert tree is not None
             body = reader.read(tree)
@@ -453,10 +498,10 @@ def parse_serialized_file(data: bytes) -> list[UnityDocument]:
     return docs
 
 
-def load_documents(data: bytes | str) -> list[UnityDocument]:
-    """テキスト（Unity YAML）でもバイナリでも、アセットを ``UnityDocument`` の列にする。"""
+def load_documents(data: bytes | str, compact: bool = False) -> list[UnityDocument]:
+    """テキスト（Unity YAML）でもバイナリでも、アセットを ``UnityDocument`` の列にする（``compact`` はバイナリのときだけ使う）。"""
     if isinstance(data, str):
         return parse_documents(data)
     if is_serialized_file(data):
-        return parse_serialized_file(data)
+        return parse_serialized_file(data, compact)
     return parse_documents(data.decode("utf-8", "replace"))

@@ -12,6 +12,7 @@ from unitypackage_loader.core.shader_source import (
     ShaderDefaults,
     ShaderSourceError,
     declared_properties,
+    graph_display_names,
     restrict_to_declared,
     shader_defaults,
 )
@@ -229,7 +230,9 @@ class ShaderDefaultsTests(unittest.TestCase):
 
     def test_alpha_test_queue_and_cull_off(self):
         defaults = shader_defaults(LEAVES, ".shader")
-        self.assertEqual(defaults, ShaderDefaults(queue=2450, render_type="TransparentCutout", cull_off=True))
+        self.assertEqual(
+            defaults, ShaderDefaults(queue=2450, render_type="TransparentCutout", cull_off=True, hidden=frozenset({"__dirty"}))
+        )
         self.assertEqual(defaults.alpha_mode, "cutout")
 
     def test_render_type_wins_over_queue(self):
@@ -284,6 +287,256 @@ class ShaderDefaultsTests(unittest.TestCase):
         text = mat_yaml("Std", STANDARD, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], floats=[("_Mode", 0)])
         n = normalize_material(parse_material(text), defaults=ShaderDefaults(queue=2450, cull_off=True))
         self.assertEqual((n.alpha_mode, n.cull_backface), ("opaque", True))
+
+
+# Amplify Shader Editor の URP テンプレートで作ったシェーダー（The Basilica Cathedral の Tripolygon(URP)/Leaf、
+# Corals の ASE_StandartCutout2Sided と同じ形）。タグは Opaque のまま、パスの中で常に切り抜く。
+# テンプレートは使わなくても白い _EmissionColor を隠して宣言する
+AMPLIFY = """Shader "Tripolygon(URP)/Leaf"
+{
+	Properties
+	{
+		[HideInInspector] _EmissionColor("Emission Color", Color) = (1,1,1,1)
+		[ASEBegin]_Color("Color", Color) = (1,1,1,1)
+		_AlphaCutoff("Alpha Cutoff", Range( 0 , 1)) = 0.5
+		[ASEEnd]_MainTex("MainTex", 2D) = "white" {}
+	}
+	SubShader
+	{
+		Tags { "RenderPipeline"="UniversalPipeline" "RenderType"="Opaque" "Queue"="Geometry" }
+		Cull Back
+		Pass
+		{
+			Tags { "LightMode"="UniversalForward" }
+			HLSLPROGRAM
+			ALPHA_TEST_LINE
+			#pragma vertex vert
+			float3 Emission = 0;
+			#ifdef _ALPHATEST_ON
+				clip(Alpha - AlphaClipThreshold);
+			#endif
+			ENDHLSL
+		}
+	}
+}
+"""
+
+
+class AmplifyTemplateTests(unittest.TestCase):
+    """パスが常に切り抜く・白い発光色を隠して宣言する Amplify Shader Editor のシェーダー（#235 / #241）。"""
+
+    def shader(self, line: str) -> str:
+        return AMPLIFY.replace("ALPHA_TEST_LINE", line)
+
+    def test_always_alpha_test(self):
+        for line in (
+            "#define _ALPHATEST_ON 1",  # Basilica の葉
+            "#pragma multi_compile_local_fragment _ALPHATEST_ON",  # Corals（キーワードが 1 つだけなので常に有効）
+            "#pragma multi_compile _ALPHATEST_ON",
+        ):
+            with self.subTest(line=line):
+                defaults = shader_defaults(self.shader(line), ".shader")
+                self.assertTrue(defaults.alpha_test)
+                self.assertEqual(defaults.alpha_mode, "cutout")
+
+    def test_switchable_alpha_test_is_not_always_on(self):
+        # 無効の選択肢がある multi_compile と shader_feature は、マテリアルのキーワード次第
+        for line in (
+            "#pragma multi_compile _ _ALPHATEST_ON",
+            "#pragma multi_compile_local __ _ALPHATEST_ON",
+            "#pragma shader_feature_local _ALPHATEST_ON",
+            "// #define _ALPHATEST_ON 1",
+        ):
+            with self.subTest(line=line):
+                defaults = shader_defaults(self.shader(line), ".shader")
+                self.assertFalse(defaults.alpha_test)
+                self.assertIsNone(defaults.alpha_mode)
+
+    def test_hidden_properties(self):
+        self.assertEqual(shader_defaults(self.shader(""), ".shader").hidden, frozenset({"_EmissionColor"}))
+
+    def test_leaf_material(self):
+        # マテリアルには前のシェーダーの _Cutoff は無く、Amplify の _AlphaCutoff がしきい値。白い _EmissionColor は光らせない
+        shader = self.shader("#define _ALPHATEST_ON 1")
+        text = mat_yaml(
+            "BC_Leaf_A", CUSTOM, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))],
+            floats=[("_AlphaCutoff", 0.679)], colors=[("_EmissionColor", (1, 1, 1, 1)), ("_Color", (0.58, 0.79, 0.26, 1))],
+        )
+        n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+        self.assertEqual((n.alpha_mode, n.alpha_from_texture), ("cutout", True))
+        self.assertAlmostEqual(n.alpha_cutoff, 0.679)
+        self.assertFalse(n.has_emission)
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        # 隠していなければ、今までどおり発光として読む
+        visible = shader.replace("[HideInInspector] _EmissionColor", "_EmissionColor")
+        n = normalize_material(parse_material(text), declared=declared_properties(visible, ".shader"), defaults=shader_defaults(visible, ".shader"))
+        self.assertTrue(n.has_emission)
+
+    def test_emission_multiplier_scales_standard_emission(self):
+        # Corals: Emission = _EmissionColor × _EmissionMultiplayer × 画像。強さが 0 なら光らない（#241）
+        shader = 'Shader "ASE/C" { Properties { _EmissionColor("E", Color) = (0,0,0,0) _EmissionMultiplayer("M", Float) = 0 } SubShader { } }'
+        for value, strength in ((0.0, 0.0), (2.5, 2.5)):
+            text = mat_yaml("Corals4", CUSTOM, floats=[("_EmissionMultiplayer", value)], colors=[("_EmissionColor", (1, 1, 1, 1))])
+            n = normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+            self.assertAlmostEqual(n.emission_strength, strength)
+        # 独自の名前で読んだ発光の強さは 1 回だけ掛ける
+        text = mat_yaml("Synty", CUSTOM, floats=[("_Emission_Intensity", 3.0)], colors=[("_Emission_Color", (1, 0, 0, 1))])
+        self.assertAlmostEqual(normalize_material(parse_material(text)).emission_strength, 3.0)
+
+
+def terrain_grass_graph() -> str:
+    """Terrain Asset Pack の TerrainGrass.shadergraph と同じ形。テクスチャの参照名は自動で付いたもので、役割は表示名でしか分からない。"""
+    props = [
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Base Map", "Texture2D_E1B0D043"),
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Normal Map", "Texture2D_9DCAAA49"),
+        ("UnityEditor.ShaderGraph.Internal.Texture2DShaderProperty", "Mask Map", "Texture2D_A5E0646"),
+        ("UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty", "Normal Scale", "Vector1_a6983181c8dc4691ba6a28a34c4223a6"),
+        ("UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty", "Wind Speed", "Wind_Speed"),
+    ]
+    objects = [{"m_SGVersion": 3, "m_Type": "UnityEditor.ShaderGraph.GraphData", "m_Properties": [{"m_Id": str(i)} for i in range(len(props))]}]
+    for i, (kind, display, reference) in enumerate(props):
+        objects.append({"m_Type": kind, "m_ObjectId": str(i), "m_Name": display, "m_DefaultReferenceName": reference, "m_OverrideReferenceName": ""})
+    return "\n\n".join(json.dumps(o, indent=4) for o in objects)
+
+
+class GraphDisplayNameTests(unittest.TestCase):
+    """Shader Graph の自動の参照名（Texture2D_XXXX）のテクスチャを、表示名で役割を探す（#236）。"""
+
+    def test_display_names(self):
+        names = graph_display_names(terrain_grass_graph())
+        self.assertEqual(names["Texture2D_E1B0D043"], "Base Map")
+        self.assertNotIn("Wind_Speed", names)  # 表示名と同じ形の参照名は入れない
+        self.assertEqual(shader_defaults(terrain_grass_graph(), ".shadergraph").display_names, names)
+        self.assertEqual(graph_display_names(graph_v1("_Color")), {})
+
+    def test_grass_material(self):
+        # 前のシェーダーの Base_Map / Normal_Map も残っているが、宣言されていないので読まない。参照名では役割が分からず、表示名で探す
+        graph = terrain_grass_graph()
+        text = mat_yaml(
+            "GrassDry", GRAPH,
+            tex=[("Base_Map", TEX_N, (1, 1), (0, 0)), ("Texture2D_E1B0D043", TEX_A, (1, 1), (0, 0)),
+                 ("Texture2D_9DCAAA49", TEX_N, (1, 1), (0, 0)), ("Texture2D_A5E0646", TEX_N, (1, 1), (0, 0))],
+            floats=[("Vector1_a6983181c8dc4691ba6a28a34c4223a6", 0.7)],
+        )
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"), defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+        self.assertEqual(n.normal_tex.guid, TEX_N)
+        self.assertAlmostEqual(n.normal_strength, 0.7)
+        # 表示名が分からなければ今までどおり（テクスチャ無し）
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertIsNone(n.base_color_tex)
+
+
+def graph_with_target(**settings):
+    """新しい形式の Shader Graph に、URP のターゲットの描画の設定を足したもの（Dreamscape の Foliage / Leaves と同じ形。#257）。"""
+    target = {"m_Type": "UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget", "m_ObjectId": "t",
+              "m_SurfaceType": 0, "m_AlphaClip": False, "m_RenderFace": 2, "m_AllowMaterialOverride": False}
+    target.update(settings)
+    return graph_v2("_Foliage_Map") + "\n\n" + json.dumps(target, indent=4)
+
+
+class GraphTargetSettingsTests(unittest.TestCase):
+    def test_alpha_clip_and_render_face(self):
+        defaults = shader_defaults(graph_with_target(m_AlphaClip=True, m_RenderFace=0), ".shadergraph")
+        self.assertEqual((defaults.alpha_mode, defaults.cull_off), ("cutout", True))
+        self.assertEqual(shader_defaults(graph_with_target(), ".shadergraph").alpha_mode, None)
+        self.assertFalse(shader_defaults(graph_with_target(m_RenderFace=2), ".shadergraph").cull_off)  # Front
+        self.assertEqual(shader_defaults(graph_with_target(m_SurfaceType=1), ".shadergraph").alpha_mode, "blend")
+        # マテリアルでの上書きを許すターゲットは、マテリアルの _Surface / _AlphaClip に任せる
+        allowed = graph_with_target(m_AlphaClip=True, m_RenderFace=0, m_AllowMaterialOverride=True)
+        self.assertEqual((shader_defaults(allowed, ".shadergraph").alpha_mode, shader_defaults(allowed, ".shadergraph").cull_off), (None, False))
+
+    def test_old_master_node(self):
+        # 古い形式は JSONnodeData の文字列の中に書かれる
+        node = {"typeInfo": {"fullName": "UnityEditor.ShaderGraph.PBRMasterNode"},
+                "JSONnodeData": json.dumps({"m_SurfaceType": 1, "m_TwoSided": True})}
+        defaults = shader_defaults(json.dumps({"m_SerializableNodes": [node]}, indent=4), ".shadergraph")
+        self.assertEqual((defaults.alpha_mode, defaults.cull_off), ("blend", True))
+
+    def test_grass_without_material_override(self):
+        # マテリアルには _AlphaClip / _Cull が無い（Allow Material Override が切ってある）
+        graph = graph_with_target(m_AlphaClip=True, m_RenderFace=0)
+        text = mat_yaml("M_Grass_01", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"),
+                               defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual((n.alpha_mode, n.alpha_from_texture, n.cull_backface), ("cutout", True, False))
+
+    def test_gradient_colors_tint_the_leaves(self):
+        # Dreamscape の Foliage / Leaves: 白黒の葉の画像に、高さで上下の色を混ぜる。平均を色にする
+        graph = graph_v2("_Foliage_Map", "_Color_Top", "_Color_Base", "_Wind_Large_Speed")
+        text = mat_yaml("M_Grass_01", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))],
+                        colors=[("_Color_Top", (0.4, 0.6, 0.2, 1)), ("_Color_Base", (0.2, 0.4, 0.0, 1)), ("_Wind_Large_Speed", (0.1, 2, 0, 0))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertEqual([round(c, 3) for c in n.base_color], [0.3, 0.5, 0.1, 1.0])
+        # 組が決まらなければ当てない（上が 2 つ）
+        graph = graph_v2("_Foliage_Map", "_Color_Top", "_Tint_Top", "_Color_Bottom")
+        text = mat_yaml("M", GRAPH, tex=[("_Foliage_Map", TEX_A, (1, 1), (0, 0))],
+                        colors=[("_Color_Top", (0.4, 0.6, 0.2, 1)), ("_Tint_Top", (0, 0, 1, 1)), ("_Color_Bottom", (0.2, 0.4, 0.0, 1))])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
+        self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 1.0))
+
+    def test_alpha_mask_and_threshold(self):
+        # Shibuya の M_BaseAlpha: アルファは _AlphaMask の R、しきい値は _AlphaThreshold（#266）
+        graph = graph_with_target(m_AlphaClip=True) + "\n\n" + graph_v2("_BaseMap", "_AlphaMask", "_AlphaThreshold")
+        text = mat_yaml("MI_Crossing", GRAPH, tex=[("_BaseMap", TEX_A, (1, 1), (0, 0)), ("_AlphaMask", TEX_N, (1, 1), (0, 0))],
+                        floats=[("_AlphaThreshold", 0.502)])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"),
+                               defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual((n.alpha_mode, n.alpha_tex.guid, n.base_color_tex.guid), ("cutout", TEX_N, TEX_A))
+        self.assertAlmostEqual(n.alpha_cutoff, 0.502)
+        self.assertIn(TEX_N, [t.guid for t in n.texture_refs()])
+        # 不透明なら使わない
+        graph = graph_v2("_BaseMap", "_AlphaMask")
+        text = mat_yaml("Opaque", GRAPH, tex=[("_BaseMap", TEX_A, (1, 1), (0, 0)), ("_AlphaMask", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph")).alpha_tex)
+
+    def test_builtin_target_keywords(self):
+        text = mat_yaml("M_Bushes_01", GRAPH, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], keywords=["_BUILTIN_ALPHATEST_ON"])
+        self.assertEqual(normalize_material(parse_material(text)).alpha_mode, "cutout")
+        text = mat_yaml("Glass", GRAPH, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], keywords=["_BUILTIN_SURFACE_TYPE_TRANSPARENT"])
+        self.assertEqual(normalize_material(parse_material(text)).alpha_mode, "blend")
+
+
+# Toon Harbor Pack の TH_CustomToon（Amplify のトゥーン）。色は _TextureSample1、陰の段階は _TextureRamp
+TOON = """Shader "Toon/TH_CustomToon"
+{
+	Properties
+	{
+		_TextureSample1("Texture Sample", 2D) = "white" {}
+		_TextureRamp("Texture Ramp", 2D) = "white" {}
+		[HideInInspector] _texcoord( "", 2D ) = "white" {}
+	}
+	SubShader { Tags{ "RenderType" = "Opaque"  "Queue" = "Geometry+0" } }
+}
+"""
+
+
+class SoleTextureTests(unittest.TestCase):
+    """役割の分からない名前のテクスチャが 1 枚だけなら、ベースカラーにする（#239）。"""
+
+    def normalize(self, shader: str, textures):
+        text = mat_yaml("Atlas_1A_D", CUSTOM, tex=textures)
+        return normalize_material(parse_material(text), declared=declared_properties(shader, ".shader"), defaults=shader_defaults(shader, ".shader"))
+
+    def test_toon_atlas(self):
+        # 前のシェーダーの _MainTex（パッケージに無い画像）は宣言されていないので候補にしない
+        n = self.normalize(TOON, [("_TextureSample1", TEX_A, (1, 1), (0, 0)), ("_TextureRamp", TEX_N, (1, 1), (0, 0)), ("_MainTex", TEX_N, (1, 1), (0, 0))])
+        self.assertEqual(n.base_color_tex.guid, TEX_A)
+
+    def test_two_unknown_textures_are_not_guessed(self):
+        shader = TOON.replace('_TextureRamp("Texture Ramp"', '_TextureSample2("Texture Sample 2"')
+        n = self.normalize(shader, [("_TextureSample1", TEX_A, (1, 1), (0, 0)), ("_TextureSample2", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(n.base_color_tex)
+
+    def test_known_roles_are_not_base_color(self):
+        shader = TOON.replace('_TextureSample1("Texture Sample"', '_DetailMask("Mask"')
+        n = self.normalize(shader, [("_DetailMask", TEX_A, (1, 1), (0, 0)), ("_TextureRamp", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(n.base_color_tex)
+
+    def test_without_declarations_nothing_is_guessed(self):
+        # 宣言が分からなければ前のシェーダーの残りも混ざるので当てない
+        text = mat_yaml("Atlas_1A_D", CUSTOM, tex=[("_TextureSample1", TEX_A, (1, 1), (0, 0))])
+        self.assertIsNone(normalize_material(parse_material(text)).base_color_tex)
 
 
 if __name__ == "__main__":

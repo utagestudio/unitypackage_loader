@@ -99,9 +99,10 @@ def alpha_mode_from_blend_state(mat: UnityMaterial, default: AlphaMode = "opaque
         return "blend"  # additive
     if mat.render_queue >= 3000:
         return "blend"
-    if "_ALPHABLEND_ON" in mat.keywords or "_ALPHAPREMULTIPLY_ON" in mat.keywords or "_SURFACE_TYPE_TRANSPARENT" in mat.keywords:
+    # _BUILTIN_* は Shader Graph の Built-in ターゲットのキーワード（#257）
+    if any(k in mat.keywords for k in ("_ALPHABLEND_ON", "_ALPHAPREMULTIPLY_ON", "_SURFACE_TYPE_TRANSPARENT", "_BUILTIN_SURFACE_TYPE_TRANSPARENT")):
         return "blend"
-    if 2450 <= mat.render_queue < 3000 or "_ALPHATEST_ON" in mat.keywords or mat.flag("_AlphaToMask"):
+    if 2450 <= mat.render_queue < 3000 or any(k in mat.keywords for k in ("_ALPHATEST_ON", "_BUILTIN_ALPHATEST_ON")) or mat.flag("_AlphaToMask"):
         return "cutout"
     return default
 
@@ -208,7 +209,8 @@ def normalize_material(
     外した名前は ``extras["undeclared_properties"]`` に残す。表で分かるシェーダーは各プロファイルの読み方に任せる。
     同じく表に無いシェーダーで、マテリアルからは不透明としか読めず、m_CustomRenderQueue も -1（シェーダーの既定のまま）なら、
     シェーダーの RenderType / Queue タグから切り抜き・半透明を決める。マテリアルにカリングのプロパティが無く、
-    シェーダーが固定の ``Cull Off`` なら両面にする（#202）。
+    シェーダーが固定の ``Cull Off`` なら両面にする（#202）。表に無いシェーダーを定義と名前から補う処理と、その順番は
+    ``custom_shader.py`` にまとめてある。
     """
     table = table or default_table()
     dropped: list[str] = []
@@ -217,19 +219,19 @@ def normalize_material(
         mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
     norm = profile.normalize(mat, info)
-    if defaults is not None and custom:
-        if norm.alpha_mode == "opaque" and mat.render_queue < 0 and defaults.alpha_mode is not None:
-            norm.alpha_mode = defaults.alpha_mode
-            norm.alpha_from_texture = True
-        if defaults.cull_off and cull_backface(mat, default=None) is None:
-            norm.cull_backface = False
-    if info is None:
-        # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
-        from .standard import fill_emission_from_aliases, fill_textures_from_aliases
+    # 表に無いシェーダー（自作の .shader / Shader Graph / Amplify など）を、シェーダーの定義と名前から補う（custom_shader.py）
+    from .custom_shader import apply_shader_defaults, fill_from_custom_names
+    from .standard import GenericProfile
 
-        fill_textures_from_aliases(mat, norm)
-        if norm.lighting != "toon":  # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）
-            fill_emission_from_aliases(mat, norm)
+    if defaults is not None and custom:
+        apply_shader_defaults(mat, norm, defaults)
+    if info is None:
+        fill_from_custom_names(
+            mat, norm,
+            display_names=defaults.display_names if defaults is not None else None,
+            declared_known=bool(declared and custom),
+            generic=isinstance(profile, GenericProfile),
+        )
     if dropped:
         norm.extras["undeclared_properties"] = dropped
     return norm

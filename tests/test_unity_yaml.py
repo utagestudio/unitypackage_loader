@@ -267,6 +267,25 @@ class FoldedScalarTests(unittest.TestCase):
         self.assertEqual(body["closed"], "one")
         self.assertEqual(body["next"], 1)
 
+    def test_quoted_value_closed_at_line_start(self):
+        # Unity は改行を含む UI のテキストを複数行のクォート付きで書き、閉じのクォートを行頭に置く（#212）
+        docs = parse_documents(
+            "--- !u!114 &1\nMonoBehaviour:\n"
+            "  m_Text: 'Press E to toggle day/night scene\n\n'\n"
+            "  m_Other: \"two\n\nlines\n\"\n"
+            "  m_Enabled: 1\n"
+            "--- !u!1 &2\nGameObject:\n  m_Name: Next\n"
+        )
+        body = docs[0].body
+        self.assertEqual(body["m_Text"], "Press E to toggle day/night scene")
+        self.assertEqual(body["m_Other"], "two lines")
+        self.assertEqual(body["m_Enabled"], 1)
+        self.assertEqual(docs[1].body["m_Name"], "Next")
+
+    def test_unclosed_quote_still_raises(self):
+        with self.assertRaises(UnityYamlError):
+            parse_text("a: 'never closed\nb: 1\n")
+
     def test_mapping_like_continuation_still_raises(self):
         with self.assertRaises(UnityYamlError):
             parse_text("a: 1\n  b: 2\n")

@@ -6,18 +6,22 @@ Standard / URP / HDRP の名前を決まった順に読むと、いまのシェ�
 
 .shader からは、マテリアルが上書きしていないときに Unity が使う描画の既定（SubShader の ``RenderType`` / ``Queue`` タグと、固定の ``Cull``）も読む
 （``shader_defaults``。#202）。アルファで切り抜くかどうかがシェーダーの中だけで決まっている自作シェーダーのため。
+タグが Opaque でも、パスが常に切り抜く（``#define _ALPHATEST_ON`` か、無効の選択肢の無い ``#pragma multi_compile… _ALPHATEST_ON``）
+シェーダーは切り抜きにする。``[HideInInspector]`` で宣言されたプロパティ（Amplify Shader Editor のテンプレートが足す白い
+``_EmissionColor`` など）も覚えておく（#235 / #241）。
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from .material import UnityMaterial
 
 __all__ = [
-    "SHADER_SOURCE_EXTS", "ShaderDefaults", "ShaderSourceError", "declared_properties", "restrict_to_declared", "shader_defaults",
+    "SHADER_SOURCE_EXTS", "ShaderDefaults", "ShaderSourceError", "declared_properties", "graph_display_names",
+    "restrict_to_declared", "shader_defaults",
 ]
 
 SHADER_SOURCE_EXTS = frozenset({".shader", ".shadergraph"})
@@ -40,6 +44,12 @@ _COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 _PROPERTIES = re.compile(r"\bProperties\s*\{")
 # [Attribute] [Attribute(args)] _Name ("Display", Type) = default
 _PROPERTY = re.compile(r"(?:\[[^\]\n]*\]\s*)*\b([A-Za-z_]\w*)\s*\(\s*\"")
+_PROPERTY_WITH_ATTRIBUTES = re.compile(r"((?:\[[^\]\n]*\]\s*)*)\b([A-Za-z_]\w*)\s*\(\s*\"")
+# パスが常に切り抜く。multi_compile にキーワードを 1 つだけ書くと「無効」の選択肢が無く、常に有効になる
+# （shader_feature は無効の選択肢が自動で付くので、マテリアルのキーワード次第）
+_ALWAYS_ALPHA_TEST = re.compile(
+    r"^[ \t]*#[ \t]*(?:define[ \t]+_ALPHATEST_ON\b|pragma[ \t]+multi_compile\w*[ \t]+_ALPHATEST_ON[ \t]*$)", re.M
+)
 
 
 # ShaderLab の Queue の名前と値（"AlphaTest+1" のように足し引きできる）
@@ -50,6 +60,11 @@ _TAGS = re.compile(r"\bTags\s*\{([^}]*)\}")
 _RENDER_TYPE = re.compile(r"\"RenderType\"\s*=\s*\"\s*(\w+)\s*\"")
 _QUEUE = re.compile(r"\"Queue\"\s*=\s*\"\s*([A-Za-z]+)\s*(?:([+-])\s*(\d+))?\s*\"")
 _CULL = re.compile(r"\bCull\s+(Off|Back|Front)\b", re.I)
+# Shader Graph のターゲット（URP / Built-in / HDRP）の描画の設定。古い形式は JSON の文字列の中なので、引用符の前の "\" も許す（#257）
+_MATERIAL_OVERRIDE = re.compile(r'"m_AllowMaterialOverride"\s*:\s*true')
+_GRAPH_SETTING = re.compile(
+    r'\\?"(m_AlphaClip|m_AlphaTest|m_SurfaceType|m_RenderFace|m_TwoSided|m_DoubleSidedMode)\\?"\s*:\s*(true|false|\d+)'
+)
 
 
 class ShaderSourceError(ValueError):
@@ -63,6 +78,10 @@ class ShaderDefaults:
     queue: int | None = None  # SubShader の Tags の "Queue"。マテリアルの m_CustomRenderQueue が -1 のときに使われる
     render_type: str | None = None  # SubShader の Tags の "RenderType"（Opaque / TransparentCutout / Transparent など）
     cull_off: bool = False  # 最初の Cull が固定の Off（両面）。"Cull [_Cull]" のようにプロパティで決めるものは含めない
+    alpha_test: bool = False  # パスが常に切り抜く（#235 / #241）
+    hidden: frozenset[str] = frozenset()  # [HideInInspector] で宣言されたプロパティ
+    # Shader Graph のプロパティの参照名 → 表示名（#236）。.shader では空
+    display_names: dict[str, str] = field(default_factory=dict)
 
     @property
     def alpha_mode(self) -> str | None:
@@ -70,7 +89,7 @@ class ShaderDefaults:
         render_type = (self.render_type or "").lower()
         if render_type == "transparent":
             return "blend"
-        if render_type == "transparentcutout":
+        if render_type == "transparentcutout" or self.alpha_test:
             return "cutout"
         if render_type or self.queue is None:
             return None
@@ -80,10 +99,19 @@ class ShaderDefaults:
 
 
 def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
-    """.shader の描画の既定。.shadergraph（描画の設定はマテリアルのプロパティに出る）や、読めないものは空。"""
+    """.shader の描画の既定。.shadergraph はターゲットの描画の設定（``_graph_settings``）とプロパティの表示名。
+
+    読めないものは空。
+    """
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+    if ext.lower() == ".shadergraph":
+        try:
+            names = graph_display_names(text.lstrip("\ufeff"))
+        except ShaderSourceError:
+            names = {}
+        return _graph_settings(text, names)
     if ext.lower() != ".shader":
         return ShaderDefaults()
-    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
     text = _COMMENT.sub("", text)
     sub = _SUBSHADER.search(text)
     if sub is None:
@@ -102,7 +130,64 @@ def shader_defaults(data: bytes | str, ext: str) -> ShaderDefaults:
         if render_type is None and match:
             render_type = match.group(1)
     cull = _CULL.search(body)
-    return ShaderDefaults(queue=queue, render_type=render_type, cull_off=bool(cull and cull.group(1).lower() == "off"))
+    end = _SUBSHADER.search(body)  # 最初の SubShader の中だけを見る（2 つ目以降は別のパイプライン・品質向け）
+    return ShaderDefaults(
+        queue=queue,
+        render_type=render_type,
+        cull_off=bool(cull and cull.group(1).lower() == "off"),
+        alpha_test=bool(_ALWAYS_ALPHA_TEST.search(body[:end.start()] if end else body)),
+        hidden=_hidden_properties(text),
+    )
+
+
+def _graph_settings(text: str, display_names: dict[str, str]) -> ShaderDefaults:
+    """Shader Graph のターゲットに書かれた描画の設定（#257）。
+
+    Graph Settings の Alpha Clipping・Surface Type・Render Face は、Allow Material Override を切っているとマテリアルの
+    プロパティ（_AlphaClip / _Surface / _Cull）に出ず、グラフにだけある。以前は .shadergraph からプロパティの表示名しか
+    読まず、Dreamscape Nature Meadows の草・花（Alpha Clipping が有効な Foliage.shadergraph）が切り抜かれず板になり、
+    木の葉（Render Face が Both の Leaves.shadergraph）が片面になっていた。
+
+    どれかのターゲットで有効なら有効とする（同じグラフに URP と Built-in のターゲットを並べたものは、同じ設定にするのが普通）。
+    Render Face は URP / Built-in の列挙（Front = 2, Back = 1, Both = 0）、古い形式のマスターノードは m_TwoSided、
+    HDRP は m_DoubleSidedMode（0 が片面）。
+    """
+    alpha_test = transparent = two_sided = False
+    settings = []
+    # 新しい形式はオブジェクトを空行で並べる。Allow Material Override を入れたターゲットはマテリアルの _Surface などが
+    # 優先されるので、そのターゲットの設定は使わない（Synty の Generic_Basic は Alpha Clipping を入れたうえで上書きを許し、
+    # 大半のマテリアルは _AlphaClip を 0 にしている）
+    for chunk in re.split(r"\n\s*\n", text):
+        if _MATERIAL_OVERRIDE.search(chunk):
+            continue
+        settings.extend(_GRAPH_SETTING.findall(chunk))
+    for name, value in settings:
+        on = value == "true" or (value.isdigit() and int(value) != 0)
+        if name in ("m_AlphaClip", "m_AlphaTest"):
+            alpha_test |= value == "true"
+        elif name == "m_SurfaceType":
+            transparent |= value == "1"
+        elif name == "m_RenderFace":
+            two_sided |= value == "0"
+        elif name in ("m_TwoSided", "m_DoubleSidedMode"):
+            two_sided |= on
+    return ShaderDefaults(
+        render_type="Transparent" if transparent else None,
+        cull_off=two_sided,
+        alpha_test=alpha_test,
+        display_names=display_names,
+    )
+
+
+def _hidden_properties(text: str) -> frozenset[str]:
+    """``[HideInInspector]`` で宣言されたプロパティ名。Properties が読めなければ空。"""
+    try:
+        block = _properties_block(text)
+    except ShaderSourceError:
+        return frozenset()
+    return frozenset(
+        name for attributes, name in _PROPERTY_WITH_ATTRIBUTES.findall(block or "") if "hideininspector" in attributes.lower()
+    )
 
 
 def declared_properties(data: bytes | str, ext: str) -> frozenset[str]:
@@ -123,10 +208,15 @@ def declared_properties(data: bytes | str, ext: str) -> frozenset[str]:
 
 def _shaderlab_properties(text: str) -> frozenset[str]:
     """ShaderLab の ``Properties { ... }`` に並んだ名前。"""
-    text = _COMMENT.sub("", text)
+    block = _properties_block(_COMMENT.sub("", text))
+    return frozenset(_PROPERTY.findall(block)) if block is not None else frozenset()
+
+
+def _properties_block(text: str) -> str | None:
+    """``Properties { ... }`` の中身（コメントは除いてから渡す）。無ければ None。"""
     match = _PROPERTIES.search(text)
     if match is None:
-        return frozenset()
+        return None
     depth, i, in_string = 1, match.end(), False
     while i < len(text) and depth:
         c = text[i]
@@ -144,11 +234,28 @@ def _shaderlab_properties(text: str) -> frozenset[str]:
         i += 1
     if depth:
         raise ShaderSourceError("unterminated Properties block")
-    return frozenset(_PROPERTY.findall(text[match.end():i - 1]))
+    return text[match.end():i - 1]
 
 
 def _graph_properties(text: str) -> frozenset[str]:
-    """Shader Graph のプロパティとキーワードの参照名（上書きがあればそれ、無ければ既定の名前）。
+    """Shader Graph のプロパティとキーワードの参照名（上書きがあればそれ、無ければ既定の名前）。"""
+    return frozenset(name for name, _ in _graph_references(text))
+
+
+def graph_display_names(text: str) -> dict[str, str]:
+    """Shader Graph のプロパティの参照名 → 表示名（Inspector に出る名前）。空白と "_" の違いだけのものは入れない。
+
+    参照名は自動で ``Texture2D_E1B0D043`` のように付くことがあり、役割は表示名（「Base Map」）でしか分からない（#236）。
+    """
+    def key(value: str) -> str:
+        return value.replace("_", "").replace(" ", "").lower()
+
+    # 「Wind Speed」と Wind_Speed のように、表示名から分かることが参照名と同じものは入れない
+    return {name: display for name, display in _graph_references(text) if display and key(display) != key(name)}
+
+
+def _graph_references(text: str) -> list[tuple[str, str]]:
+    """Shader Graph のプロパティとキーワードの（参照名, 表示名）。
 
     古い形式は 1 つの JSON（``m_SerializedProperties`` の各要素の ``JSONnodeData`` が JSON の文字列）、
     新しい形式は JSON のオブジェクトを並べたもの。
@@ -176,12 +283,13 @@ def _graph_properties(text: str) -> frozenset[str]:
                             objects.append(parsed)
     except (json.JSONDecodeError, RecursionError) as exc:
         raise ShaderSourceError(f"not a shader graph: {exc}") from exc
-    names = set()
+    result = []
     for obj in objects:
         name = obj.get("m_OverrideReferenceName") or obj.get("m_DefaultReferenceName")
         if isinstance(name, str) and name:
-            names.add(name)
-    return frozenset(names)
+            display = obj.get("m_Name")
+            result.append((name, display if isinstance(display, str) else ""))
+    return result
 
 
 def restrict_to_declared(mat: UnityMaterial, declared: frozenset[str]) -> tuple[UnityMaterial, list[str]]:

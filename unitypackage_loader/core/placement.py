@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Container, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
@@ -39,6 +39,7 @@ from .hierarchy import (
     world_matrices,
 )
 from .primitives import builtin_mesh_kind
+from .terrain import terrain_data_ref
 from .transform import Mat4, inverse_affine, multiply
 from .unity_ids import mesh_file_id
 
@@ -55,6 +56,7 @@ class PlacedRenderer:
     # 展開した Renderer の配置で、ルートより下の Renderer だけが持つ。同じ配置に同名の Renderer があれば、どれのものか
     # 決められないので None（#186）
     relative: Mat4 | None = None
+    shadows_only: bool = False  # Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）
 
 
 @dataclass
@@ -182,12 +184,48 @@ class _RendererRow(NamedTuple):
     own: int  # 候補を使わないときのルート
 
 
+def _single_mesh_name(guid: str, tables: dict[str, dict[int, str]], sole_nodes: Mapping[str, str]) -> str | None:
+    """1 メッシュのモデルなら、そのノード（Blender のオブジェクト）の名前。表があれば畳んだノード、無ければ FBX のただ 1 つのノード。"""
+    table = tables.get(guid)
+    if table:
+        return collapsed_root_name(table)
+    return next((name for g, name in sole_nodes.items() if g.lower() == guid and name), None)
+
+
+def _swap_model_mesh(
+    placement: ModelPlacement, node: Node, tables: dict[str, dict[int, str]], sole_nodes: Mapping[str, str], models: set[str]
+) -> None:
+    """モデルの PrefabInstance で MeshFilter のメッシュを別のモデルのものに差し替えていれば、配置するモデルを入れ替える（#242）。
+
+    Destroyed Building Kit は、瓦礫の FBX（DBK_Brick_Rubble_A.fbx）を置いてメッシュだけを別の FBX（DBK_Brick_Rubble_C）に
+    差し替えている。どちらも 1 メッシュのモデルのときだけ扱う（ルートの Transform はどちらでも畳んだノードの変換なので、
+    位置の上書きはそのまま使える）。上書きの記録の名前（畳んだノードの名前）は、差し替え先の名前に付け替える。
+    """
+    if len(node.model_meshes) != 1:
+        return
+    guid, _ = next(iter(node.model_meshes.values()))
+    guid = guid.lower() if guid else None
+    if not guid or guid == placement.model_guid or guid not in models:
+        return
+    old_name = _single_mesh_name(placement.model_guid, tables, sole_nodes)
+    new_name = _single_mesh_name(guid, tables, sole_nodes)
+    if old_name is None or new_name is None:
+        return
+    placement.model_guid = guid
+    for records in (placement.node_transforms, placement.renderers, placement.parts):
+        if old_name in records and old_name != new_name:
+            records[new_name] = records.pop(old_name)
+    if new_name in placement.renderers:
+        placement.renderers[new_name].name = new_name
+
+
 def placements(
     h: Hierarchy,
     model_guids: ModelNames,
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
     top_nodes: Mapping[str, str] | None = None,
+    top_level_nodes: Mapping[str, frozenset[str]] | None = None,
 ) -> list[ModelPlacement]:
     """モデルの配置を、階層に現れた順に返す。
 
@@ -215,6 +253,9 @@ def placements(
     表のある 1 メッシュの FBX と同じに扱う（メッシュはこのノードのものしか無いので、メッシュ参照の名前もこのノード名）。
     モデルの PrefabInstance の配置は今までどおり（読み込み側がオブジェクトの数で決める。#111）。Issue #181。
 
+    ``top_level_nodes``（モデルの GUID → FBX の最上位のノードの名前。複数あるものだけ）: 表の無いモデルで、Renderer のある
+    GameObject がそのまま配置のルートになり、その名前が最上位のノードの 1 つなら、そのノードを単位行列にする（#237）。
+
     ``top_nodes``（モデルの GUID → FBX のただ 1 つの最上位のノードの名前）: Unity は最上位のノードが 1 つだけの FBX で、
     子があってもそのノードをモデルのルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
     Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer のメッシュ参照で判定）なら、
@@ -223,6 +264,7 @@ def placements(
     root_names = _model_names(model_guids)
     models = set(root_names)
     tops = {g.lower(): name for g, name in (top_nodes or {}).items() if name}
+    top_levels = {g.lower(): names for g, names in (top_level_nodes or {}).items() if names}
     tables = {g.lower(): table for g, table in (name_tables or {}).items()}
     node_names = {g: names for g, table in tables.items() if (names := node_names_in_table(table)) is not None}
     # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
@@ -260,8 +302,9 @@ def placements(
                 placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
             placement.node_transforms = copy.deepcopy(node.model_transforms)
             placement.parts = {k: replace(v) for k, v in node.model_parts.items()}
+            _swap_model_mesh(placement, node, tables, sole_nodes or {}, models)
             # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
-            collapsed = collapsed_root_name(tables.get(node.model_guid, {}))
+            collapsed = collapsed_root_name(tables.get(placement.model_guid, {}))
             if collapsed is not None:
                 placement.root_node = collapsed
                 placement.node_transforms.setdefault(collapsed, {})
@@ -319,6 +362,12 @@ def placements(
                 # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
                 if label is not None:
                     placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            elif guid in top_levels and not tables.get(guid) and root == key:
+                # 表の無い、最上位のノードが複数ある FBX を展開した GameObject（MeshDecals.fbx の RoadDecals.002 だけを置いた
+                # prefab）。ルートの GameObject がその最上位のノードなら、Unity の行列がノードの変換を含むので単位行列にする（#237）
+                base = unity_base_name(h.nodes[root].name)
+                if base in top_levels[guid]:
+                    placement.node_transforms[base] = copy.deepcopy(_IDENTITY_NODE)
             # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
             top = tops.get(guid)
             if top and not placement.node_transforms and _is_top_node(h.nodes[root], guid, top, renderer_tables.get(guid, {})):
@@ -335,6 +384,7 @@ def placements(
             name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
             renderer.mesh_file_id, renderer.lod_level,
             multiply(root_inverse, worlds[key]) if root_inverse is not None else None,
+            renderer.shadows_only,
         )
         # ルートからこの Node までの、上書き前の行列の積で逆算する
         inverse = inverse_affine(node.scope_matrix)
@@ -347,15 +397,20 @@ def placements(
 
 @dataclass
 class PrimitivePlacement:
-    """Unity の組み込みメッシュ（Quad・Plane・Cube など）を使う MeshRenderer（Issue #190）。
+    """モデルファイルではないメッシュを使う Renderer。Unity の組み込みメッシュ（Quad・Plane・Cube など。Issue #190）か、
+    パッケージの Unity の Mesh（``.asset`` か、prefab に埋め込んだもの。Issue #216）。
 
-    メッシュはパッケージに無いので、読み込み側が ``core/primitives.py`` で同じ形を作り、``key`` の Node の Empty の下に置く。
+    組み込みメッシュはパッケージに無いので、読み込み側が ``core/primitives.py`` で同じ形を作る。Mesh は ``core/unity_mesh.py`` で読む。
+    どちらも ``key`` の Node の Empty の下に置く。
     """
 
     key: int  # Renderer の Node
-    kind: str  # 組み込みメッシュの名前（``primitives.BUILTIN_MESHES`` の値）
+    kind: str  # 組み込みメッシュの名前（``primitives.BUILTIN_MESHES`` の値）。Mesh なら空
     materials: list[str | None]
     visible: bool  # GameObject が祖先も含めてアクティブで、Renderer が有効
+    mesh_guid: str = ""  # Mesh を持つアセットの GUID（組み込みメッシュなら空）
+    mesh_file_id: int = 0  # そのアセットの中の Mesh の fileID
+    shadows_only: bool = False  # Shadows Only の Renderer（#232）
 
 
 @dataclass
@@ -366,7 +421,8 @@ class SceneContents:
     lights: int = 0
     cameras: int = 0
     ui_elements: int = 0  # RectTransform（読み込まない。#202）
-    terrains: int = 0  # Terrain（読み込まない。#202）
+    terrains: int = 0  # Terrain のコンポーネントの数（#202）
+    terrain_data: list[str] = field(default_factory=list)  # Terrain が指す TerrainData の GUID（重複なし、現れた順。#205）
     other_renderers: int = 0  # パッケージ外のメッシュを指す Renderer（組み込みメッシュの MeshRenderer は ``primitives``）
     decals: int = 0  # DecalProjector（#165）
     primitives: list[PrimitivePlacement] = field(default_factory=list)
@@ -387,11 +443,13 @@ def summarize(
     name_tables: dict[str, dict[int, str]] | None = None,
     sole_nodes: Mapping[str, str] | None = None,
     top_nodes: Mapping[str, str] | None = None,
+    mesh_assets: Container[str] = (),
+    top_level_nodes: Mapping[str, frozenset[str]] | None = None,
 ) -> SceneContents:
-    """シーンの概要。引数は ``placements`` と同じ。"""
+    """シーンの概要。引数は ``placements`` と同じ。``mesh_assets`` は Unity の Mesh を持つアセットの GUID（#216）。"""
     names = _model_names(model_guids)
     models = set(names)
-    found = placements(h, names, name_tables, sole_nodes, top_nodes)
+    found = placements(h, names, name_tables, sole_nodes, top_nodes, top_level_nodes)
     active = effective_active(h)
     primitives: list[PrimitivePlacement] = []
     other = 0
@@ -400,12 +458,21 @@ def summarize(
         if renderer is None or n.model_guid is not None or renderer.mesh_guid in models:
             continue
         kind = builtin_mesh_kind(renderer.mesh_guid, renderer.mesh_file_id)
+        if kind is None and renderer.mesh_guid in mesh_assets and renderer.renderer_class == CLASS_MESH_RENDERER:
+            if renderer.materials:  # マテリアルの無い MeshRenderer は描かれない（組み込みメッシュと同じ）
+                primitives.append(PrimitivePlacement(
+                    key, "", list(renderer.materials), active[key] and renderer.enabled, renderer.mesh_guid, renderer.mesh_file_id,
+                    renderer.shadows_only,
+                ))
+            continue
         if kind is not None and renderer.renderer_class == CLASS_MESH_RENDERER:
             if not renderer.materials:
                 # マテリアルが 1 つも無い MeshRenderer は Unity では何も描かれない（スクリプトの目印に Cube を付けた
                 # GameObject など）ので作らない。読み込まない Renderer の警告にも数えない
                 continue
-            primitives.append(PrimitivePlacement(key, kind, list(renderer.materials), active[key] and renderer.enabled))
+            primitives.append(PrimitivePlacement(
+                key, kind, list(renderer.materials), active[key] and renderer.enabled, shadows_only=renderer.shadows_only,
+            ))
         else:
             other += 1
     return SceneContents(
@@ -414,6 +481,10 @@ def summarize(
         cameras=h.counts[CLASS_CAMERA],
         ui_elements=h.counts[CLASS_RECT_TRANSFORM],
         terrains=h.counts[CLASS_TERRAIN],
+        terrain_data=list(dict.fromkeys(
+            guid for n in h.nodes.values() for class_id, body in n.components.values()
+            if class_id == CLASS_TERRAIN and (guid := terrain_data_ref(body))
+        )),
         other_renderers=other,
         primitives=primitives,
         decals=sum(1 for n in h.nodes.values() for class_id, _ in n.components.values() if class_id == CLASS_MONO_BEHAVIOUR),
@@ -434,12 +505,15 @@ class ModelCatalog:
     recycle_names: Mapping[str, dict[int, str]] = field(default_factory=dict)  # 古い形式の .meta の fileIDToRecycleName（#53）
     sole_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX のノードが 1 つだけのモデル → そのノード名（#181）
     top_nodes: Mapping[str, str] = field(default_factory=dict)  # FBX の最上位のノードが 1 つだけのモデル → そのノード名（#185）
+    # FBX の最上位のノードが複数あるモデル → その名前（表の無いモデルで、展開したノードをルートにした配置の判定に使う。#237）
+    top_level_nodes: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    mesh_assets: frozenset[str] = frozenset()  # Unity の Mesh を持つアセット（.asset と、Mesh を埋め込んだ prefab・シーン。#216）
 
     def expander(self, read_asset: Callable[[str], RawAsset | None]) -> Expander:
         return Expander(read_asset, dict(self.names), dict(self.recycle_names))
 
     def placements(self, h: Hierarchy) -> list[ModelPlacement]:
-        return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
+        return placements(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.top_level_nodes)
 
     def summarize(self, h: Hierarchy) -> SceneContents:
-        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes)
+        return summarize(h, self.names, self.recycle_names, self.sole_nodes, self.top_nodes, self.mesh_assets, self.top_level_nodes)

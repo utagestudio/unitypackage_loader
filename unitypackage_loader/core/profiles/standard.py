@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..material import BLACK, NormalizedMaterial, UnityMaterial
 from .base import ShaderInfo, ShaderProfile, alpha_mode_from_blend_state, cull_backface, is_black, texture_transform
+from .custom_shader import fill_emission_from_aliases, fill_textures_from_aliases, scale_emission_by_alias
 from .hdrp import hdrp_emission
 
 # Standard シェーダーの _Mode
@@ -51,6 +52,10 @@ class StandardProfile(ShaderProfile):
 
     @staticmethod
     def _alpha_mode(mat: UnityMaterial, info: ShaderInfo | None):
+        # Legacy Shaders などの組み込みシェーダーは、半透明・切り抜きがシェーダーで決まっている。前に使っていた Standard の
+        # _Mode（0 = 不透明）が残っていても使わない（Synty の FX_Default_01 は Particles/Additive (Soft) で _Mode が 0。#256）
+        if info is not None and info.family == "legacy" and info.alpha is not None:
+            return info.alpha
         if mat.has("_Mode"):  # Built-in Standard
             mode = int(mat.f("_Mode", 0))
             if mode == MODE_CUTOUT:
@@ -104,104 +109,6 @@ def _smoothness(mat: UnityMaterial, n: NormalizedMaterial) -> None:
     n.smoothness_from_albedo = int(mat.f("_SmoothnessTextureChannel", 0.0)) == 1 and n.base_color_tex is not None
 
 
-# 一般名（_MainTex など）を持たない自作シェーダー（Amplify Shader Editor など）でよく使われる名前。
-# 大文字小文字と "_" を無視して完全一致で比べる（_Mask や _Color_Tilling のような別の役割の名前を拾わないよう、部分一致にはしない）。
-# #118 で宣言されていない残りの _MainTex を読まなくなり、独自の名前でしか色を持たないシェーダーが白くなった
-_BASE_COLOR_ALIASES = (
-    "basecolor", "basecolormap", "basecolortex", "basecolortexture", "basemap", "basetex", "basetexture",
-    "albedo", "albedomap", "albedotex", "albedotexture", "diffuse", "diffusemap", "diffusetex", "diffusetexture",
-    "maintexture", "colormap", "colortex", "colortexture",
-)
-_NORMAL_ALIASES = ("normal", "normals", "normalmap", "normaltex", "normaltexture", "bump", "bumptex", "bumptexture")
-_NORMAL_SCALE_ALIASES = (
-    "normalscale", "scalenormal", "normalstrength", "normalintensity", "normalpower", "normalamount", "bumpstrength", "bumppower",
-)
-
-# 発光（#167）。ON / OFF・色・テクスチャ・強さを独自の名前で持つシェーダー（Synty の _Enable_Emission / _Emission_Color /
-# _Emission_Map など）向け。Unity 標準の名前は各プロファイルが読み、条件付きで無視もする（#52 のキーワードの判定など）ので、
-# ここでは拾わない（_EMISSION_STANDARD_NAMES）
-_EMISSION_TOGGLE_ALIASES = ("enableemission", "useemission", "emissionenabled", "emissionenable", "emissionon", "emissiontoggle")
-_EMISSION_COLOR_ALIASES = ("emissioncolor", "emissioncolour", "emissivecolor", "emissivecolour", "emissiontint")
-_EMISSION_TEX_ALIASES = (
-    "emissionmap", "emissiontex", "emissiontexture", "emissivemap", "emissivetex", "emissivetexture", "emission", "emissive",
-)
-_EMISSION_STRENGTH_ALIASES = ("emissionintensity", "emissionstrength", "emissionpower", "emissiveintensity", "emissivestrength")
-_EMISSION_STANDARD_NAMES = frozenset({"_EmissionColor", "_EmissionMap", "_EmissiveColor", "_EmissiveColorMap", "_EmissiveColorLDR"})
-
-
-def _alias_key(name: str) -> str:
-    return name.replace("_", "").lower()
-
-
-def _find_texture(mat: UnityMaterial, aliases: tuple[str, ...]):
-    """``aliases`` の順に、値の入ったテクスチャを探す。"""
-    by_key = {_alias_key(name): ref for name, ref in mat.textures.items()}
-    for alias in aliases:
-        if by_key.get(alias) is not None:
-            return by_key[alias]
-    return None
-
-
-def _find_color(mat: UnityMaterial, aliases: tuple[str, ...], exclude: frozenset[str] = frozenset()):
-    """``aliases`` の順に色を探す。無ければ None。"""
-    by_key = {_alias_key(name): value for name, value in mat.colors.items() if name not in exclude}
-    for alias in aliases:
-        if alias in by_key:
-            return by_key[alias]
-    return None
-
-
-def _find_float(mat: UnityMaterial, aliases: tuple[str, ...], default: float) -> float:
-    names = {_alias_key(name): name for name in (*mat.floats, *mat.ints)}
-    for alias in aliases:
-        if alias in names:
-            return mat.f(names[alias], default)
-    return default
-
-
-def fill_textures_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
-    """ベースカラー・法線のテクスチャが一般名で見つからなかったとき、自作シェーダーでよく使われる名前で探す。
-
-    Shader Graph で作ったシェーダーは URP Lit の ``_WorkflowMode`` / ``_Surface`` を持つので指紋では URP Lit と読まれるが、
-    テクスチャは ``_Albedo_Map`` / ``_Base_Map`` / ``_Normal_Map`` のような独自の名前で持つことがある（Synty の POLYGON シリーズ）。
-    """
-    if n.base_color_tex is None:
-        n.base_color_tex = _find_texture(mat, _BASE_COLOR_ALIASES)
-        if n.base_color_tex is not None:
-            n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
-    if n.normal_tex is None:
-        n.normal_tex = _find_texture(mat, _NORMAL_ALIASES)
-        if n.normal_tex is not None:
-            n.normal_strength = _find_float(mat, _NORMAL_SCALE_ALIASES, 1.0)
-
-
-def fill_emission_from_aliases(mat: UnityMaterial, n: NormalizedMaterial) -> None:
-    """発光が一般名で見つからなかったとき、独自の名前（ON / OFF・色・テクスチャ・強さ）で探す（#167）。
-
-    発光は「色 × テクスチャ」とする（Synty の Shader Graph は ON のとき Emission_Map × Emission_Color）。誤って光らせると
-    目立つので、ON / OFF の項目が OFF なら光らせず、色が黒なら（テクスチャがあっても）光らせない。色の項目が無ければ、
-    テクスチャがあるときだけ白とする。
-    """
-    if n.has_emission:
-        return
-    names = {_alias_key(name): name for name in (*mat.floats, *mat.ints)}
-    toggle = next((names[a] for a in _EMISSION_TOGGLE_ALIASES if a in names), None)
-    if toggle is not None and not mat.flag(toggle):
-        return
-    by_key = {_alias_key(name): ref for name, ref in mat.textures.items() if name not in _EMISSION_STANDARD_NAMES}
-    tex = next((by_key[a] for a in _EMISSION_TEX_ALIASES if by_key.get(a) is not None), None)
-    color = _find_color(mat, _EMISSION_COLOR_ALIASES, _EMISSION_STANDARD_NAMES)
-    if color is None:
-        if tex is None:
-            return
-        color = (1.0, 1.0, 1.0, 1.0)
-    if is_black(color):
-        return
-    n.emission_tex = tex
-    n.emission_color = color
-    n.emission_strength *= max(0.0, _find_float(mat, _EMISSION_STRENGTH_ALIASES, 1.0))
-
-
 class GenericProfile(StandardProfile):
     """どのプロファイルにも一致しないシェーダー向け。一般的なプロパティ名だけで最善努力する。
 
@@ -215,7 +122,10 @@ class GenericProfile(StandardProfile):
     def normalize(self, mat: UnityMaterial, info: ShaderInfo | None = None) -> NormalizedMaterial:
         n = super().normalize(mat, info)
         fill_textures_from_aliases(mat, n)
-        fill_emission_from_aliases(mat, n)
+        if n.has_emission:
+            scale_emission_by_alias(mat, n)  # 一般名で読んだ発光にも、独自の名前の強さを掛ける（#241）
+        else:
+            fill_emission_from_aliases(mat, n)
         if info is None:
             n.family = "unknown"
             n.warnings.append("unknown shader; used generic property mapping")

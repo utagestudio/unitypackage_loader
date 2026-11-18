@@ -258,6 +258,7 @@ class PartMatch:
     hidden: set[str] = field(default_factory=set)  # 隠すオブジェクト（非アクティブな GameObject の子孫と、無効な Renderer）
     removed: set[str] = field(default_factory=set)  # Unity で消されたオブジェクト（使われていない部品と同じ扱い）
     unmatched: int = 0  # 当てられなかった上書き・削除の数（見た目を変えないものと、Renderer 以外の削除は数えない）
+    shadows_only: set[str] = field(default_factory=set)  # Shadows Only にした Renderer のオブジェクト（#232）
 
 
 class PartMatcher:
@@ -304,9 +305,16 @@ class PartMatcher:
         hide_own: set[str] = set()
         remove_trees: list[str] = []
         remove_own: set[str] = set()
+        shadows: set[str] = set()
         unmatched = 0
         for key, state in parts.items():
             hides_tree, hides_own = state.active is False, state.enabled is False
+            if state.shadows_only:
+                name = self.renderer_ids.get(uid) if (uid := pending_renderer_id(key)) is not None else self._by_name(key)
+                if name is not None:
+                    shadows.add(name)
+                else:
+                    unmatched += 1
             if not (hides_tree or hides_own or state.removed):
                 continue  # 表示する値（Unity の既定値）を書いただけの上書き
             if (uid := pending_object_id(key)) is not None:
@@ -329,4 +337,4 @@ class PartMatcher:
                 remove_own.add(name)
         removed = self._subtree(remove_trees) | remove_own
         hidden = (self._subtree(hide_trees) | hide_own) - removed
-        return PartMatch(hidden, removed, unmatched)
+        return PartMatch(hidden, removed, unmatched, shadows - removed - hidden)

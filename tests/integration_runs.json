@@ -5,6 +5,14 @@
     { "script": "tests/make_synthetic_urp_package.py", "blender": true, "outputs": ["synthetic_urp.unitypackage", "synthetic_urp_standard.unitypackage"] },
     { "script": "tests/make_synthetic_hdrp_package.py", "blender": true, "outputs": ["synthetic_hdrp.unitypackage"] },
     { "script": "tests/make_synthetic_toon_package.py", "blender": true, "outputs": ["synthetic_toon.unitypackage"] },
+    { "script": "tests/make_synthetic_terrain_package.py", "blender": true, "outputs": ["synthetic_terrain.unitypackage"] },
+    { "script": "tests/make_synthetic_mesh_package.py", "blender": true, "outputs": ["synthetic_mesh.unitypackage"] },
+    {
+      "script": "tests/make_synthetic_nested_package.py",
+      "blender": false,
+      "args": ["{packages}"],
+      "outputs": ["synthetic_nested.unitypackage"]
+    },
     {
       "script": "tests/make_synthetic_broken_packages.py",
       "blender": false,
@@ -28,6 +36,14 @@
     { "package": "synthetic_toon.unitypackage", "expectations": "expectations_synthetic_toon_options.json", "note": "Principled・Force Opaque・法線と発光を使わない・Unity の情報を残さない・画像の取り込み・Legacy の FBX インポーター" },
     { "package": "synthetic_toon.unitypackage", "expectations": "expectations_synthetic_toon_reuse.json", "note": "同名のマテリアルの再利用と Unlit" },
     { "package": "synthetic_toon.unitypackage", "expectations": "expectations_synthetic_toon_names_only.json", "note": "Names Only と、そこからの再構築" },
+    { "package": "synthetic_terrain.unitypackage", "expectations": "expectations_synthetic_terrain.json", "note": "Terrain の高さ・穴・塗り分け（新旧の TerrainData）" },
+    { "package": "synthetic_terrain.unitypackage", "expectations": "expectations_synthetic_terrain_low_unlit.json", "note": "Terrain の間引き（129）と Unlit" },
+    { "package": "synthetic_terrain.unitypackage", "expectations": "expectations_synthetic_terrain_none.json", "note": "Terrain を読み込まない設定（Terrain だけのシーンは読み込めない）" },
+    { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh.json", "note": "Unity の Mesh（.asset と prefab に埋め込んだもの）と .asset のマテリアルを使うシーン" },
+    { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh_prefabs.json", "note": "Unity の Mesh だけを使う prefab" },
+    { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh_models.json", "note": "FBX のマテリアルの画像が作者の PC のパスを指すモデル" },
+    { "package": "synthetic_nested.unitypackage", "expectations": "expectations_synthetic_nested.json", "note": "入れ子のパッケージ（選ばなければ Built-in らしいもの）" },
+    { "package": "synthetic_nested.unitypackage", "expectations": "expectations_synthetic_nested_chosen.json", "note": "入れ子のパッケージを選んで読む" },
     { "package": "synthetic_broken_model.unitypackage", "expectations": "expectations_synthetic_broken_model.json", "note": "1 つ失敗しても残りを読む" },
     { "package": "synthetic_broken_all.unitypackage", "expectations": "expectations_synthetic_broken_all.json", "note": "全部失敗したら何も残さない" }
   ]

@@ -21,12 +21,8 @@ from unitypackage_loader.core.prefab import (
     RendererMaterials,
     analyze_prefab,
     merge_prefab_tables,
-    inactive_models,
-    models_placed_whole,
-    parts_from_placements,
     resolve_model_renderers,
     tables_from_hierarchy,
-    unused_parts,
 )
 
 MAT_A = "1" * 32
@@ -364,7 +360,7 @@ class PrefabVariantTests(unittest.TestCase):
         self.assertEqual(h.unresolved_overrides, 0)
         placed = placements(h, MODELS)
         self.assertEqual(tables_from_hierarchy(h, MODELS, placed=placed), {MODEL_A: {}})  # 表示の上書きだけでもモデルを使う
-        self.assertEqual(parts_from_placements(placed), {MODEL_A: {pending_object(123456789): PartState(active=False)}})
+        self.assertEqual(placed[0].parts, {pending_object(123456789): PartState(active=False)})
 
     def test_material_overrides_on_a_model_object_are_kept_by_file_id(self):
         target = -7511558181221131132
@@ -500,16 +496,10 @@ class PrefabVisibilityTests(unittest.TestCase):
         self.assertEqual({name: rm.visible for name, rm in table.items()},
                          {"Chr_Business": True, "Chr_Street": False, "Chr_Robot": False})
 
-    def test_models_placed_only_under_inactive_objects(self):
-        self.assertEqual(inactive_models(self.placed), {MODEL_B})
-
     def test_analysis_collects_the_same_results(self):
         """読み込み側がまとめて受け取る PrefabAnalysis は、個々の関数の結果と同じ（#198）。"""
         analysis = analyze_prefab(self.h, self.placed)
         self.assertEqual(analysis.tables, tables_from_hierarchy(self.h, MODELS, placed=self.placed))
-        self.assertEqual(analysis.whole_models, models_placed_whole(self.h, self.placed))
-        self.assertEqual(analysis.parts, parts_from_placements(self.placed))
-        self.assertEqual(analysis.inactive_models, {MODEL_B})
 
     def test_a_row_shown_in_any_placement_is_shown(self):
         # 同じモデルを 2 か所に置き、片方だけ非アクティブ（Prefabs 単位ではモデルを 1 回だけ読み込む）
@@ -519,7 +509,6 @@ class PrefabVisibilityTests(unittest.TestCase):
         for placed in ([placement(False, True), placement(True, True)], [placement(True, False), placement(True, True)]):
             table = tables_from_hierarchy(self.h, MODELS, placed=placed)[MODEL_A]
             self.assertTrue(table["Body"].visible)
-            self.assertEqual(inactive_models(placed), set())
 
     def test_resolved_rows_keep_their_visibility(self):
         table = {"Body": RendererMaterials("Body", [MAT_A], visible=False), pending_renderer(5): RendererMaterials(pending_renderer(5), [None, MAT_B])}
@@ -576,34 +565,6 @@ class FindRendererTests(unittest.TestCase):
         self.assertEqual(find_renderer(both, "Body.002").materials, [MAT_A])  # 連番を外した「Body」と完全一致
         ambiguous = {"Arm.001": RendererMaterials("Arm.001", [MAT_A]), "Arm.002": RendererMaterials("Arm.002", [MAT_B])}
         self.assertIsNone(find_renderer(ambiguous, "Arm.003"))
-
-
-class UnusedPartsTests(unittest.TestCase):
-    """読み込む単位 Prefabs で、prefab が使っていない FBX の部品を見分ける（#151）。"""
-
-    def test_meshes_missing_from_the_table(self):
-        from unitypackage_loader.core.unity_ids import mesh_file_id
-
-        table = {
-            "Body": RendererMaterials("Body", [MAT_A]),
-            "Renamed": RendererMaterials("Renamed", [MAT_B], mesh_file_id=mesh_file_id("Door")),
-        }
-        objects = [("Body", True), ("Body.002", True), ("Door.001", True), ("Window", True), ("Armature", False)]
-        self.assertEqual(unused_parts(table, objects), {"Window"})  # メッシュでないものは対象にしない
-
-    def test_numbered_node_names_renamed_by_blender(self):
-        # FBX のノード名が「Base-Ring.001」で、2 回目の読み込みで Blender が「Base-Ring.002」に付け替えた
-        table = {"Base-Ring.001": RendererMaterials("Base-Ring.001", [MAT_A])}
-        objects = [("Base-Ring.002", True), ("Chain-Link.002", True)]
-        self.assertEqual(unused_parts(table, objects), {"Chain-Link.002"})
-
-    def test_models_placed_whole(self):
-        # Renderer からだけ使う prefab では、FBX の部品は表の分しか Unity に無い
-        h = expand(BASE, {BASE: PREFAB})
-        self.assertEqual(models_placed_whole(h, placements(h, MODELS)), set())
-        # モデルの PrefabInstance で FBX を丸ごと置いた prefab では、すべての部品がある
-        on_model = expand(VARIANT, {VARIANT: variant_yaml(5000, MODEL_A, [(123456789, "m_LocalPosition.x", "1", None)])})
-        self.assertEqual(models_placed_whole(on_model, placements(on_model, MODELS)), {MODEL_A})
 
 
 class RenamedGameObjectMappingTests(unittest.TestCase):

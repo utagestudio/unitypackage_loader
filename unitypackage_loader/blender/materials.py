@@ -187,7 +187,13 @@ def build_material(
     # --- アルファ ---
     alpha_out = None
     if alpha_mode != "opaque":
-        if base_node is not None and norm.alpha_from_texture:
+        if norm.alpha_tex is not None and norm.alpha_from_texture:
+            # 色の画像とは別のアルファの画像（白黒のマスク）の R（#266）
+            mask = b.texture(norm.alpha_tex, "alpha", "Alpha Mask (R)")
+            split = b.add("ShaderNodeSeparateColor", 2, label="Alpha Mask R")
+            b.link(mask.outputs["Color"], split.inputs["Color"])
+            alpha_out = split.outputs["Red"]
+        elif base_node is not None and norm.alpha_from_texture:
             alpha_out = base_node.outputs["Alpha"]
         if norm.base_color[3] < 1.0 - 1e-4:
             mul = b.add("ShaderNodeMath", 2, label="Alpha × _Color.a")

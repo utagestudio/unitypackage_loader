@@ -32,13 +32,12 @@ import copy
 import math
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
 from .hierarchy import (
     CLASS_GAME_OBJECT,
     CLASS_TRANSFORM,
-    LEGACY_MODEL_IDS,
     MAX_NESTING,
     MAX_NODES,
     MAX_SLOTS,
@@ -66,13 +65,15 @@ from .hierarchy import (
     pending_renderer,
     remap,
     file_uid,
+    is_shadows_only,
+    legacy_root_ids,
     ID_MASK,
 )
 from .transform import chain
 from .unity_yaml import UnityRef, ref_guid, to_float
 
 
-_TABLES = ("transforms", "game_objects", "renderers", "components")
+_TABLES = ("transforms", "game_objects", "renderers", "components", "mesh_filters")
 
 
 @dataclass
@@ -83,10 +84,15 @@ class _Inserted:
     """
 
     instance_id: int
+    source_guid: str | None = None  # 差し込んだ元のアセットの GUID（埋め込んだ Mesh の参照に使う。#242）
     transforms: dict[int, int] = field(default_factory=dict)
     game_objects: dict[int, int] = field(default_factory=dict)
     renderers: dict[int, int] = field(default_factory=dict)
     components: dict[int, int] = field(default_factory=dict)
+    mesh_filters: dict[int, int] = field(default_factory=dict)
+
+
+_DEFAULT_LEGACY_ROOTS = legacy_root_ids({})
 
 
 class Expander:
@@ -104,15 +110,17 @@ class Expander:
         self._recycle = {g.lower(): table for g, table in (model_recycle_names or {}).items() if table}
         # 1 メッシュの FBX（Unity がノードを //RootNode に畳むモデル）の GUID → そのノードの名前（#99）
         self._collapsed = {g: name for g, table in self._recycle.items() if (name := collapsed_root_name(table))}
+        # モデルの GUID → 古い形式のルートの fileID → 新しい形式のルートの fileID（表が無いモデルは 100000 / 400000）
+        self._legacy_roots = {g: legacy_root_ids(table) for g, table in self._recycle.items()}
         # GUID → (展開結果, 深さで打ち切ったときの展開時のスタックの長さ。打ち切りが無ければ None)
         self._cache: dict[str, tuple[Hierarchy | None, int | None]] = {}
 
     def expand_asset(self, guid: str) -> Hierarchy | None:
         return self._asset(guid.lower(), ())
 
-    def expand_raw(self, raw: RawAsset) -> Hierarchy:
-        """シーンなど、キャッシュしないアセットを展開する。"""
-        return self._build(raw, ())
+    def expand_raw(self, raw: RawAsset, guid: str | None = None) -> Hierarchy:
+        """シーンなど、キャッシュしないアセットを展開する。``guid`` はそのアセットの GUID（埋め込んだ Mesh の参照に使う）。"""
+        return self._build(raw, (), guid.lower() if guid else None)
 
     def _asset(self, guid: str, stack: tuple[str, ...]) -> Hierarchy | None:
         """prefab を展開する（結果はキャッシュする）。
@@ -134,6 +142,10 @@ class Expander:
         self._cache[guid] = (result, len(stack) if result is not None and result.depth_truncated else None)
         return result
 
+    def legacy_roots(self, guid: str) -> dict[int, int]:
+        """モデルの古い形式のルートの fileID → 新しい形式のルートの fileID（``hierarchy.legacy_root_ids``）。"""
+        return self._legacy_roots.get(guid) or _DEFAULT_LEGACY_ROOTS
+
     def _model(self, guid: str) -> Hierarchy:
         h = Hierarchy()
         root = Node(
@@ -153,11 +165,17 @@ class Expander:
         ):
             h.transforms[file_uid(transform_id)] = root.key
             h.game_objects[file_uid(game_object_id)] = root.key
+        # 古い形式のルート（100000 / 400000、または表の //RootNode）も向ける。prefab の中に置いたモデルのルートを、外側から
+        # 「中の PrefabInstance の fileID XOR 元の fileID」で指す上書きが、古い形式の番号で書かれている（Destroyed Building Kit。#244）
+        for legacy_id, root_id in self.legacy_roots(guid).items():
+            table = h.transforms if root_id == MODEL_ROOT_TRANSFORM else h.game_objects
+            table.setdefault(file_uid(legacy_id), root.key)
         return h
 
-    def _build(self, raw: RawAsset, stack: tuple[str, ...]) -> Hierarchy:
+    def _build(self, raw: RawAsset, stack: tuple[str, ...], own_guid: str | None = None) -> Hierarchy:
         h = Hierarchy(counts=Counter(raw.counts))
-        model_instances = {i.file_id for i in raw.instances if i.source_guid in self._models}
+        own_guid = own_guid or (stack[-1] if stack else None)
+        model_instances = {i.file_id: i.source_guid for i in raw.instances if i.source_guid in self._models}
         inserted: dict[int, _Inserted] = {}  # PrefabInstance の fileID → 差し込んだオブジェクトの表
 
         def resolve(file_id: int, table: str) -> int | None:
@@ -170,7 +188,7 @@ class Expander:
             if scope is None:
                 return None
             if instance_id in model_instances:
-                source_id = LEGACY_MODEL_IDS.get(source_id, source_id)
+                source_id = self.legacy_roots(model_instances[instance_id]).get(source_id, source_id)
             return getattr(scope, table).get(file_uid(source_id))
 
         fathers: list[tuple[int, int]] = []  # (Node の key, 親の fileID)。差し込みが終わってから解決する
@@ -198,6 +216,9 @@ class Expander:
         for renderer_id, (go, info) in raw.renderers.items():
             key = h.game_objects.get(file_uid(go))
             if key is not None:
+                if info.mesh_guid is None and info.mesh_file_id and own_guid:
+                    # 同じアセットに埋め込んだ Mesh（UModeler の prefab など。#216）。GUID の無い参照をアセット自身の GUID にする
+                    info = replace(info, mesh_guid=own_guid)
                 h.nodes[key].renderer = info
                 h.nodes[key].renderer_key = file_uid(renderer_id)
                 h.renderers[file_uid(renderer_id)] = key
@@ -206,6 +227,10 @@ class Expander:
             if key is not None:
                 h.nodes[key].components[file_uid(component_id)] = (class_id, copy.deepcopy(body))
                 h.components[file_uid(component_id)] = key
+        for filter_id, go in raw.mesh_filters.items():
+            key = h.game_objects.get(file_uid(go))
+            if key is not None:
+                h.mesh_filters[file_uid(filter_id)] = key
         _assign_scopes(h, own)
 
         roots: list[tuple[int, int]] = []  # (差し込んだ最上位の Node の key, m_TransformParent の fileID)
@@ -304,12 +329,13 @@ class _Insertion:
         self.is_model = is_model
         self.iid = instance.file_id
         self.added: dict[int, int] = {}  # 元の key → 差し込んだ key（copy_nodes で作る）
-        self.scope = _Inserted(self.iid)
+        self.scope = _Inserted(self.iid, self.source)
         # モデルの PrefabInstance なら、そのルートの Node と、古い形式の .meta の表（中への上書きを名前に結び付ける）
         self.root_key: int | None = None
         self.table = expander._recycle.get(self.source, {}) if is_model else {}
         self.collapsed = expander._collapsed.get(self.source) if is_model else None
         self.has_table = self.source in expander._recycle
+        self.legacy_roots = expander.legacy_roots(self.source) if is_model else {}
         # prefab を挟んで、その中のモデルのオブジェクトを指しているかもしれない上書き・削除（#31 / #172）
         self.through: list[_Through] = []
 
@@ -349,7 +375,7 @@ class _Insertion:
         if guid is not None and guid != self.source:
             return None
         if self.is_model:
-            file_id = LEGACY_MODEL_IDS.get(file_id, file_id)
+            file_id = self.legacy_roots.get(file_id, file_id)
         return file_uid(file_id)
 
     def model_root(self) -> Node | None:
@@ -440,6 +466,10 @@ class _Insertion:
         """モデルの中のオブジェクトへの上書きを、モデルのルートに記録する（名前を引ければ名前で、引けなければ fileID で）。"""
         h = self.h
         root = self.model_root()
+        if path == "m_Mesh" and root is not None and isinstance(reference, UnityRef):
+            # モデルの中の MeshFilter のメッシュを差し替える。配置を作るときに、1 メッシュのモデル同士なら入れ替える（#242）
+            root.model_meshes[uid] = (reference.guid, reference.file_id)
+            return
         if root is not None and _apply_named_model_override(root, self.table, file_id, path, value, reference):
             return
         visibility = _visibility_change(path, value)
@@ -490,6 +520,8 @@ def _visibility_change(path: str, value: object) -> tuple[str, dict[str, bool]] 
         return "object", {"active": to_float(value, 1.0) != 0}
     if path == "m_Enabled":
         return "renderer", {"enabled": to_float(value, 1.0) != 0}
+    if path == "m_CastShadows":
+        return "renderer", {"shadows_only": is_shadows_only(value)}
     return None
 
 
@@ -583,7 +615,7 @@ def _is_tracked(path: str) -> bool:
     return bool(
         TRS_PATH.fullmatch(path)
         or MATERIAL_PATH.fullmatch(path)
-        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled")
+        or path in ("m_Materials.Array.size", "m_IsActive", "m_Enabled", "m_CastShadows", "m_Mesh")
     )
 
 
@@ -619,12 +651,25 @@ def _apply_modification(h: Hierarchy, scope: _Inserted, uid: int, path: str, val
             return False
         _set_property(component[1], path, value, reference)
         return True
+    if path == "m_Mesh":
+        # MeshFilter のメッシュの差し替え（#242）。GUID の無い参照は、差し込んだ元のアセットに埋め込んだ Mesh
+        node = h.nodes.get(scope.mesh_filters.get(uid))  # type: ignore[arg-type]
+        if node is None or node.renderer is None or not isinstance(reference, UnityRef):
+            return False
+        node.renderer.mesh_guid = reference.guid or scope.source_guid
+        node.renderer.mesh_file_id = reference.file_id
+        return True
     node = h.nodes.get(scope.renderers.get(uid))  # type: ignore[arg-type]
     renderer = node.renderer if node is not None else None
     if path == "m_Enabled":
         if renderer is None:
             return False
         renderer.enabled = to_float(value, 1.0) != 0
+        return True
+    if path == "m_CastShadows":
+        if renderer is None:
+            return False
+        renderer.shadows_only = is_shadows_only(value)
         return True
     if path == "m_Materials.Array.size":
         if renderer is None:

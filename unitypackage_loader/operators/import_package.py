@@ -12,7 +12,9 @@ from bpy_extras.io_utils import ImportHelper
 from ..core.package import PackageError
 from ..core.report import describe_exception, sanitize_display
 from ..blender import log
-from ..ui.preferences import ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, UNIT_ITEMS, get_prefs
+from ..ui.preferences import (
+    ARRANGE_ITEMS, EXTRACT_MODE_ITEMS, MATERIAL_MODE_ITEMS, MODELS_ITEMS, TERRAIN_ITEMS, UNIT_ITEMS, get_prefs,
+)
 from . import select_models
 from .common import options_from_operator, report_level
 
@@ -38,6 +40,9 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
     scene_cameras: BoolProperty(name="Scene Cameras", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_exposure: BoolProperty(name="Scene Exposure", default=True, options={"HIDDEN", "SKIP_SAVE"})
     scene_decals: BoolProperty(name="Scene Decals", default=True, options={"HIDDEN", "SKIP_SAVE"})
+    scene_terrain: EnumProperty(name="Scene Terrain", items=TERRAIN_ITEMS, default="513", options={"HIDDEN", "SKIP_SAVE"})
+    # 入れ子のパッケージのうち読むものの pathname（#217）。空なら、選ぶダイアログを出すか Built-in らしいものを読む
+    nested_package: StringProperty(name="Nested Package", default="", options={"HIDDEN", "SKIP_SAVE"})
     hide_lods: BoolProperty(
         name="Hide Lower LODs",
         default=True,
@@ -147,8 +152,14 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 if not self.properties.is_property_set(prop):
                     setattr(self, prop, getattr(prefs, pref))
         # ドラッグ＆ドロップ（FileHandler 経由）で filepath が既に入っていればオプションのポップアップ、
-        # メニューからならファイルブラウザを開く
-        return self.invoke_popup(context, confirm_text="Import")
+        # メニューからならファイルブラウザを開く。ImportHelper.invoke_popup と同じだが、タイトルはファイル名だけにする
+        # （フルパスをタイトルにすると、深いフォルダのパッケージでダイアログが横に伸びる。#211）
+        if self.properties.is_property_set("filepath"):
+            return context.window_manager.invoke_props_dialog(
+                self, confirm_text="Import", title=Path(self.filepath).name, translate=False
+            )
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
 
     def draw(self, context):
         layout = self.layout
@@ -211,7 +222,10 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         return [self.filepath] if self.filepath else []
 
     def execute(self, context):
-        from ..blender.importer import ImportOptions, build_shader_table, prepare_package, run_import
+        from ..blender.importer import (
+            ImportOptions, build_shader_table, default_nested_package, extract_nested_package, prepare_package, run_import,
+        )
+        from ..core.package import UnityPackage
         from ..core.report import ImportReport
 
         prefs = get_prefs(context)
@@ -236,8 +250,19 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
                 base = index / len(paths)
                 span = 1.0 / len(paths)
                 try:
+                    pkg = UnityPackage(path)
+                    pkg.scan()
+                    nested = pkg.nested_packages()
+                    if nested:
+                        # 外側に読み込めるものが無く、中に .unitypackage がある（パイプライン別の中身。#217）
+                        chosen = next((e for e in nested if e.pathname == self.nested_package), None)
+                        if chosen is None and len(nested) > 1 and not batch and not bpy.app.background:
+                            set_nested_pending(path, opts, pkg, nested)
+                            return bpy.ops.import_scene.unitypackage_nested("INVOKE_DEFAULT")
+                        chosen = chosen or default_nested_package(nested)
+                        path, pkg = str(extract_nested_package(pkg, chosen, opts, Path(path))), None
                     prepared = prepare_package(
-                        path, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend
+                        path, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend, pkg=pkg
                     )
                     ask = opts.models == "ASK" and not bpy.app.background
                     if ask and prepared.has_choices:
@@ -291,6 +316,78 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+# 入れ子のパッケージを選ぶダイアログに渡すもの（#217）。EnumProperty の動的 items は文字列を保持しておく必要があるので、モジュールで持つ
+_nested_pending: tuple | None = None  # (外側のパス, ImportOptions, 走査済みの UnityPackage, 入れ子の AssetEntry の並び)
+_nested_items: list[tuple[str, str, str]] = []
+
+
+def set_nested_pending(path: str, opts, pkg, nested) -> None:
+    global _nested_pending
+    _nested_pending = (path, opts, pkg, nested)
+    from ..blender.importer import default_nested_package
+
+    default = default_nested_package(nested)
+    _nested_items[:] = [
+        (e.pathname, sanitize_display(Path(e.pathname).name), sanitize_display(e.pathname))
+        for e in [default] + [e for e in nested if e is not default]
+    ]
+
+
+def _nested_enum(self, context):
+    return _nested_items or [("", "(none)", "")]
+
+
+class IMPORT_SCENE_OT_unitypackage_nested(bpy.types.Operator):
+    """入れ子になった .unitypackage のうち、読み込むものを選ぶ（#217）。"""
+
+    bl_idname = "import_scene.unitypackage_nested"
+    bl_label = "Choose a Package Inside"
+    bl_description = "This package only contains other .unitypackage files (for example one per render pipeline). Choose one to import"
+    bl_options = {"INTERNAL"}
+
+    choice: EnumProperty(name="Package", items=_nested_enum)
+
+    def invoke(self, context, event):
+        if _nested_pending is None:
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self, width=420, confirm_text="Continue")
+
+    def draw(self, context):
+        layout = self.layout
+        path = _nested_pending[0] if _nested_pending else ""
+        layout.label(text=sanitize_display(Path(path).name), icon="PACKAGE")
+        layout.label(text="This package contains other packages. Choose one to import:")
+        layout.prop(self, "choice", expand=True)
+
+    def execute(self, context):
+        global _nested_pending
+        from ..blender.importer import build_shader_table, extract_nested_package, prepare_package, run_import
+
+        if _nested_pending is None:
+            return {"CANCELLED"}
+        path, opts, pkg, nested = _nested_pending
+        _nested_pending = None
+        entry = next((e for e in nested if e.pathname == self.choice), None)
+        if entry is None:
+            return {"CANCELLED"}
+        try:
+            inner = str(extract_nested_package(pkg, entry, opts, Path(path)))
+            prepared = prepare_package(inner, build_shader_table(opts.shader_table_path), import_blend=opts.import_blend)
+            if opts.models == "ASK" and prepared.has_choices:
+                select_models.set_pending(inner, opts, prepared)
+                return bpy.ops.import_scene.unitypackage_select("INVOKE_DEFAULT")
+            report = run_import(context, inner, opts, prepared=prepared)
+        except PackageError as exc:
+            self.report({"ERROR"}, sanitize_display(str(exc)))
+            return {"CANCELLED"}
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self.report({"ERROR"}, sanitize_display(f"Import failed: {describe_exception(exc)}"))
+            return {"CANCELLED"}
+        self.report({report_level(report)}, report.summary())
+        return {"FINISHED"}
+
+
 class IO_FH_unitypackage(bpy.types.FileHandler):
     """3D ビューポートなどへの .unitypackage のドラッグ＆ドロップを受け付ける。"""
 
@@ -310,7 +407,7 @@ def menu_func_import(self, context):
     self.layout.operator(IMPORT_SCENE_OT_unitypackage.bl_idname, text="Unitypackage (.unitypackage)")
 
 
-_classes = (IMPORT_SCENE_OT_unitypackage, IO_FH_unitypackage)
+_classes = (IMPORT_SCENE_OT_unitypackage, IMPORT_SCENE_OT_unitypackage_nested, IO_FH_unitypackage)
 
 
 def register() -> None:

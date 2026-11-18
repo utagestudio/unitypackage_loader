@@ -7,7 +7,6 @@ from unitypackage_loader.core.scene_import import (
     PlacementStats,
     parts_to_hide,
     parts_to_remove,
-    prefab_warnings,
     removed_warning,
     scene_warnings,
     unused_in_placement,
@@ -126,6 +125,19 @@ class UnusedInPlacementTests(unittest.TestCase):
         self.assertEqual(unused_in_placement(h, whole, objects), set())
 
 
+    def test_numbered_node_names_are_not_merged(self):
+        # MeshDecals.fbx の RoadDecals / .001 / .002 / .003。連番を外すと同じ名前になるが、名前がそのまま一致する行が
+        # あれば、外した形では比べない（#237）
+        objects = [("RoadDecals", True), ("RoadDecals.001", True), ("RoadDecals.002", True), ("RoadDecals.003", True)]
+        for row in ("RoadDecals.002", "RoadDecals"):
+            with self.subTest(row=row):
+                h, placement = placed(renderer(row))
+                self.assertEqual(unused_in_placement(h, placement, objects), {n for n, _ in objects} - {row})
+        # 一致する行が無ければ今までどおり外した形で比べる（Blender が付け替えた名前）
+        h, placement = placed(renderer("Lamp.001"))
+        self.assertEqual(unused_in_placement(h, placement, [("Lamp.004", True), ("Pole", True)]), {"Pole"})
+
+
 class PartsToRemoveTests(unittest.TestCase):
     """使われていない部品を読み込まないときに消すもの（#152）。"""
 
@@ -169,23 +181,21 @@ class SceneWarningsTests(unittest.TestCase):
             ["1", "a", "b", "2", "1", "3", "8", "9", "4", "7", "5", "6"],
         )
 
+    def test_terrain_warning_only_when_terrains_are_off(self):
+        contents = SceneContents([], terrains=2)
+        self.assertEqual(len(scene_warnings("S", contents, PlacementStats())), 1)
+        self.assertEqual(scene_warnings("S", contents, PlacementStats(terrains_imported=True)), [])
+
     def test_unreadable_scene_reports_only_lights(self):
         self.assertEqual(scene_warnings("S", None, PlacementStats(hidden_unused=3)), [])
         self.assertEqual(len(scene_warnings("S", None, PlacementStats(baked_lights=1))), 1)
         self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats()), [])
 
 
-class PrefabWarningsTests(unittest.TestCase):
-    def test_same_wording_as_scenes(self):
-        self.assertEqual(prefab_warnings(PlacementStats()), [])
-        messages = prefab_warnings(PlacementStats(hidden_unused=53, hidden_lods=2))
-        self.assertEqual(messages[0], unused_warning(53))
-        self.assertTrue(messages[0].startswith("53 object(s) from model files are not used"))
-        self.assertTrue(messages[1].startswith("2 object(s) are lower LOD levels"))
-
+class RemovedWarningTests(unittest.TestCase):
     def test_removed_parts(self):
-        messages = prefab_warnings(PlacementStats(removed_unused=53, hidden_unused=1))
-        self.assertEqual(messages, [removed_warning(53), unused_warning(1)])
+        messages = scene_warnings("S", SceneContents([]), PlacementStats(removed_unused=53, hidden_unused=1), "prefab")
+        self.assertEqual(messages, ["prefab S: " + removed_warning(53), "prefab S: " + unused_warning(1)])
         self.assertIn("were not imported", messages[0])
         self.assertEqual(scene_warnings("S", SceneContents([]), PlacementStats(removed_unused=4)), ["scene S: " + removed_warning(4)])
 

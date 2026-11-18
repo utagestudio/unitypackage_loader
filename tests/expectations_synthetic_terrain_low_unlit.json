@@ -1,0 +1,53 @@
+{
+  "options": {
+    "unit": "SCENES",
+    "material_mode": "UNLIT",
+    "scene_terrain": "129"
+  },
+  "terrain_count": 2,
+  "placed_objects": [
+    {
+      "top": "Ground",
+      "object": "Ground",
+      "vertices": 16641,
+      "faces": 16383,
+      "hidden": false,
+      "bbox": [
+        -138.0,
+        -84.0,
+        1.0,
+        -10.0,
+        -20.0,
+        20.845
+      ]
+    },
+    {
+      "top": "Level",
+      "object": "Old Ground",
+      "vertices": 153,
+      "faces": 128,
+      "hidden": false,
+      "bbox": [
+        -116.0,
+        -3.0,
+        0.0,
+        -100.0,
+        5.0,
+        0.0
+      ]
+    }
+  ],
+  "material_checks": [
+    {
+      "name": "Ground Data (Terrain)",
+      "node_types": [
+        "ShaderNodeEmission",
+        "ShaderNodeSeparateColor"
+      ],
+      "node_types_absent": [
+        "ShaderNodeBsdfPrincipled",
+        "ShaderNodeNormalMap"
+      ]
+    }
+  ]
+}

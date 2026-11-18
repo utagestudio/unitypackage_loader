@@ -117,6 +117,16 @@ class SceneUnitTest(unittest.TestCase):
         self.assertFalse(scene.supported)
         self.assertEqual(scene.skip_reason, NO_SCENE_MESH_REASON)
 
+    def test_scene_with_only_a_terrain_is_readable(self):
+        contents = SceneContents([], terrains=1, terrain_data=["a" * 32])
+        self.assertTrue(summarize_scene("s", "Assets/T.unity", contents, {}, {"a" * 32}).supported)
+        # TerrainData がパッケージに無ければ、今までどおり読み込めない
+        missing = summarize_scene("s", "Assets/T.unity", contents, {}, set())
+        self.assertEqual((missing.supported, missing.skip_reason), (False, NO_SCENE_MESH_REASON))
+        # 読めないモデルしか無くても、Terrain があれば読み込める
+        both = SceneContents([ModelPlacement(BLEND, 0, IDENTITY, True)], terrain_data=["a" * 32])
+        self.assertTrue(summarize_scene("s", "Assets/T.unity", both, {BLEND: "x"}, {"a" * 32}).supported)
+
     def test_unreadable_scene(self):
         scene = summarize_scene("s", "Assets/Broken.unity", None, {})
         self.assertEqual((scene.supported, scene.skip_reason, scene.placements), (False, UNREADABLE_SCENE_REASON, []))

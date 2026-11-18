@@ -80,6 +80,7 @@
 | `materials.modes` | レポートの行の、実際に組んだモードの集合（`PRINCIPLED` / `TOON` / `UNLIT` / `NAMES_ONLY`。組まなかった行は数えない） |
 | `before.materials` | 読み込む前に、この名前の空のマテリアルを作っておく（同名のマテリアルを使う `reuse_existing` の確認に使う） |
 | `images.count` | 読み込まれた画像数 |
+| `images.missing` | ファイルの見つからない画像の数（パッケージの外のパスを指す画像。#220） |
 | `images.packed` | `true` なら、レポートに載った画像がすべて .blend に取り込まれている（`pack_images`） |
 | `outlines` | `count` はレポートのアウトラインの数、`objects` はオブジェクト名 → アウトライン（Solidify モディファイアー `UnityOutline`）の厚さ。`null` なら付いていないこと |
 | `warnings_max` | 許容する警告数の上限 |
@@ -100,12 +101,14 @@
 | `submesh_materials` | オブジェクトのポリゴンで最初に使われた順（Unity のサブメッシュ順）に並べたマテリアル名。スロットの並びに依らず、ポリゴン群とマテリアルの対応を確かめる |
 | `prefabs.count` | 読み込む単位 Prefabs で読み込んだ prefab の数（`options` に `"unit": "PREFABS"` を指定する） |
 | `collections` | prefab ごとのコレクションの中身。`objects` はオブジェクト数（子コレクション込み）、`prefab` はコレクションの `unity_prefab`、`mat_files` はメッシュに付いたマテリアルの元の .mat のファイル名の集合（同じモデルを読み直すとマテリアル名に連番が付くため、名前ではなく元のファイルで比べる）、`parts` はオブジェクト名ごとの `hidden`（`hide_get()`）と `lod`（`unity_lod` カスタムプロパティ）。`absent: true` ならそのオブジェクトが無いこと |
+| `package_collection` | パッケージのコレクションの名前（入れ子のパッケージを読んだときは「外側の名前 (中身の名前)」） |
 | `scenes.count` | 読み込む単位 Scenes で読み込んだシーンの数（`options` に `"unit": "SCENES"` を指定する） |
-| `placed_objects` | シーンで配置したオブジェクト。最上位の Empty（Unity の最上位の GameObject）の名前とオブジェクト名（`.001` などの連番を除く）で 1 つに絞る。`tip` は評価後のメッシュで重心から最も遠い頂点のワールド座標（誤差 0.001 まで）、`hidden` は `hide_get()`、`lod` は `unity_lod` カスタムプロパティ、`mat_files` はスロットのマテリアルの元の .mat のファイル名の集合。`absent: true` なら該当するオブジェクトが無いこと（読み込まなかった部品） |
+| `placed_objects` | シーンで配置したオブジェクト。最上位の Empty（Unity の最上位の GameObject）の名前とオブジェクト名（`.001` などの連番を除く）で 1 つに絞る。`tip` は評価後のメッシュで重心から最も遠い頂点のワールド座標（誤差 0.001 まで）、`hidden` は `hide_get()`、`lod` は `unity_lod` カスタムプロパティ、`vertices` / `faces` はメッシュの頂点数・面数、`bbox` はワールドの範囲 `[x0, y0, z0, x1, y1, z1]`、`mat_files` はスロットのマテリアルの元の .mat のファイル名の集合。`absent: true` なら該当するオブジェクトが無いこと（読み込まなかった部品） |
 | `lights` / `cameras` | シーンから作ったライト・カメラ（オブジェクト名で探す）。`type`、`energy`、`spot_size`、`spot_blend`、`size`、`size_y`、`shape`、`use_shadow`、`use_custom_distance`、`cutoff_distance`、`use_temperature`、`temperature`、`lens`、`sensor_fit`、`ortho_scale`、`clip_end` はライト・カメラのデータの値（数値は 0.1% まで）。`direction` はオブジェクトの -Z のワールドでの向き、`location` はワールド座標、`hidden` は `hide_get()` |
 | `scene_camera` | シーンのカメラになったオブジェクトの名前 |
 | `dialog_selected` | 選択ダイアログの候補で、既定でチェックが入るものの pathname（単位 `SCENES` / `PREFABS` / `MODELS` ごと。挙げた単位だけ比べる） |
 | `light_count` / `camera_count` | レポートのライト・カメラの数 |
+| `decal_count` / `terrain_count` | レポートのデカール・Terrain の数 |
 | `shared_meshes` | 挙げたオブジェクトがメッシュのデータを共有しているか（同じモデル・同じ割り当ての配置は複製で共有する） |
 | `steps` | 読み込みの後に、順に呼ぶオペレーター。`operator` は `unitypkg.rebuild_material` のような名前、`select` は選ぶオブジェクト名（最初のものをアクティブにする）、`properties` はオペレーターの引数、`result` は結果（既定は `FINISHED`）。`checks` には上のキーを同じ書式で書き、その手順の後に確かめる（レポートは読み込んだときのまま） |
 | `prefab_collections_overlap` | prefab ごとのコレクションの外形（XY）が重なっているか。並べる（`"arrange": "SIDE_BY_SIDE"`）なら `false`、原点に重ねる（`"STACK"`）なら `true` |

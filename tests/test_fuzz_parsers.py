@@ -26,13 +26,17 @@ from unitypackage_loader.core.expander import Expander
 from unitypackage_loader.core.hierarchy import components, effective_active, parse_asset, world_matrices
 from unitypackage_loader.core.placement import placements, summarize
 from unitypackage_loader.core.material import parse_material
-from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo
+from unitypackage_loader.core.meta import ModelImporterInfo, TextureImporterInfo, legacy_meta
 from unitypackage_loader.core.model_ids import parse_fbx_node_names
 from unitypackage_loader.core.prefab import tables_from_hierarchy
 from unitypackage_loader.core.profiles.base import normalize_material
 from unitypackage_loader.core.shader_graph import apply_uv_transforms, texture_uv_transforms
 from unitypackage_loader.core.shader_source import declared_properties, shader_defaults
+from unitypackage_loader.core.terrain import read_terrain_data, read_terrain_layer, terrain_mesh
 from unitypackage_loader.core.unity_binary import load_documents
+from tests.terrain_writer import terrain_data_asset, terrain_layer_yaml
+from tests.unity_mesh_writer import mesh_document
+from unitypackage_loader.core.unity_mesh import read_mesh
 
 SEED = 20260915
 ROUNDS = 80  # フィクスチャ 1 つあたりの壊し方の数
@@ -237,7 +241,7 @@ class ParserFuzzTest(unittest.TestCase):
     def test_shader_source(self):
         # パッケージに入っているシェーダーの定義（#118）
         self.fuzz("shader", run_shader_source(".shader"), tss.SHADERLAB, mutate_text)
-        for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color")):
+        for graph in (tss.graph_v1("_MainTex", "_Color"), tss.graph_v2("_MainTex", "_Color"), tss.terrain_grass_graph()):
             self.fuzz("shader graph", run_shader_source(".shadergraph"), graph, mutate_text)
 
     def test_shader_graph_uvs(self):
@@ -249,6 +253,40 @@ class ParserFuzzTest(unittest.TestCase):
 
     def test_meta(self):
         self.fuzz("meta", run_meta, META, mutate_text)
+
+    def test_legacy_meta_data(self):
+        # Unity 4 以前のパッケージの metaData（#225 の続き）
+        from tests.test_meta import LegacyMetaDataTests as MetaTests
+
+        data = MetaTests.meta_data("ModelImporter", 1040, MetaTests.TABLE)
+        self.fuzz("legacy metaData", lambda d: ModelImporterInfo.from_meta(legacy_meta(d) or ""), data, mutate_bytes)
+
+    def test_mesh(self):
+        # Unity の Mesh（#216）
+        def run_mesh(text: str) -> None:
+            for doc in load_documents(text):
+                if doc.class_id == 43 and isinstance(doc.body, dict):
+                    read_mesh(doc.body)
+
+        quad = [(-0.5, -0.5, 0.0), (0.5, -0.5, 0.0), (-0.5, 0.5, 0.0), (0.5, 0.5, 0.0)]
+        text = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" + mesh_document(
+            1, "Quad", quad, [[0, 3, 1], [3, 0, 2]], normals=[(0.0, 0.0, -1.0)] * 4, uvs=[(0.0, 0.0)] * 4
+        )
+        self.fuzz("mesh", run_mesh, text, mutate_text)
+
+    def test_terrain(self):
+        # Terrain の TerrainData と TerrainLayer（#205）。読めた TerrainData はメッシュまで作る
+        def run_terrain(data: bytes) -> None:
+            terrain_mesh(read_terrain_data(data), 3)
+
+        holes = [255, 0, 255, 255]
+        data = terrain_data_asset(3, 3, (1.0, 10.0, 1.0), [0, 1, 2, 3, 4, 5, 6, 7, 8], holes=holes, layers=["a" * 32],
+                                  alphamaps=[(2, 2, bytes(16))])
+        self.fuzz("terrain data", run_terrain, data, mutate_bytes)
+        old = terrain_data_asset(2, 3, (1.0, 1.0, 1.0), [0] * 6, old_layout=True, legacy=[{"texture": "b" * 32}],
+                                 alphamaps=[(2, 2, bytes(16))], argb=True)
+        self.fuzz("old terrain data", run_terrain, old, mutate_bytes)
+        self.fuzz("terrain layer", read_terrain_layer, terrain_layer_yaml("Road", "c" * 32, "d" * 32), mutate_text)
 
     def test_fbx_node_names(self):
         # 表の無いモデルの中への上書きの対象を決めるときに読む、FBX のノード名（#31）

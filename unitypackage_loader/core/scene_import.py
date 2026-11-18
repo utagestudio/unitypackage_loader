@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from .hierarchy import Hierarchy
 from .placement import ModelPlacement, SceneContents, built_from_renderers
@@ -12,18 +12,25 @@ from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
 __all__ = [
+    "KIND_PREFAB",
+    "KIND_SCENE",
+    "PlacedKind",
     "HiddenParts",
     "PlacementStats",
     "lod_warning",
     "parts_warning",
     "parts_to_hide",
     "parts_to_remove",
-    "prefab_warnings",
     "removed_warning",
     "scene_warnings",
     "unused_in_placement",
     "unused_warning",
 ]
+
+# シーンと同じ処理で置くものの種類（#240）。コレクションのプロパティ（unity_scene / unity_prefab）と警告の頭に使う
+PlacedKind = Literal["scene", "prefab"]
+KIND_SCENE: PlacedKind = "scene"
+KIND_PREFAB: PlacedKind = "prefab"
 
 
 class HiddenParts(NamedTuple):
@@ -33,6 +40,7 @@ class HiddenParts(NamedTuple):
     unused: int  # そのうち「Unity で使われていない部品」として隠した数（#58）
     lods: dict[str, int]  # LODGroup の段が分かったオブジェクトの名前 → 段（隠さない LOD0 も含む。#104）
     hidden_lods: int = 0  # そのうち遠景用 LOD として隠した数
+    shadows_only: frozenset[str] = frozenset()  # Shadows Only の Renderer のオブジェクト（隠すものは除く。#232）
 
 
 def unused_in_placement(h: Hierarchy, placement: ModelPlacement, objects: Iterable[tuple[str, bool]]) -> set[str]:
@@ -45,15 +53,19 @@ def unused_in_placement(h: Hierarchy, placement: ModelPlacement, objects: Iterab
     """
     if not built_from_renderers(h, placement):
         return set()
-    used = set(placement.renderers) | {strip_numeric_suffix(n) for n in placement.renderers}
+    objects = list(objects)
+    rows = set(placement.renderers)
+    # 連番を外して比べるのは、名前がそのまま一致するオブジェクトの無い行だけ。FBX のノード名がもともと連番の形
+    # （MeshDecals.fbx の RoadDecals / .001 / .002 / .003）だと、外すと全部が同じ名前になり、どれも使われていることになる（#237）
+    loose = rows - {name for name, _ in objects}
+    fallback = loose | {strip_numeric_suffix(n) for n in loose}
     mesh_ids = {r.mesh_file_id for r in placement.renderers.values() if r.mesh_file_id}
     result: set[str] = set()
     for obj_name, is_mesh in objects:
+        if not is_mesh or obj_name in rows or mesh_file_id(obj_name) in mesh_ids:
+            continue
         name = strip_numeric_suffix(obj_name)
-        if (
-            is_mesh and obj_name not in used and name not in used
-            and mesh_file_id(obj_name) not in mesh_ids and mesh_file_id(name) not in mesh_ids
-        ):
+        if name not in fallback and not (loose and mesh_file_id(name) in mesh_ids):
             result.add(obj_name)
     return result
 
@@ -131,7 +143,14 @@ def parts_to_hide(
         if placement.active and name not in disabled:
             unused_count += int(unused)
             lod_count += int(lod_hidden and not unused)
-    return HiddenParts(hide, unused_count, lods, lod_count)
+    # Shadows Only の Renderer（#232）。無効と同じく、表の名前の連番も外した形で引く
+    shadows = {name for name, r in placement.renderers.items() if r.shadows_only}
+    shadows |= {strip_numeric_suffix(n) for n in shadows if len(by_base[strip_numeric_suffix(n)]) == 1}
+    shadow_objects = frozenset(
+        obj_name for obj_name, _ in objects
+        if obj_name not in hide and (obj_name in shadows or strip_numeric_suffix(obj_name) in shadows)
+    )
+    return HiddenParts(hide, unused_count, lods, lod_count, shadow_objects)
 
 
 @dataclass
@@ -145,9 +164,11 @@ class PlacementStats:
     removed_unused: int = 0  # 同じく、読み込まなかった FBX の部品（#152）
     hidden_lods: int = 0  # LODGroup の遠景用の段として隠したオブジェクト（#104）
     unmatched_parts: int = 0  # モデルの中への表示の上書き・削除で、当てられなかったもの（#172）
+    shadows_only: int = 0  # Shadows Only の Renderer として、カメラから見えなくしたオブジェクト（#232）
     skipped_nodes: int = 0  # 名前を引けたが当てられなかった、モデルの中のノードへの位置の上書き（シーンだけ）
     skipped_offsets: int = 0  # 置き直せなかった、アーマチュアで変形する部品（シーンだけ）
     skipped_decals: int = 0  # マテリアルが無いか使えない DecalProjector（シーンだけ。#165）
+    terrains_imported: bool = False  # Terrain を読み込む設定だった（読めなかったものは読み込む側が個別に警告する。#205）
     baked_lights: int = 0  # Unity ではライトマップにしか効かないライト（シーンだけ）
     light_notes: set[str] = field(default_factory=set)  # ライトの換算の注意（シーンだけ）
 
@@ -162,12 +183,22 @@ class PlacementStats:
             messages.append(lod_warning(self.hidden_lods))
         if self.unmatched_parts:
             messages.append(parts_warning(self.unmatched_parts))
+        if self.shadows_only:
+            messages.append(
+                f"{self.shadows_only} object(s) only cast shadows in Unity (Shadows Only); they were made invisible to the camera "
+                "and drawn as wireframe in the viewport"
+            )
         return messages
 
 
-def scene_warnings(pathname: str, contents: SceneContents | None, stats: PlacementStats) -> list[str]:
-    """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。"""
-    prefix = f"scene {pathname}: "
+def scene_warnings(
+    pathname: str, contents: SceneContents | None, stats: PlacementStats, kind: PlacedKind = KIND_SCENE
+) -> list[str]:
+    """シーン 1 つを読み込んだ後にレポートへ出す警告（読めなかったシーンの ``contents`` は None）。
+
+    ``kind`` は警告の頭に付ける種類（読む単位 Prefabs で prefab をシーンと同じく置くときは ``KIND_PREFAB``。#240）。
+    """
+    prefix = f"{kind} {pathname}: "
     messages: list[str] = []
     if stats.baked_lights:
         messages.append(
@@ -188,14 +219,14 @@ def scene_warnings(pathname: str, contents: SceneContents | None, stats: Placeme
                 f"{contents.other_renderers} renderer(s) use meshes outside the package "
                 "(such as Unity's built-in primitives) and were skipped"
             )
-        if contents.terrains:
-            messages.append(f"{contents.terrains} Unity Terrain(s) were not imported (terrains are not supported)")
+        if contents.terrains and not stats.terrains_imported:
+            messages.append(f"{contents.terrains} Unity Terrain(s) were not imported (turn on Terrain in the scene options)")
         if contents.ui_elements:
             messages.append(f"{contents.ui_elements} UI element(s) (RectTransform) were not imported")
         if stats.skipped_decals:
             messages.append(
                 f"{stats.skipped_decals} decal projector(s) were skipped (their material is not in the package "
-                "or has no base color texture)"
+                "or has no base color texture; a projector with a material that is not a decal shader is not drawn in Unity either)"
             )
         messages.extend(stats.part_warnings())
         if stats.skipped_nodes:
@@ -208,11 +239,6 @@ def scene_warnings(pathname: str, contents: SceneContents | None, stats: Placeme
                 f"{stats.skipped_offsets} moved part(s) of armature-deformed objects were left at the model's position"
             )
     return [prefix + m for m in messages]
-
-
-def prefab_warnings(stats: PlacementStats) -> list[str]:
-    """prefab 1 つを読み込んだ後にレポートへ出す警告（呼ぶ側が「prefab <pathname>: 」を付ける）。"""
-    return stats.part_warnings()
 
 
 def parts_warning(unmatched_parts: int) -> str:

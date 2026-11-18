@@ -565,6 +565,11 @@ def main() -> None:
     lamp = add(lamp_path, (HEADER + game_object(10, "Lamp") + transform(11, 10, pos=(0, 2, 0))
                            + light_doc(12, 10, 2, intensity=1, light_range=4)).encode(), prefab_meta(lamp_path))
 
+    rings_fbx = tmp / "rings.fbx"
+    export_rings_fbx(rings_fbx)
+    rings_path = "Assets/Synthetic/Models/Rings.fbx"
+    rings_model = add(rings_path, rings_fbx.read_bytes(), model_meta(guid_of(rings_path), {}))
+
     scene_path = "Assets/Synthetic/Scenes/Probe.unity"
     add(scene_path, (HEADER + "".join([
         instance(2500, all_red, 0, [mod(101, all_red, "m_LocalPosition.z", 8)]),
@@ -701,6 +706,10 @@ def main() -> None:
             mod(ROOT_GAME_OBJECT ^ 100, stall_prefab, "m_Name", "StallRoot"),
             mod(STALL_SIGN_RENDERER ^ 100, stall_prefab, "m_Enabled", 1),
         ], removed_game_objects=[STALL_FLAG_OBJECT ^ 100]),
+        # 表の無い FBX の Ring.001 を、名前を変えた GameObject で置く（#213）。マテリアルはメッシュ参照のハッシュで当てる
+        game_object(6100, "Ring Renamed"),
+        transform(6101, 6100, pos=(-20, 0, 0)),
+        mesh_renderer(6102, 6103, 6100, rings_model, mats["ProbeRed"], mesh_file_id("Ring.001")),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),
@@ -764,10 +773,6 @@ def main() -> None:
     )).encode(), f"fileFormatVersion: 2\nguid: {guid_of(legacy_path)}\nDefaultImporter:\n  externalObjects: {{}}\n")
 
     # ノード名がもともと連番付きの FBX と、その Ring.001 だけを指す色違いの prefab（#155）
-    rings_fbx = tmp / "rings.fbx"
-    export_rings_fbx(rings_fbx)
-    rings_path = "Assets/Synthetic/Models/Rings.fbx"
-    rings_model = add(rings_path, rings_fbx.read_bytes(), model_meta(guid_of(rings_path), {}))
     for label, mat_name in (("RingRed", "ProbeRed"), ("RingPlain", "ProbeMat")):
         ring_prefab_path = f"Assets/Synthetic/Prefabs/{label}.prefab"
         add(ring_prefab_path, (HEADER + "".join([

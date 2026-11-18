@@ -14,6 +14,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from ..core.arrange import arrange_offsets
+from ..core.fbx_units import blender_axis_matrix, unity_axis_matrix
 from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
@@ -22,6 +23,7 @@ from ..core.decals import Decal, decal_plane
 from ..core.primitives import PrimitiveMesh, build_primitive
 from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
 from ..core.unity_yaml import UnityRef
+from .model_import import node_name
 
 
 def find_layer_collection(layer_coll, target):
@@ -247,16 +249,56 @@ def _file_scale(unit_scale: float | None) -> float:
     return (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
 
 
-def _node_basis(basis: Matrix, spec: dict, f: float) -> Matrix:
+@dataclass(frozen=True)
+class ModelUnits:
+    """配置の計算に使う、モデルの FBX の単位と軸（``read_unit_scale`` / ``read_axes``。FBX 以外は空）。"""
+
+    unit_scale: float | None = None
+    axes: tuple[int, ...] | None = None
+    global_scale: float = 1.0  # .meta の globalScale（Unity は頂点と子の位置に焼き込む）
+
+    def basis_a(self) -> Matrix:
+        """Blender のオブジェクトのローカル座標（FBX のファイルの座標）→ Unity のノード空間（A = f·U）。
+
+        U は Unity がこの FBX に掛ける軸の変換（``fbx_units.unity_axis_matrix``）。Y が上の FBX では diag(-1, 1, 1) で、
+        A = diag(-f, f, f)（#53 で確かめた形）。3ds Max の Z が上の FBX では Y と Z の入れ替え（Cardboard Boxes Pack。#240）。
+        """
+        f = _file_scale(self.unit_scale)
+        return Matrix.Diagonal((f, f, f, 1.0)) @ Matrix(unity_axis_matrix(self.axes)).to_4x4()
+
+    def world_basis_a(self) -> Matrix:
+        """``basis_a`` に globalScale も掛けたもの（ルートの Empty の下で、親の逆行列を通さずにワールドで置くとき）。"""
+        g = self.global_scale if math.isfinite(self.global_scale) and self.global_scale > 0 else 1.0
+        return Matrix.Diagonal((g, g, g, 1.0)) @ self.basis_a()
+
+
+def axis_correction(axes: tuple[int, ...] | None) -> Matrix | None:
+    """Y が上でない FBX を読み込んだ直後に、最上位のオブジェクトへ左から掛けて Unity と同じ向きにする行列（K = C·U·B⁻¹）。
+
+    Blender の FBX インポーターはファイルの上の軸を +Z にする（B。Z が上の 3ds Max の FBX では回転を掛けない）が、Unity は
+    U で Y が上にする（#240）。Y が上の FBX では K が単位行列（C·diag(-1, 1, 1) = B）なので None。
+    """
+    if axes is None or axes[0] != 2:
+        return None
+    unity = Matrix(unity_axis_matrix(axes)).to_4x4()
+    blender = Matrix(blender_axis_matrix(axes)).to_4x4()
+    return Matrix(UNITY_TO_BLENDER) @ unity @ blender.inverted_safe()
+
+
+def _units(units: ModelUnits | None) -> ModelUnits:
+    return units if units is not None else ModelUnits()
+
+
+def _node_basis(basis: Matrix, spec: dict, basis_a: Matrix) -> Matrix:
     """ノードへの上書きを当てたオブジェクトの行列（C·M·A）。
 
     Unity のノード空間の行列 L と、原点に読み込んだ Blender のオブジェクトの行列 N の関係は N = C·L·A
-    （C は Unity → Blender の基底、A = diag(-f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）。
-    Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、Unity 6 が読んだノードの値と
-    突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はその値のまま使う。
+    （C は Unity → Blender の基底、A は ``ModelUnits.basis_a``。Y が上の FBX では diag(-f, f, f)、f は Unity の fileScale
+    = FBX の UnitScaleFactor / 100）。Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、
+    Unity 6 が読んだノードの値と突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分は
+    その値のまま使う。
     """
-    basis_a = Matrix.Diagonal((-f, f, f, 1.0))
-    basis_a_inverse = Matrix.Diagonal((-1.0 / f, 1.0 / f, 1.0 / f, 1.0))
+    basis_a_inverse = basis_a.inverted_safe()
     location, rotation, scale = (Matrix(BLENDER_TO_UNITY) @ basis @ basis_a_inverse).decompose()
     position = [location.x, location.y, location.z]
     quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
@@ -275,27 +317,27 @@ def _movable(obj, members: set) -> bool:
     return obj.parent not in members and not deformed
 
 
-def apply_node_transforms(template: SceneTemplate, objects, overrides, unit_scale: float | None) -> int:
+def apply_node_transforms(template: SceneTemplate, objects, overrides, units: ModelUnits | None) -> int:
     """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
 
     当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
     行列の組み立ては ``_node_basis`` を参照。
     """
-    f = _file_scale(unit_scale)
+    basis_a = _units(units).basis_a()
     members = set(objects)
     skipped = 0
     for original, obj in zip(template.objects, objects):
-        spec = _by_object_name(overrides, obj.name)
+        spec = _by_object_name(overrides, node_name(obj))
         if spec is None:
             continue
         if not _movable(obj, members):
             skipped += 1
             continue
-        obj.matrix_basis = _node_basis(template.basis[original], spec, f)
+        obj.matrix_basis = _node_basis(template.basis[original], spec, basis_a)
     return skipped
 
 
-def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec: dict, unit_scale: float | None) -> bool:
+def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec: dict, units: ModelUnits | None) -> bool:
     """1 メッシュの FBX をモデルの PrefabInstance で置いた配置を、FBX のノードの変換ぶんも含めて置き直す（#99）。
 
     この形の FBX では Unity のモデルのルートの Transform の値が FBX のノードの変換 L で、シーンの上書きは
@@ -305,15 +347,15 @@ def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec
     """
     if root is None:
         return False
-    f = _file_scale(unit_scale)
-    neutral = Matrix(UNITY_TO_BLENDER) @ Matrix.Diagonal((-f, f, f, 1.0))  # ノードを単位行列にしたオブジェクトの行列
+    basis_a = _units(units).basis_a()
+    neutral = Matrix(UNITY_TO_BLENDER) @ basis_a  # ノードを単位行列にしたオブジェクトの行列
     members = set(objects)
     for original, obj in zip(template.objects, objects):
-        if _by_object_name({name: spec}, obj.name) is None:
+        if _by_object_name({name: spec}, node_name(obj)) is None:
             continue
         if not _movable(obj, members):
             return False
-        root.matrix_basis = _node_basis(template.basis[original], spec, f) @ neutral.inverted_safe()
+        root.matrix_basis = _node_basis(template.basis[original], spec, basis_a) @ neutral.inverted_safe()
         obj.matrix_basis = neutral
         return True
     return False
@@ -327,18 +369,98 @@ def remove_parts(objects: list[bpy.types.Object], names: set[str]) -> list[bpy.t
     それを見て消すと、データと一緒に共有していたほかのオブジェクトまで消える。オブジェクトを先にすべて消し、
     残したオブジェクトが使っていないデータだけを消す。
     """
-    kept = [obj for obj in objects if obj.name not in names]
-    gone = [obj for obj in objects if obj.name in names]
+    kept = [obj for obj in objects if node_name(obj) not in names]
+    gone = [obj for obj in objects if node_name(obj) in names]
     used = {obj.data for obj in kept if obj.data is not None}
     orphans = {obj.data for obj in gone if obj.data is not None} - used
-    for obj in gone:
-        bpy.data.objects.remove(obj)
-    for data in orphans:
-        if isinstance(data, bpy.types.Mesh):
-            bpy.data.meshes.remove(data)
-        elif isinstance(data, bpy.types.Armature):
-            bpy.data.armatures.remove(data)
+    # 1 つずつ remove すると、そのたびに全データを調べて参照を外すので、シーンでは何万回も呼んで重い。まとめて消す（#219）
+    bpy.data.batch_remove(gone + [d for d in orphans if isinstance(d, (bpy.types.Mesh, bpy.types.Armature))])
     return kept
+
+
+_BATCH_HIDE_MIN = 200  # これより多く隠すときだけ、まとめて隠す
+
+
+def _view3d(context):
+    """まとめて隠すオペレーターに渡す 3D ビュー（ウィンドウ・エリア・リージョン）。無ければ None（ヘッドレスなど）。"""
+    for window in getattr(context.window_manager, "windows", []):
+        screen = window.screen
+        for area in screen.areas if screen is not None else []:
+            if area.type == "VIEW_3D":
+                region = next((r for r in area.regions if r.type == "WINDOW"), None)
+                if region is not None:
+                    return window, area, region
+    return None
+
+
+def _hidden(obj: bpy.types.Object) -> bool:
+    try:
+        return obj.hide_get()
+    except RuntimeError:  # ビューレイヤーに無い（隠せない）
+        return True
+
+
+def hide_objects(context, objects: list[bpy.types.Object]) -> None:
+    """オブジェクトをビューレイヤーで隠す（``hide_set(True)`` と同じ）。
+
+    ``hide_set`` は 1 回ごとにビューレイヤーを同期し直すので、オブジェクトの多いシーンで何万回も呼ぶと 2 乗のオーダーで遅い
+    （Shibuya では 4 万個を隠すのに約 220 秒）。3D ビューがあれば、選択してから ``object.hide_view_set`` で 1 回で隠す
+    （GUI で 6 万個のうち 2 万個を 3 秒）。選択は元に戻す。3D ビューが無いとき（ヘッドレス）と、まとめて隠せなかったものは
+    1 つずつ隠す（#219）。
+    """
+    remaining = objects
+    view = _view3d(context) if len(objects) >= _BATCH_HIDE_MIN and context.mode == "OBJECT" else None
+    if view is not None:
+        view_layer = context.view_layer
+        selected = list(view_layer.objects.selected)
+        active = view_layer.objects.active
+        try:
+            for obj in selected:
+                obj.select_set(False)
+            for obj in objects:
+                try:
+                    obj.select_set(True)
+                except RuntimeError:  # ビューレイヤーに無い（除外したコレクションの中など）
+                    pass
+            window, area, region = view
+            with context.temp_override(window=window, area=area, region=region):
+                bpy.ops.object.hide_view_set(unselected=False)
+        except RuntimeError:
+            pass
+        finally:
+            for obj in view_layer.objects.selected:
+                obj.select_set(False)
+            for obj in selected:
+                try:
+                    obj.select_set(True)
+                except (RuntimeError, ReferenceError):
+                    pass
+            try:
+                view_layer.objects.active = active
+            except (RuntimeError, ReferenceError):
+                pass
+        remaining = [obj for obj in objects if not _hidden(obj)]
+    for obj in remaining:
+        try:
+            obj.hide_set(True)
+        except RuntimeError:  # ビューレイヤーに無い
+            pass
+
+
+def make_shadows_only(obj: bpy.types.Object) -> None:
+    """Unity の Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）と同じく、影だけを残す。
+
+    レイの可視性でカメラ・拡散・光沢・透過・ボリュームから外す（Cycles と EEVEE の描画で効果がある）。ビューポートの
+    ソリッド表示などでは消えないので、ワイヤーフレームで描く。``unity_shadows_only`` に印を残す。
+    """
+    obj.visible_camera = False
+    obj.visible_diffuse = False
+    obj.visible_glossy = False
+    obj.visible_transmission = False
+    obj.visible_volume_scatter = False
+    obj.visible_shadow = True
+    obj.display_type = "WIRE"
+    obj["unity_shadows_only"] = True
 
 
 def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
@@ -352,9 +474,13 @@ def defer_hide(obj: bpy.types.Object, hidden: list) -> None:
 
 def move_collection_contents(source: bpy.types.Collection, target: bpy.types.Collection) -> None:
     """``source`` のオブジェクトと子コレクションを ``target`` へ移す（先にリンクしてから外す）。"""
+    # 名前での「含まれるか」は、オブジェクトの多いコレクションでは毎回すべてをなめるので重い（シーンでは何千回も呼ぶ。#219）。
+    # リンク済みなら link が RuntimeError を送るので、それで判断する
     for obj in list(source.objects):
-        if obj.name not in target.objects:
+        try:
             target.objects.link(obj)
+        except RuntimeError:
+            pass
         source.objects.unlink(obj)
     for child in list(source.children):
         if child.name not in target.children:
@@ -413,7 +539,7 @@ def _same_placement(a: Matrix, b: Matrix) -> bool:
     return all(abs(a[r][3] - b[r][3]) <= 1e-4 + 1e-6 * abs(a[r][3]) for r in range(3))
 
 
-def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dict, unit_scale: float | None) -> int:
+def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dict, units: ModelUnits | None) -> int:
     """FBX を展開した配置で、Renderer の GameObject が FBX のノードと違う位置にあるオブジェクトを、Unity の位置に置き直す。
 
     ``renderers`` は配置の Renderer（``PlacedRenderer``）。``relative`` が Unity でのルートから GameObject までの行列 R。
@@ -428,8 +554,8 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
     """
     if root is None or not any(r.relative is not None for r in renderers.values()):
         return 0
-    f = _file_scale(unit_scale)
-    basis_a = Matrix.Diagonal((-f, f, f, 1.0))
+    # ルートの Empty のワールドから直接置くので、親の逆行列で掛けている globalScale もここで掛ける（#240）
+    basis_a = _units(units).world_basis_a()
     base = _world_matrix(root)
     if base is None:
         return 0
@@ -437,7 +563,7 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
     table = {name: RendererMaterials(name, mesh_file_id=r.mesh_file_id) for name, r in renderers.items()}
     claimed: dict[str, list] = {}
     for original, obj in zip(template.objects, objects):
-        found = find_renderer(table, original.name)
+        found = find_renderer(table, node_name(original))
         if found is not None:
             claimed.setdefault(found.game_object, []).append(obj)
     targets = []
@@ -467,7 +593,7 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
     原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
     行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
     """
-    targets = [o for o in objects if _by_object_name(offsets, o.name) is not None]
+    targets = [o for o in objects if _by_object_name(offsets, node_name(o)) is not None]
     if not targets:
         return 0
     scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
@@ -479,6 +605,6 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
         if worlds[obj] is None or frame is None:
             skipped += 1
             continue
-        world = Matrix(unity_to_blender(_by_object_name(offsets, obj.name))) @ scale_matrix @ to_origin @ worlds[obj]
+        world = Matrix(unity_to_blender(_by_object_name(offsets, node_name(obj)))) @ scale_matrix @ to_origin @ worlds[obj]
         obj.matrix_basis = frame.inverted_safe() @ world
     return skipped

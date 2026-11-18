@@ -46,9 +46,9 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 1〜3 は「FBX マテリアル 1 つに .mat を 1 つ」決める順序。Unity で実際に表示されるのは Renderer の `m_Materials` で、externalObjects は FBX を置いたときの既定値にすぎないので、prefab に割り当てがあれば下記のスロット単位の分割で 1・2 の結果より優先する。 FBX がマテリアルを 1 つも持たない場合は 1〜3 の対象が無いので、prefab の割り当てだけからスロットを作る（下記「マテリアルを持たないモデル」）。
 
-**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。表は `hierarchy.Expander` で展開した prefab の配置（`placements`）から作るので、名前の決め方（Unity の複製番号「 (N)」を外す、.meta の表で引いたメッシュ名を優先する）も Scenes 単位と同じ。名前で引けないとき（prefab で GameObject の名前を変えたもの）は、オブジェクト名から求めたメッシュの fileID を Renderer のメッシュ参照と照合する。それでも引けなければ、表の名前の連番も外して比べ、該当する行が 1 つだけならそれを使う（`prefab.find_renderer`。Issue #155）。FBX のノード名がもともと `Base-Ring.001` のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が `Base-Ring.002` に付け替え、オブジェクト名の連番を外しただけでは表の `Base-Ring.001` と一致しないため（以前は 2 回目以降の色違いの prefab で .mat が当たらず、FBX のマテリアルのままだった）。連番を外すと同じになる行が複数あれば（`Body` と `Body.001` が両方ある FBX）、どれか決められないので引かない。Scenes 単位の LOD の段と無効な Renderer の判定（`scene_import.parts_to_hide`）も同じ形で照合し、使われていない部品の判定は、表の名前の連番を外した形が 1 つでも一致すれば使っている側に倒す。FBX を置いただけの PrefabInstance で、中へのマテリアルの上書きが 1 つも無いものは表に入れない。Models 単位の統合は、名前に加えてメッシュ参照の fileID でも先勝ちにする（Prefab Variant で名前を変えた行と、後の prefab の元の名前の行が並んだとき、パス順で先の prefab の割り当てを使うため）（Issue #71）。
+**prefab とモデルの対応**（`core/prefab.py`、Issue #25）: prefab の表はモデルごとに作る。Renderer がどのモデルのものかは、メッシュ参照（MeshRenderer と同じ GameObject の MeshFilter、または SkinnedMeshRenderer の `m_Mesh`）の GUID で決め、メッシュ参照が無い Renderer とパッケージ外のメッシュを指す Renderer は使わない。1 つの prefab が複数モデルを含む場合も Renderer 単位で振り分けるので、別モデルの同名オブジェクトには当てはまらない。読み込む単位 Models では、モデルごとに「そのモデルを使う prefab」だけを候補にし、候補をパス順に先勝ちで統合する（`PreparedPackage.table_for`）。表は `hierarchy.Expander` で展開した prefab の配置（`placements`）から作るので、名前の決め方（Unity の複製番号「 (N)」を外す、.meta の表で引いたメッシュ名を優先する）も Scenes 単位と同じ。名前で引けないとき（prefab で GameObject の名前を変えたもの）は、オブジェクト名から求めたメッシュの fileID を Renderer のメッシュ参照と照合する。それでも引けなければ、表の名前の連番も外して比べ、該当する行が 1 つだけならそれを使う（`prefab.find_renderer`。Issue #155）。FBX のノード名がもともと `Base-Ring.001` のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が `Base-Ring.002` に付け替え、オブジェクト名の連番を外しただけでは表の `Base-Ring.001` と一致しないため（以前は 2 回目以降の色違いの prefab で .mat が当たらず、FBX のマテリアルのままだった）。連番を外すと同じになる行が複数あれば（`Body` と `Body.001` が両方ある FBX）、どれか決められないので引かない。Scenes 単位の LOD の段と無効な Renderer の判定（`scene_import.parts_to_hide`）も同じ形で照合し、使われていない部品の判定は、表の名前の連番を外した形が 1 つでも一致すれば使っている側に倒す。**FBX のノードとしての名前**（Issue #237）: Unity のデータとの照合は、オブジェクト名ではなく読み込んだときの FBX のノード名（カスタムプロパティ `unity_fbx_node`、`model_import.node_name`）で行う。FBX のノード名と同じ名前の既存オブジェクトがあれば、読み込む間だけ一時的な名前にして、新しいオブジェクトにノード名そのままの名前を付けさせ、それを記録してから既存の名前を戻す（`ID.rename(mode='ALWAYS')` で新しいほうに連番が付く。`reserve_names` / `restore_names`）。複製した配置のオブジェクトも同じ名前を持つ。NewGen Sci-Fi Slums の FBX は Blender から書き出したもので、ノード名がもともと `Plane.010` や `RoadDecals.002` のような連番の形をしていて、先に読んだ別の FBX と重なると付け替えられ、連番を外しても元の名前に戻せなかった（1 ノードの FBX のノードの変換が残り、prefab のマテリアルと使われていない部品の照合が外れていた。Unity と突き合わせた一致は 1,829 個中 657 → 1,829）。使われていない部品の判定（`unused_in_placement`）は、名前がそのまま一致するオブジェクトの無い行だけを連番を外した形で比べる（`RoadDecals` / `.001` / `.002` / `.003` が全部同じ名前にならないように）。表の無い、最上位のノードが複数ある FBX を展開した GameObject が配置のルートで、その名前が最上位のノードの 1 つなら、そのノードを単位行列にする（`AssetEntry.fbx_top_nodes`、`ModelCatalog.top_level_nodes`）。FBX を置いただけの PrefabInstance で、中へのマテリアルの上書きが 1 つも無いものは表に入れない。Models 単位の統合は、名前に加えてメッシュ参照の fileID でも先勝ちにする（Prefab Variant で名前を変えた行と、後の prefab の元の名前の行が並んだとき、パス順で先の prefab の割り当てを使うため）（Issue #71）。
 
-**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。prefab で表示されていない部品（非アクティブな GameObject の下にあるか、Renderer が無効なもの。表の行の `RendererMaterials.visible`）は、読み込んだうえで隠す（Scenes 単位の `PlacedRenderer.visible` と同じ扱い。件数は警告に出さない）。同じモデルの配置が prefab の中に複数あれば、どれかで表示されていれば表示する。prefab の中の配置がすべて非アクティブなモデル（非アクティブな GameObject の下に FBX を丸ごと置いたもの。`prefab.inactive_models`）は、すべての部品を隠す。以前は Prefabs 単位にこの処理が無く、Synty のキャラクターの展開済み prefab（27 体分の GameObject を持ち、自分以外を非アクティブにしている）で全員が重なって表示されていた（Issue #177）。
+**読み込む単位 Prefabs**（§3.3、Issue #47）: 選んだ prefab ごとに、その prefab の表だけを当てはめてモデルを読み込む（`ImportOptions.unit` / `prefab_paths`）。1.17.0 からは prefab をシーンと同じく展開して置く（§3.3 の後の「読み込む単位 Prefabs でも…」、Issue #240）。以下の表示・部品の扱いは、シーンの配置の処理（`SceneImport`）でそのまま行われる。同じモデルを使う prefab（色違いなど）を複数選ぶと、prefab ごとにモデルを読み直す。読み直したモデルのマテリアルのうち、組み立て済みの .mat と同じものは新しく組まずに同じ Blender マテリアルを使い回し（下記「マテリアルの共有」）、prefab の表と違うスロットだけを下記の分割で差し替える。読み込めないモデルを含む prefab は、そのモデルだけ飛ばして警告に出す。prefab で表示されていない部品（非アクティブな GameObject の下にあるか、Renderer が無効なもの。表の行の `RendererMaterials.visible`）は、読み込んだうえで隠す（Scenes 単位の `PlacedRenderer.visible` と同じ扱い。件数は警告に出さない）。同じモデルの配置が prefab の中に複数あれば、どれかで表示されていれば表示する。prefab の中の配置がすべて非アクティブなモデル（非アクティブな GameObject の下に FBX を丸ごと置いたもの）は、すべての部品を隠す（今はシーンの配置と同じく、非アクティブな配置として隠す）。以前は Prefabs 単位にこの処理が無く、Synty のキャラクターの展開済み prefab（27 体分の GameObject を持ち、自分以外を非アクティブにしている）で全員が重なって表示されていた（Issue #177）。
 
 **読み込む単位 Scenes**（§3.3、Issue #48）: .unity を展開し（`core/expander.py`）、モデルの配置を求めて（`core/placement.py`）読み込む。1 つのアセットの読み取りと展開した階層のデータは `core/hierarchy.py`。
 
@@ -57,8 +57,10 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 - 座標変換（`core/transform.py`）: Unity のモデル空間 (x, y, z) は Blender では (-x, -z, y)。Unity でモデルのルートに掛かる行列 M は、Blender では C·M·C⁻¹ を原点に読み込んだオブジェクトの行列に左から掛ける。Unity 6 で合成 FBX を 3 通り（FBX を中に置いた prefab、空の親の下への直置き、非一様スケールで置いて中の子を上書きした展開 prefab）に置いたシーンを作り、Renderer ごとの頂点のワールド座標（スキンしたメッシュはボーン行列 × bindpose で計算）と、Blender の FBX インポーターで読んだ同じ FBX から予測した座標が、9 か所すべてで一致することを確かめた。Blender 由来の FBX では、Unity のルート直下のノードは X -90 度・スケール 100 を持つが、Blender のオブジェクトはその値を持たない。そのためノードの値を直接オブジェクトに当てず、行列で計算してから差分として当てる。
 - 読み込み: 配置のルートと、その祖先の GameObject を Empty にし（行列は Unity のローカル行列を C·M·C⁻¹ で変換）、モデルの最上位のオブジェクトをルートの Empty の子にする。.meta の `globalScale` は親の逆行列として掛ける。同じモデル・同じマテリアルの割り当ての配置は、2 つ目からメッシュ・アーマチュアのデータを共有した複製（`Object.copy()`）にし、アーマチュアモディファイアとコンストレイントの参照を複製側に付け替える。割り当てが違えば読み直す（組み立て済みの .mat は、下記「マテリアルの共有」のとおり共有）。展開 prefab の中のノードが Unity と違う位置にあれば（上書きで動かしたものも、展開した値そのものを動かしたものも。#186）、Unity の行列に合わせてオブジェクトを置き直す（親から順に。ワールド行列は評価を待たずに親をたどって計算する。アーマチュアで変形するものは動かさず件数を警告に出す）。非アクティブな GameObject と無効な Renderer は `hide_render` をその場で立て、`hide_set` は読み込みがすべて終わってからまとめて当てる（下記の理由で、読み込み中はビューレイヤーに無いため）。
 - 読み込み中のビューレイヤー: インポーターのオペレーターは呼ぶたびにビューレイヤーの中身を評価し直すので、読み込み済みのオブジェクトが増えるほど 1 回が重くなる（3000 オブジェクトで 1 回 180 ms。Japanese Street の Day_Showcase の読み込み 16 秒の大半）。パッケージのコレクションは読み込みが終わるまで `exclude` し、モデルは空の作業用コレクション「<パッケージ名> (importing)」に読み込んでから配置先へ移す。終わったら（失敗しても）除外を戻して作業用コレクションを消す。これで Day_Showcase は 1.7 秒になった（Issue #75）。
-- 使われていない部品（Issue #58）: 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、表に無いメッシュのオブジェクト（prefab が使っていない LOD、FBX にだけある別のノードなど）は Unity に無い。既定ではこれを読み込まず（ダイアログの「Unused Parts」、`ImportOptions.skip_unused_parts`。Issue #152）、オプションを切ると読み込んだうえで非表示にする（件数はどちらも警告に出す）。FBX を直接置いた配置は対象にしない。読み込む単位 Prefabs でも、prefab がモデルを丸ごと置いていなければ（モデルの PrefabInstance の配置が無ければ。`prefab.models_placed_whole`）、表に無いメッシュを同じように隠す（Issue #151。以前は Prefabs 単位にこの処理が無く、部品をまとめた FBX のメッシュを 1 つだけ指す prefab で、FBX の全部品が表示されていた）。Renderer の名前は GameObject 名ではなくメッシュ参照（MeshFilter / SkinnedMeshRenderer の `m_Mesh` の fileID）から決める。展開後に GameObject の名前を変えていると、名前の照合では使っている部品まで隠してしまうため。モデルの .meta の表（`fileIDToRecycleName`、古い番号を引き継いだ `internalIDToNameTable`）で名前を引き、表の無い新しい形式では fileID = xxHash64("Type:Mesh-><名前>0")（`core/unity_ids.py`。Unity 6 の prefab と Japanese Street の 100 か所で一致）を Blender のオブジェクト名で計算して照合する。
-  - 読み込まないときの消し方（Issue #152）: シーンでは配置ごとに FBX のテンプレートを複製するので、最初に読み込んだモデルから使われていない部品を消し、残りからテンプレートを作る。以後の配置では必要な分だけを複製する（部品を 1 つの FBX にまとめ、prefab がそのうち 1〜3 個だけを指す Japanese Train Station PBR Pack の DemoScene では、オブジェクトが 31,290 から 1,167 に、読み込みが 34 秒から 3.4 秒になった）。消す部品はテンプレートを使い回す条件で決まるよう、使い回しのキーに Renderer から作った配置かとメッシュ参照の fileID を加える。消すものは `scene_import.parts_to_remove` が決める。使われていないメッシュでも、子孫に残すもの（使う部品）があれば親子関係と位置を保つため残して隠し、子がすべて消えた Empty・アーマチュアは消す。消したオブジェクトだけが使っていたメッシュ・アーマチュアのデータも消す。マテリアルは同じ回の別のモデルと共有するので（#77）消さない。Prefabs 単位では prefab ごとに読み込んだモデルから同じように消す。
+- 使われていない部品（Issue #58）: 展開した prefab・シーンの Renderer から作った配置では、Unity にあるのは表の Renderer だけなので、表に無いメッシュのオブジェクト（prefab が使っていない LOD、FBX にだけある別のノードなど）は Unity に無い。既定ではこれを読み込まず（ダイアログの「Unused Parts」、`ImportOptions.skip_unused_parts`。Issue #152）、オプションを切ると読み込んだうえで非表示にする（件数はどちらも警告に出す）。FBX を直接置いた配置は対象にしない。読み込む単位 Prefabs でも、prefab がモデルを丸ごと置いていなければ（モデルの PrefabInstance の配置が無ければ）、表に無いメッシュを同じように隠す（今は prefab をシーンと同じく置くので、上と同じ処理になる。#240。Issue #151。以前は Prefabs 単位にこの処理が無く、部品をまとめた FBX のメッシュを 1 つだけ指す prefab で、FBX の全部品が表示されていた）。Renderer の名前は GameObject 名ではなくメッシュ参照（MeshFilter / SkinnedMeshRenderer の `m_Mesh` の fileID）から決める。展開後に GameObject の名前を変えていると、名前の照合では使っている部品まで隠してしまうため。モデルの .meta の表（`fileIDToRecycleName`、古い番号を引き継いだ `internalIDToNameTable`）で名前を引き、表の無い新しい形式では fileID = xxHash64("Type:Mesh-><名前>0")（`core/unity_ids.py`。Unity 6 の prefab と Japanese Street の 100 か所で一致）を Blender のオブジェクト名で計算して照合する。
+  - 読み込まないときの消し方（Issue #152）: シーンでは配置ごとに FBX のテンプレートを複製するので、最初に読み込んだモデルから使われていない部品を消し、残りからテンプレートを作る。以後の配置では必要な分だけを複製する（部品を 1 つの FBX にまとめ、prefab がそのうち 1〜3 個だけを指す Japanese Train Station PBR Pack の DemoScene では、オブジェクトが 31,290 から 1,167 に、読み込みが 34 秒から 3.4 秒になった）。消す部品はテンプレートを使い回す条件で決まるよう、使い回しのキーに Renderer から作った配置かとメッシュ参照の fileID を加える。消すものは `scene_import.parts_to_remove` が決める。使われていないメッシュでも、子孫に残すもの（使う部品）があれば親子関係と位置を保つため残して隠し、子がすべて消えた Empty・アーマチュアは消す。消したオブジェクトだけが使っていたメッシュ・アーマチュアのデータも消す。マテリアルは、消した後に誰も使わなくなったこの回に組んだものだけを消し、レポートの行を `unused` にする（同じ回の別のモデルと共有するものは使われているので残る。#77）。1 つの FBX に 32 個のサンゴが入り、配置ごとに 1 つだけ使う Corals では、配置の割り当てごとの読み直しで使われないマテリアルが 298 個残り、未対応付けとして数えていた（#221）。Prefabs 単位では prefab ごとに読み込んだモデルから同じように消す。
+- MeshFilter のメッシュの差し替え（Issue #242）: PrefabInstance の上書き `m_Mesh`（MeshFilter が対象）を当てる。prefab・シーンの MeshFilter は `Hierarchy.mesh_filters` の表で引き、その Node の Renderer のメッシュ参照を差し替える（GUID の無い参照は差し込んだ元のアセットに埋め込んだ Mesh）。モデル（FBX）を置いた PrefabInstance の中の MeshFilter への上書きは `Node.model_meshes` に残し、配置を作るときに、差し替え元も差し替え先も 1 メッシュのモデル（表で畳んだノード、または FBX のただ 1 つのノード）なら、配置するモデルを差し替え先に入れ替える（位置・マテリアル・表示の上書きの記録の名前も付け替える。`placement._swap_model_mesh`）。Destroyed Building Kit は、瓦礫や床の FBX を置いてメッシュだけを別の FBX のものに差し替えた prefab を多く使う（建物の prefab の中で 160 か所ほど）。同じパッケージの Polybrush（`m_PolyMesh`）は頂点カラーを足すもので、メッシュの差し替えには関わらない。
+- Shadows Only（Issue #232）: Renderer の `m_CastShadows` が 3（Shadows Only）なら、Unity は影だけを落として本体を描かない（Japanese Hotel Room の天板 `Quad_shadow` と、`hotel_room_shadow.fbx` / `elevator01_shadow.fbx` を置いた PrefabInstance への上書き）。`RendererInfo` / `PlacedRenderer` / `PrimitivePlacement` / prefab の表の行に `shadows_only` を持ち、PrefabInstance の上書き `m_CastShadows` も当てる。モデルの中の Renderer への上書きは `PartState.shadows_only` として残し、`PartMatcher` が `PartMatch.shadows_only` に当てる。読み込み側はレイの可視性でカメラ・拡散・光沢・透過・ボリュームから外して影だけを残し（`make_shadows_only`）、ソリッド表示では消えないのでワイヤーフレームで描く。カスタムプロパティ `unity_shadows_only` に印を残し、件数を警告に出す。
 - LOD（Issue #104）: Unity の LOD は prefab・シーンの `LODGroup`（クラス ID 205）が持ち、`m_LODs` の段ごとに Renderer の fileID が並ぶ。段ごとの GameObject はどれも Renderer を持つので、そのままでは全段が重なって表示される。`parse_asset` で段を読み、`RendererInfo.lod_level`（0 = もっとも細かい LOD0）に付けて、読み込み側が LOD1 以降を非表示にする（削除はしない。段は `unity_lod` カスタムプロパティに残し、件数を警告に出す。ダイアログの「LODs」トグルで切れる）。LODGroup はシーンから prefab インスタンスの中の Renderer を指すことがあるので、段の解決は PrefabInstance の差し込みが終わった後に、stripped ドキュメントの別名を通して行う。1 つの LODGroup の中で同じ Renderer が複数の段にあればもっとも細かい段を採り、内側の prefab で付いた段は外側で上書きしない（内側で遠景用だったものは隠れたままにする）。`m_Enabled: 0` の LODGroup は Unity でも全段が描かれるので段を付けない。適用するのは Scenes と Prefabs 単位（Models 単位の表は prefab をまたいで統合したものなので対象にしない）。外側から LODGroup 自体を無効化・削除する上書きは反映しない。`_LOD1` のような命名規則からの推測はしない（LODGroup の無いモデルは今までどおり全部表示する）。
 - Renderer をまとめるモデルのルート（Issue #60）: 以前は Transform を直接持つアセットでの最上位の祖先に固定していたため、シーンの共通の親（部屋など）の下に同じ小物を複製して並べると、名前が同じ Renderer が 1 つだけ残り、しかも親の原点に置かれていた。モデルの .meta の表（`fileIDToRecycleName` / `internalIDToNameTable`）にある、ルート以外の GameObject 名を FBX のノード名として、次のように決める（`core/hierarchy.py` の `placements`）。
   - 1 メッシュの FBX（表の GameObject はルートだけで、メッシュも 1 つ）: Renderer の GameObject 自身。この形の FBX では、Unity はノードを `//RootNode` に畳んでその変換をモデルのルートの Transform に載せ、メッシュの頂点はノード空間のままにするので、メッシュを直接指す Renderer にはノードの変換が掛からない。そこで、下のノード自身をルートにした配置と同じく `node_transforms`（名前は表のメッシュ名）でそのノードを単位行列にする。これをしないと、ノードが原点から離れた FBX（街並みアセットの歩道など）がノードの移動ぶんずれる（Issue #98。Unity 6000.6.0f1 で確認）。
@@ -70,7 +72,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     `node_transforms` を付ける。Expander（中への上書きの照合）とモデルの PrefabInstance の配置（#111）には使わない。以前は、ノードが原点から離れた FBX の
     メッシュを直接指す prefab で、ノードの移動・回転が残っていた。UnityJapanOffice の NoonA の `Cussion_01`（0.76 m）、Synty Starter の Overview の岩（9〜17 m）、
     Japanese Street の `AE_Tablet_08`（向きが 90 度違い、隣の札と面がそろわなかった）。メッシュのワールド座標を前後で比べ、動いたのはこれらだけだった
-    （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs は prefab の中の位置で並べないので対象外。
+    （Office の NoonA、Starter の Overview、Street の Day_Showcase と Prefabs、Train Station の DemoScene）。読み込む単位 Prefabs も、下記のとおり Scenes と同じ置き方をする（#240）。
   - 最上位のノードが 1 つだけで子を持つ FBX（Issue #185）: Unity は子があってもそのノードをルートに畳むので、FBX を展開した GameObject のルートの行列はノードの変換を含む。
     走査のときに FBX の Connections（`C: "OO", 子, 親`。親が 0 なら最上位）から最上位のノードを求め（`model_ids.parse_fbx_top_nodes`）、1 つだけならその名前を
     `AssetEntry.fbx_top_node` に残して `placements` の `top_nodes` で渡す。Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer の
@@ -104,7 +106,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     パーティクルの親の GameObject に Cube とマテリアルの無い MeshRenderer を付けていて、白い箱が出ていた）。
   - 置き方はライト・カメラと同じ。その GameObject に配置の Empty があればその子（単位行列）、無ければ親の Empty の下に Unity のローカル行列で置き、
     以後その Node の子はこのオブジェクトの下に付ける。非アクティブ・無効なら隠す。
-  - 読み込む単位 Scenes だけ。Prefabs 単位は prefab の中の Transform を再現しない（モデルを原点に読む）ので対象にしない。
+  - 読み込む単位 Prefabs でも、prefab をシーンと同じく置くので同じように置く（#240。以前は Scenes 単位だけだった）。
     prefab で見つかった組み込みメッシュの参照（Synty の FX の Cube など）は MeshRenderer ではなかった。
 - URP / HDRP の DecalProjector（Issue #165）: シーンに MonoBehaviour として保存されている。スクリプトの GUID ではなく、フィールドの形
   （`m_Material` / `m_Size` / `m_UVScale` / `m_UVBias`。URP と HDRP 10 以降で同じ名前）で見分け、ライト・カメラと同じく中身ごと Node の
@@ -120,10 +122,53 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る `_MetallicGlossMap` / `_Smoothness: 1` は使わず、
     金属感 0・ラフネス 0.8 にする（Shibuya の点字ブロックが黒い鏡面になっていた）。
     ベースのテクスチャが無いもの・パッケージに無い .mat を指すものは置かずに件数を警告に出す。板は影を落とさない。
+    2026-11-15 にダウンロードし直した版の Shibuya は、DecalProjector の .mat 48 個がデカール用でない Lit の Shader Graph（`M_BaseMaterial`）に
+    変わっていて、画像は前のシェーダーの名残の `Base_Map` にしか無い（宣言に無いので読まない）。Unity 6000.6.9f1（URP）に取り込んで確かめると、
+    どのマテリアルもデカールのパス（DBufferProjector / DecalScreenSpaceProjector / DecalGBufferProjector）を持たず、Unity でも描画されない。
+    なので置かずに警告に出すままにした（#165 で確かめたのは、デカール用の Shader Graph だった前の版）。
   - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
     オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
   - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。
-- 読み込まないもの: UI、Terrain、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
+- Unity の Terrain（Issue #205）: シーンの Terrain（クラス 218）は中身ごと Node のコンポーネントに持ち（prefab の上書きも当たる）、
+  `m_TerrainData` が指す TerrainData（クラス 156。ほぼ必ずバイナリの .asset）を読む（`core/terrain.py`）。
+  - 高さマップは `m_Resolution`（2019.3 より前は `m_Width` / `m_Height`）× 同じ数の 16 ビットの値で、`m_Heights[z * 幅 + x]` の 32766 が
+    `m_Scale.y` の高さ、点の間隔は `m_Scale.x` / `m_Scale.z`。原点は角で +X・+Z に広がる。Tokyo Street は 4097² の 1,680 万点・230 MB あり、
+    要素ごとに Python のオブジェクトにすると数百 MB になるので、`unity_binary` の compact モード（数値の配列は `array`、TypelessData は `bytes`）で読む。
+  - メッシュは 1 辺の点の数の上限（ダイアログの Terrain。`scene_terrain` = NONE / 129 / 257 / 513 / 1025 / FULL、既定 513）まで等間隔に間引く
+    （両端の点は必ず残す）。穴（`m_Holes`、マス単位で 0 が穴）は、間引いた面が覆う元のマスの半分より多くが穴なら面を作らない。
+    Unity の (x, y, z) を Blender の (-x, -z, y) にし、面の法線が上を向く順に頂点を並べる。UV は Terrain 全体で 0〜1（アルファマップと同じ向き）。
+  - Terrain は Transform の回転・拡大縮小を受けず、ワールドの位置に軸に沿って置かれる（親の回転も受けない）。オブジェクトは親の GameObject の
+    Empty の下に、ワールドでは位置だけの行列になるように置く。オブジェクト名は GameObject の名前、中身は `unity_terrain` に残す。
+    `m_DrawHeightmap` が 0 か、非アクティブ・無効なら隠す。同じ TerrainData を使う Terrain・シーンは、1 回の読み込みの中でメッシュとマテリアルを共有する。
+  - 塗り分け: レイヤーは `m_TerrainLayers` の .terrainlayer（2018.3 より前は `m_Splats` の SplatPrototype）。k 番目のレイヤーの重みは
+    `m_AlphaTextures` の k // 4 枚目の k % 4 チャンネル（RGBA32 か ARGB32。展開先に PNG で書き、Non-Color・Channel Packed で読む）。
+    レイヤーのテクスチャは Terrain の UV × (Terrain の大きさ / `m_TileSize`) + `m_TileOffset` / `m_TileSize` で読み、重みを掛けて足す
+    （色は × `m_DiffuseRemapMax`）。金属感・つやは、URP / HDRP でマスクマップがあれば R / A を `m_MaskMapRemapMin`〜`Max` に写した値、無ければ
+    `m_Metallic` と `m_Smoothness` × ディフューズの A（Built-in と URP の Terrain のシェーダーと同じ）。法線は法線マップの色を重みで足して
+    1 つの Normal Map ノードに通す（強さは `m_NormalScale` の重み付きの和）。Auto / Principled / Toon は Principled BSDF、Unlit は色だけ、
+    Names Only はノードを組まない。`m_MaterialTemplate`（カスタムの Terrain シェーダー）は読まない。マテリアルには `unity_terrain_layers` を残す
+    （`unity_normalized` は無いので、マテリアルの再構築の対象外）。
+  - レイヤーのテクスチャは TerrainData を読むまで分からないので、走査時にキャッシュした .terrainlayer のテクスチャを先に展開する。
+    SplatPrototype のテクスチャなど漏れたものは、組み立ての前に展開して読む。
+  - モデルの無いシーンも、パッケージにある TerrainData を指す Terrain があれば読み込める（`summarize_scene`）。モデルファイルが 1 つも無いパッケージも、
+    シーンと TerrainData（.meta の `mainObjectFileID: 15600000`）があれば解析を続ける。
+  - 木（`m_TreeInstances`）と草（`m_DetailPrototypes`）は読まず、数を警告に出す（手元では Impostors のサンプルが木 10,000 本、Dreamscape Meadows が
+    木と草、Advanced Terrain Grass が草を使う）。SerializedFile 版 9 の古い TerrainData（Global Illumination Proxy）は読めないので警告して外す。
+  - 読み込む単位 Scenes だけ（手元で prefab の中に Terrain があるのは Simple Water Shader HDRP の例と Magic Pig のデモ用 prefab で、
+    Prefabs 単位は prefab の中の Transform を再現しない）。
+- Unity の Mesh アセット（Issue #216）: メッシュを FBX ではなく Unity の Mesh（クラス 43）として持つもの。`.asset`（.meta の
+  mainObjectFileID 4300000。Conifers BOTD・Terrain Asset Pack）と、prefab・シーンに埋め込んだもの（UModeler X の Basilica の 149 個の prefab）。
+  - 読み取りは `core/unity_mesh.py`。Unity 2018 以降の `m_VertexData`（14 チャンネルがストリーム・位置・形式・次元を持ち、ストリームは 0 から順に、
+    次のストリームは 16 バイト境界から）と `m_IndexBuffer`（`m_IndexFormat` 0 が 16 ビット）、三角形のサブメッシュを読む。圧縮メッシュ・
+    外部の .resS・2017 より前の形（`m_Streams`）は警告して外す。Unity の (x, y, z) を (-x, -z, y) にし、鏡映なので面の頂点の並びを逆にする
+    （実データの頂点の法線と照合した）。YAML の `m_IndexBuffer` / `_typelessdata` は数字だけの並びでも文字列として読む。
+  - GUID の無い `m_Mesh` 参照は同じアセットに埋め込んだ Mesh なので、展開するときにアセット自身の GUID にする（`Expander._build`）。
+  - `ModelCatalog.mesh_assets`（Mesh を持つ .asset と、Mesh のドキュメントを持つ prefab・シーン）のメッシュを使う MeshRenderer を、
+    組み込みメッシュと同じ `PrimitivePlacement`（`kind` が空で `mesh_guid` / `mesh_file_id` を持つ）にし、同じ置き方で置く。
+    サブメッシュ i のスロットに `m_Materials[i]` を付ける。同じ Mesh は 1 回の読み込みの中で 1 つのメッシュを共有する（`blender/unity_meshes.py`）。
+  - Prefabs 単位でも、prefab をシーンと同じく置くので、Mesh を使う Renderer も同じ置き方になる（#240）。Mesh だけの prefab・シーンも
+    読み込める候補にする。マテリアルを `.asset`（mainObjectFileID 2100000）に入れたものも .mat と同じに読む。
+- 読み込まないもの: UI、組み込みメッシュ以外のパッケージ外のメッシュを使う Renderer。件数を警告に出す。
 
 **表の無いモデルの中への上書き**（Issue #31 / #109）: 新しい形式のモデルの中のオブジェクト（GameObject / Transform / MeshFilter / MeshRenderer / SkinnedMeshRenderer）の fileID は、xxHash64 を符号付き 64 bit にしたもので、.meta の `fileIdsGeneration` によって入力が 2 通りある（`core/unity_ids.py`）。2（今の既定）は階層パスで決まり、GameObject は `Type:GameObject->//RootNode/root/<パス>0`、コンポーネントは `Type:<型>->//RootNode/root/<パス>/<型>0`（パスはルートを除く上からの名前を `/` でつないだもの。ルート自身は `//RootNode/root`）。1（キーの無い古い .meta もこちら。Unity 2019.3〜2019.4 ごろのパッケージ）は階層によらず名前だけで決まり、`Type:<型>-><名前>0`、ルートの名前は `//RootNode`。どちらも、最上位のノードが 1 つだけの FBX では Unity がそのノードをルートに畳む。Unity 6000.6.0f1 に合成 FBX と実パッケージの FBX（UnityJapanOffice の `Office.fbx` を元の .meta ごと）を読み込ませて書き出した表と、7 つのモデル・380 件あまりで一致した（エディタの出力の観察だけで、リバースエンジニアリングはしていない）。
 
@@ -135,12 +180,16 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 
 prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置き、シーンが部品のマテリアルを替えたときなど）は、対象が「PrefabInstance の fileID XOR モデルの中の fileID」で書かれる。展開した Renderer のどれにも当たらなかったマテリアルの上書きは、差し込んだ prefab の中のモデルのルートごとに XOR を戻し（ルートの `Node.id_mask` に、差し込んだ PrefabInstance の fileID を重ねてある）、古い形式の表で名前を引けるか、内側のアセットが同じ fileID の行を作っていればそこに当てる。どちらでもなく、prefab の中のモデルが 1 つだけなら、そのモデルの中の fileID として行を足す（実際にモデルのオブジェクトを指すかは、読み込み側の突き合わせで確かめる）。モデルが複数ある prefab では、どのモデルの中かを決められないので当てない（`Expander._override_through`）。実例は Shibuya.unitypackage の `SM_MetroEntrance_02.prefab`（1 メッシュの FBX で、Renderer はルートに付く。34 スロットのうち 17 を上書き）と、UnityJapanOffice.unitypackage の `Office Variant.prefab`（最上位のノードが 1 つの FBX の 50 個のメッシュを上書きし、シーンがさらに上書きする。FBX から無くなった部品を指したままの上書きが 14 件あり、これは警告に出る）。
 
-表示の上書きと削除（Issue #172）も同じ仕組みで扱う。GameObject の `m_IsActive`、Renderer の `m_Enabled`、`m_RemovedGameObjects` / `m_RemovedComponents` のうち、モデルの中のオブジェクトを指すものを、対象ごとの `hierarchy.PartState`（key は古い形式の表で引いた名前か、`pending_object` / `pending_renderer` の名前）としてルートの `model_parts` に記録し、配置の `parts` に写す。prefab を挟んだ外側からのもの（シーンが prefab の中のモデルの部品を表示し直す・消すなど）も、上と同じ順で当てる（後から書かれた値で上書きされる）。読み込み側は `model_ids.PartMatcher` で、GameObject の fileID はオブジェクトの種類を問わず、Renderer の fileID はメッシュのオブジェクトだけに結び付け、非アクティブな GameObject は子孫も含めて、無効な Renderer はそのオブジェクトだけを隠す。消した GameObject は子孫も含めて、消した Renderer はそのオブジェクトだけを「使われていない部品」と同じに扱う（既定は読み込まず、**Unused Parts** を切ると読み込んで隠す。件数も同じ警告に入れる）。子孫はアーマチュアの子をたどらない（Blender の FBX インポーターはスキンメッシュをアーマチュアの子にするが、Unity ではボーンの枝とは別にある）。`m_IsActive: 1` のように見た目を変えない上書きは、当てられなくても数えない。消したコンポーネントは Renderer かどうか（コライダーなど）を fileID から区別できないので、当てられなくても数えない。それ以外で当てられなかったものは件数を警告に出す。シーンでは、消したオブジェクトがテンプレートから消えるので、消した対象を `ModelPlacement.signature` に入れ、fileID の計算はテンプレートのオブジェクトで行い、複製した配置には並び順で対応させる。Prefabs 単位では、表示の上書きだけで FBX を丸ごと置いた prefab も、空の表でそのモデルを使う prefab に数える（`prefab.tables_from_hierarchy`、`prefab.parts_from_placements`）。実例は Synty の `SM_Gen_Chr_Underwear_Female_01.prefab`（27 体が入った FBX を丸ごと置き、26 体を非アクティブにする）と、UnityJapanOffice の 6 つのシーン（`Collider.fbx` を置いて MeshRenderer を消し、当たり判定にだけ使う。以前は 21 m 四方の白い板が出ていた）。
+表示の上書きと削除（Issue #172）も同じ仕組みで扱う。GameObject の `m_IsActive`、Renderer の `m_Enabled`、`m_RemovedGameObjects` / `m_RemovedComponents` のうち、モデルの中のオブジェクトを指すものを、対象ごとの `hierarchy.PartState`（key は古い形式の表で引いた名前か、`pending_object` / `pending_renderer` の名前）としてルートの `model_parts` に記録し、配置の `parts` に写す。prefab を挟んだ外側からのもの（シーンが prefab の中のモデルの部品を表示し直す・消すなど）も、上と同じ順で当てる（後から書かれた値で上書きされる）。読み込み側は `model_ids.PartMatcher` で、GameObject の fileID はオブジェクトの種類を問わず、Renderer の fileID はメッシュのオブジェクトだけに結び付け、非アクティブな GameObject は子孫も含めて、無効な Renderer はそのオブジェクトだけを隠す。消した GameObject は子孫も含めて、消した Renderer はそのオブジェクトだけを「使われていない部品」と同じに扱う（既定は読み込まず、**Unused Parts** を切ると読み込んで隠す。件数も同じ警告に入れる）。子孫はアーマチュアの子をたどらない（Blender の FBX インポーターはスキンメッシュをアーマチュアの子にするが、Unity ではボーンの枝とは別にある）。`m_IsActive: 1` のように見た目を変えない上書きは、当てられなくても数えない。消したコンポーネントは Renderer かどうか（コライダーなど）を fileID から区別できないので、当てられなくても数えない。それ以外で当てられなかったものは件数を警告に出す。シーンでは、消したオブジェクトがテンプレートから消えるので、消した対象を `ModelPlacement.signature` に入れ、fileID の計算はテンプレートのオブジェクトで行い、複製した配置には並び順で対応させる。Prefabs 単位では、表示の上書きだけで FBX を丸ごと置いた prefab も、空の表でそのモデルを使う prefab に数える（`prefab.tables_from_hierarchy`）。実例は Synty の `SM_Gen_Chr_Underwear_Female_01.prefab`（27 体が入った FBX を丸ごと置き、26 体を非アクティブにする）と、UnityJapanOffice の 6 つのシーン（`Collider.fbx` を置いて MeshRenderer を消し、当たり判定にだけ使う。以前は 21 m 四方の白い板が出ていた）。
 
-**古い形式のモデルの中への上書き**（Issue #53）: Unity 2018.2 以前の形式のモデルの .meta の `fileIDToRecycleName` を `ModelImporterInfo.recycle_names` に読み、モデルの PrefabInstance の中への上書きを名前付きで配置に記録する（`core/hierarchy.py`）。fileID は「クラス ID × 100000 + 通し番号」で、ルートは 100000 / 400000（`//RootNode`）。
+**古い形式のモデルの中への上書き**（Issue #53）: Unity 2018.2 以前の形式のモデルの .meta の `fileIDToRecycleName` を `ModelImporterInfo.recycle_names` に読み、モデルの PrefabInstance の中への上書きを名前付きで配置に記録する（`core/hierarchy.py`）。fileID は「クラス ID × 100000 + 通し番号」で、ルートはふつう 100000 / 400000（`//RootNode`）。Unity 4 で取り込んだモデルは名前順などで番号を振り、`//RootNode` が 100006 / 400006 のように後ろになって 100000 が中のノードを指すことがあるので、表に `//RootNode` の行があればそれをルートにする（`hierarchy.legacy_root_ids`。表が無い・行が足りなければ 100000 / 400000）。以前は 400000 と決め打ちしていて、Japanese School Cafeteria の窓・扉・柵（複数ノードの FBX）では、配置の位置の上書きが中のノードに当たってルートが原点に残っていた。展開したモデルの階層の表にも、この古い形式のルートの番号を載せる（`Expander._model`）。prefab の中に置いたモデルのルートを、外側から「中の PrefabInstance の fileID XOR 元の fileID」で指す上書きが古い形式の番号で書かれていることがあり、新しい形式の定数だけでは当たらなかった（Destroyed Building Kit の `DBK_Big_Scene` が `DBK_Cinderblock_Building.prefab` の中の瓦礫の板 `rubble` を `m_IsActive: 0` で隠している。#244）。
+
+Unity 4 以前に書き出したパッケージは、`asset.meta`（YAML）の代わりに `metaData` を持つ。中身は取り込み結果（GameObject・Mesh など）とインポーターを入れたバイナリの SerializedFile（version 9）で、ヘッダーのファイルサイズの後ろにプレビューの PNG が続く。scan でモデルの `metaData` だけを読み、ModelImporter の `m_FileIDToRecycleName` を上の表と同じ形にする（`meta.legacy_meta` → `AssetEntry.legacy_meta`）。あわせて `m_GlobalScale` も読む。Unity 4 は FBX の単位（UnitScaleFactor）を見ず、頂点の値にこれだけを掛ける（Japanese School Cafeteria では cm の FBX 25 個も m の FBX 28 個も 0.01 で、頂点はどちらも cm の値。エアコンは cm 指定で頂点 80 → 0.8 m、柵は m 指定で頂点 150 → 1.5 m）。Blender の FBX インポーターは UnitScaleFactor / 100 を掛けるので、m 指定のものが 100 倍になっていた。Unity 4 のモデルは読み込みで `m_GlobalScale × 100 / UnitScaleFactor` を掛けて Unity と同じ大きさにし（`ModelImporterInfo.import_scale`）、配置の計算（`_node_basis` などの fileScale）には `m_GlobalScale` を渡す（`unity_unit_scale`）。Models / Prefabs 単位でも同じ大きさで読む。テクスチャの `metaData` は取り込んだ画像まで入っていて大きく、ノーマルマップなどの設定は今は読まない。
+
+Unity 4 のシーンは、PrefabInstance（`m_IsExploded: 1`）の中身を stripped にせず、値ごとふつうの GameObject / Transform / Renderer として保存している（各ドキュメントが `m_PrefabParentObject` で元のオブジェクトを、`m_PrefabInternal` で PrefabInstance を指す）。そのまま読むと、PrefabInstance から差し込んだものと二重になる。`parse_asset` は、展開済みの PrefabInstance の中にあって元を持つドキュメントを stripped と同じく別名として扱い、配置は差し込みと上書きで作る（元を持たないもの＝その PrefabInstance で足したオブジェクトは、シーンのものとして残す）。2018.2 以前でも YAML のシーンは stripped を使い、この値を持たない（手元の SbbUtutuya のパッケージで確認）。
 
 - マテリアル（`m_Materials.Array.data[N]`、クラス 23 / 137）: 配置の `renderers` に入れ、既存のスロット単位の割り当てで当てる。上書きの無いスロットは None で、.meta・名前一致の結果のまま。1 メッシュの FBX では Renderer が `//RootNode` に載るので、表のメッシュ名（クラス 43 がただ 1 つ）をオブジェクト名にする
-- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`blender/scene_objects.py` の `apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）
+- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`blender/scene_objects.py` の `apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）。A は Y が上の FBX（Maya・Blender が書き出すもの）での形で、一般には A = f·U（U は Unity がその FBX の頂点に掛ける軸の変換。`fbx_units.unity_axis_matrix`、`ModelUnits.basis_a`）。Y が上なら U = diag(−1, 1, 1)、3ds Max の Z が上の FBX（GlobalSettings の UpAxis が 2）で、.meta の Bake Axis Conversion（`meshes.bakeAxisConversion`。`ModelImporterInfo.bake_axis_conversion`）が有効なら Y と Z の入れ替え（入れ替えだけで左手系になる）。Bake Axis Conversion が無効（既定）なら、Unity は軸の変換を頂点に焼き込まずルートの回転として持ち、シーン・prefab に保存されるルートの回転にもそれが入るので、Y が上と同じ U = diag(−1, 1, 1) で合う（Unreal 由来の Z が上の FBX を使う Shibuya で、入れ替えを当てると建物などが 90° 回っていた。1.17.0 の開発中に見つけて直した）。Blender の FBX インポーターはファイルの上の軸を +Z にする B（`blender_axis_matrix`）を掛けるが、Z が上の FBX では回転を掛けないので、読み込んだ直後に最上位のオブジェクトへ K = C·U·B⁻¹ を左から掛けて Unity と同じ向きにそろえる（`axis_correction`。Bake Axis Conversion を入れたモデルだけ。Y が上なら K は単位行列で何もしない）。Cardboard Boxes Pack（box0.FBX などがインチ・Z が上・globalScale 2.54）で、展開した prefab の箱が X 軸のまわりに 90° 倒れていた（Issue #240。Unity 6000.6.9f1 で demo シーンを開いて書き出した 1,861 個の Renderer と突き合わせ、一致が 762 → 1,861）。Renderer の GameObject を Unity の位置に置き直すとき（`apply_renderer_worlds`）は、ルートの Empty のワールドから直接置くので、親の逆行列で掛けている globalScale も掛ける（`ModelUnits.world_basis_a`。以前は掛けておらず、globalScale が 1 でないモデルで子の部品が小さく、位置が寄っていた）
 - 当てるのはモデルの最上位のオブジェクトだけ。入れ子のオブジェクトとアーマチュアで変形するものは件数を警告に出す。表に無い fileID は今までどおり数える
 - 室内アセットのシーンでは、FBX 由来の Renderer 120 個すべてで、Unity の外形の中心との差が 1 cm 未満、マテリアルも一致した
 
@@ -259,6 +308,7 @@ Material:
 
 ### 読み込む
 - モデル: `.fbx` `.obj` `.gltf/.glb` `.dae`（Blender 標準インポーターに委譲。Collada は Blender 5.0 で削除されたので、`wm.collada_import` が無い版では `.dae` を理由付きの読み込めない候補にする）と同梱 `.blend`（append。Python スクリプトを含み得るので既定 OFF のオプトイン。マテリアルは既定でそのまま残す）。OBJ の `.mtl`、glTF の `.bin` は同じフォルダから一緒に展開する。
+  OBJ は Unity と同じくグループ（`g`）ごとにオブジェクトを分けて読む（`use_split_groups`。`o` の名前では分けない）。グループの無い OBJ の中のメッシュを Unity は `default` と呼び、Blender ではファイル名のオブジェクトになるので、.meta の名前の表の `default` をファイル名に読み替える（走査のときに OBJ のグループの名前を覚えておく。#214）。
 - `.vrm`: VRM add-on（extensions.blender.org の "VRM format"、`import_scene.vrm`）が登録されていればそちらに委譲し、マテリアルも add-on のもの（MToon ノードグループ）をそのまま使う。無ければ glTF バイナリとして標準 glTF インポーターで読み、`.mat`（UniVRM が展開した MToon マテリアル）から組み直す。
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
@@ -492,7 +542,12 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   Scenes が既定になりうるとき（前回が Scenes か、ほかに読み込めるものが無い）はダイアログを開くときに、それ以外は Scenes タブに切り替えたときに展開して
   行を加える（`PreparedPackage.ensure_scenes`。Japanese Street で `prepare_package` が 13.6 秒から 10.2 秒になった。Issue #75）。
 - **並べ方**（Prefabs で 2 つ以上選んだとき有効）: `Side by Side` は prefab ごとのコレクションのワールド座標の外形を求め、1 つ目を動かさずに +X へ並べる。5 つ以上は ceil(√n) 列の格子に折り返し、次の行を +Y に置く。行の中では手前側（Y の最小）を揃える。間隔は最大の幅・奥行きの 25%（最小 0.1 m）（`core/arrange.py`）。動かすのは親を持たないオブジェクト。`Stack at Origin` は動かさない。行を出し入れするとダイアログの高さと Import ボタンの位置が変わるので、Prefabs では常に表示し、選択が 1 つ以下なら淡色にする。
-- 読み込む単位 Prefabs では prefab 内の配置（子オブジェクトの位置など）は再現せず、prefab のモデルはすべてそのコレクションの原点に置く。配置を再現するのは Scenes だけ。
+- 読み込む単位 Prefabs でも、prefab の中の配置（子オブジェクトの位置・回転・拡大率、同じモデルの複数の配置）を Scenes と同じく再現する（#240）。
+  選んだ prefab ごとに、展開した階層（prepare で `Expander` にキャッシュしたもの）を写し、ルートの位置だけを原点にして（回転と拡大率は残す）
+  シーンの要約を作り（`_ImportSession.prefab_scenes`）、`SceneImport` を `kind="prefab"` で回す。コレクションのプロパティは `unity_prefab` /
+  `unity_prefab_guid`、警告の頭は `prefab <パス>:`。以前は prefab の表を当ててモデルを原点に読むだけで、Cardboard Boxes Pack の `box001.prefab` では
+  中に置いたシールの FBX が原点に重なり、同じシールの 2 つ目も出ず、箱に .meta の globalScale（2.54）も掛からなかった。Unity 6 で prefab を開いて
+  書き出した Renderer と、18 個すべての位置と大きさが一致する。
 - 一覧は `UIList` + `CollectionProperty`（WindowManager 側。All / None ボタンから書き換えるため）。表示中の単位への絞り込みは `filter_items` で行う（名前での絞り込みも併用）。単位の enum は候補数入りのラベルを動的 items で出すので、文字列をモジュールで保持する。パッケージ由来の pathname は表示用に `sanitize_display` を通し、選択結果は GUID で持つ。
 - スクリプトからは、オペレーターの非表示プロパティ `unit`（`SCENES` / `PREFABS` / `MODELS`）と `arrange` で指定できる。ダイアログを出さない場合は、その単位の読み込める候補をすべて読む。
 
@@ -504,7 +559,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   選択ダイアログ・オペレーターの report に出す前に `core/report.py` の `sanitize_display` で制御文字（C0 / DEL / C1）を
   `\x1b` のような可視表現に置き換える（ANSI エスケープで表示を乱せないようにする）。
   - Objects / Materials / Textures の一覧
-  - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、PSD などの非対応画像形式
+  - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、読めない画像（統合した画像の無い PSD など）
   - 「Open extract folder」「Copy log」ボタン
 - 警告はインポートを止めず、可能なところまで進めて記録する。
 
@@ -566,13 +621,16 @@ unitypackage_loader/
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
+│   ├─ terrain.py                # Terrain の TerrainData・TerrainLayer の読み取り、間引いたメッシュ、アルファマップの PNG（#205）
 │   ├─ primitives.py             # Unity の組み込みメッシュ（Cube / Sphere / Capsule / Cylinder / Plane / Quad）の形（#190）
+│   ├─ unity_mesh.py             # Unity の Mesh アセットの頂点と面（#216）
 │   ├─ lights.py                 # シーンのライト・カメラを Blender の値に換算する（#49）
 │   ├─ exposure.py               # HDRP の Volume の露出からライトの強さの倍率を決める（#130）
 │   ├─ profiles/
 │   │   ├─ base.py               # ShaderProfile 基底 + 判定（GUID テーブル / プロパティ指紋）
 │   │   ├─ liltoon.py
 │   │   ├─ standard.py           # Built-in Standard / HDRP Lit
+│   │   ├─ custom_shader.py      # 表に無いシェーダーをシェーダーの定義（ShaderDefaults）と名前（別名・表示名・1 枚だけの画像・上下 2 色・発光）から補う（#262）
 │   │   ├─ urp.py                # URP Lit / Complex Lit / Simple Lit / Unlit / Baked Lit（#116 / #117）
 │   │   ├─ hdrp.py               # HDRP Lit / LayeredLit / Unlit（#119）
 │   │   ├─ mtoon.py              # VRM MToon
@@ -586,7 +644,9 @@ unitypackage_loader/
 │   ├─ prepare.py                # パッケージの事前解析（prepare_package / PreparedPackage。ダイアログと読み込みで共有）
 │   ├─ model_import.py           # モデルファイルを Blender のインポーターで読む処理と、bpy.data の差分
 │   ├─ session_materials.py      # 1 回の読み込みの中でのマテリアルの組み立て・共有・スロット分割（SessionMaterials）
-│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・デカール・ライト・カメラ）
+│   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・Terrain・デカール・ライト・カメラ）
+│   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
+│   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
 │   ├─ materials.py              # ノード生成
@@ -653,7 +713,10 @@ class UnityPackage:
 - パス正規化（`safe_relative_path`）: `..`・絶対パス・空要素に加え、Windows で展開先の外に出るか異常なファイルになる
   コロン（ドライブ文字・NTFS 代替データストリーム）、制御文字、`<>"|?*`、予約デバイス名（`CON` `NUL` `COM1` 等。拡張子付きも）、
   末尾のドット / 空白を拒否する。規則は展開する OS に依らず同じ（Linux で展開した結果を Windows で開くケースがあるため）。
-- メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB。tar ヘッダーのサイズで判定）。
+- メモリへ丸ごと読むメンバーには上限を置く（`pathname` / `asset.meta` は 16 MiB、`read_asset` は 64 MiB、シーン・prefab だけは 512 MiB。tar ヘッダーのサイズで判定）。
+  シーン・prefab は配置やライトマップのデータで 64 MiB を超えることがある（Destroyed Building Kit の DBK_Big_Scene.unity は 134 MB。#218）。
+  tar では `asset` が `pathname` より先に来るので、走査の時点では拡張子が分からず小さいほうの上限になる。そのため走査の最後に、読まなかった大きなシーン・prefab を
+  1 回の再走査でまとめて読む。
   超えた `pathname` / `asset.meta` は警告して無視し、`read_asset` は `PackageError`（呼び出し側はそのアセットだけスキップ）。
 - 展開前に書き出す合計サイズ（tar ヘッダー基準。gzip / sparse で小さく見せても実際に書く量）を求め、
   Preferences の上限（`Max Extract Size`、既定 8 GiB、0 で無制限）と展開先の空き容量（`shutil.disk_usage`）を超えるなら何も書かずに `PackageError`。
@@ -663,6 +726,12 @@ class UnityPackage:
   Windows では `PackageError`（Extract To で短いフォルダを選ぶよう案内）、ほかの OS では元のパスに書く。記録のキーは置いた場所の相対パス。
 - 書き出し時は展開先から対象までの各要素がシンボリックリンクでないことを確認し、リンクなら `PackageError`（既存のリンク経由で外側へ書くのを防ぐ）。展開先自体はユーザーが選んだ場所なのでリンクでもよい。
 - 進捗: `wm.progress_begin/update/end`。
+- 入れ子のパッケージ（#217）: 外側にモデル・prefab・シーンが無く `.unitypackage` を含むもの（NewGen Sci-Fi Slums・Toon Harbor Pack・Conifers BOTD）は、
+  `nested_packages()` の中身を選んで読む。対話的なら選ぶダイアログ（`import_scene.unitypackage_nested`）、一括読み込みとヘッドレスでは名前が
+  Built-in らしいもの（`builtin` / `birp` / `standard` / `3d`）か pathname 順の最初（`default_nested_package`。オペレーターの `nested_package` で指定もできる）。
+  選んだ中身を外側の展開先に書き出し、外側に説明書以外のアセットがあれば中身と合わせたパッケージ（`<中身> + outer.unitypackage`。中身にある GUID は中身を使う）
+  を書いて、そちらを読む（Conifers は中身が prefab とマテリアルだけで、メッシュとテクスチャは外側にある）。パッケージのコレクションの名前は「外側 (中身)」。
+  走査を 2 回しないよう、判定に使った `UnityPackage` を `prepare_package(pkg=...)` に渡す。
 
 ### 4.4 `core/unity_yaml.py` — Unity YAML サブセットパーサー
 
@@ -691,7 +760,10 @@ prefab が読めないとマテリアルが一つも当たらない）。
 
 - 判定: 先頭 20 バイトのヘッダー（ビッグエンディアン）の version と、ファイルサイズが実際の長さと一致するか（version 22 以降は 64 ビットの欄）。
   `load_documents(bytes)` がテキストかバイナリかを振り分け、`parse_material` / `hierarchy.parse_asset` は bytes をそのまま受け取る。
-- 対応範囲: version 14〜22（Unity 5.0 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
+- 対応範囲: version 9〜22（Unity 3.5 〜 Unity 6）で TypeTree が付いたもの（エディタが書くファイルには付いている）。
+  version 9〜13（Unity 4 まで）は、型の表に型ハッシュが無く（13 から）、TypeTree が入れ子の古い形（9 / 11。10 / 12 は平らな形）、
+  オブジェクトの pathID が `m_BigIDEnabled` が 0 なら 32 ビット、スクリプトの型の表は 11 から。手元では SbbUtutuya の Japanese School
+  Cafeteria / Library Set / Phone Booth の .mat、City Terrace Pack と Global Illumination Proxy の一部の .mat・prefab・シーンがこの形（#215）。
   形式の読み方は公開されているオープンソース実装（UnityPy、AssetStudio）の記述に従った。共通文字列表も同じ表を持つ。
 - 読み方: 型ごとの TypeTree（blob 形式。ノードは 24 バイト、version 19 以降は 32 バイト）をたどり、値を YAML パーサーと同じ形に変換する。
   クラスは dict、配列は list、`map` は 1 要素 dict の list、`FastPropertyName` は中の文字列、`PPtr<...>` は externals の GUID
@@ -736,6 +808,11 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
 
 **プロファイル判定順**
 1. `shader_guids.json` の GUID 一致（サンプルの 4 GUID は lilToon として登録）
+   - Unity の組み込みシェーダー（GUID が `0000000000000000f000000000000000`）は fileID で引く（`builtin_file_ids`）。Standard・Unlit のほか、
+     Legacy Shaders / Mobile / Particles / Nature / Sprites / UI の fileID と名前を Unity 6000.6 の `Resources/unity_builtin_extra` から書き出して入れた。
+     半透明・切り抜きは各シェーダーの RenderType タグ、ライティング無しは Unlit 系とパーティクル用のものに合わせる。Legacy のシェーダーは
+     半透明かどうかがシェーダーで決まっているので、前に使っていた Standard の `_Mode` が残っていても表の値を使う。以前は Standard と Unlit の
+     7 つだけで、Unity 4 の Transparent/Specular を使う Japanese Phone Booth Clean Dirty Set のガラスが不透明になっていた（Issue #256）
 2. プロパティ指紋（GUID 未登録のシェーダー向け）
    - lilToon: `_BaseMap` と `_MatCapTex` と `_UseShadow` がある
    - URP Lit: `_WorkflowMode` か `_Surface` がある（Standard の残りを持つことが多いので Standard より先に判定する）
@@ -749,14 +826,26 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
    （ベースカラーは `_Base_Color` / `_Base_Map` / `_Albedo` / `_Albedo_Map` / `_Diffuse` / `_MainTexture` / `_ColorMap` など、法線は `_Normal` / `_Normal_Map` / `_Bump` など、法線の強さは `_NormalScale` / `_Scale_Normal` / `_NormalStrength` / `_Normal_Amount` など）。
    `_Mask` や `_Color_Tilling` のような別の役割の名前を拾わないよう、部分一致にはしない
    この別名での検索は、シェーダー表に無いシェーダーなら、指紋で選んだプロファイル（URP Lit など）で読んだあとにも行う（`fill_textures_from_aliases`）。
+   以下の名前での補い（1 枚だけの画像・上下 2 色・発光）と、シェーダーの定義の既定を当てる処理は `core/profiles/custom_shader.py` にまとめてあり、
+   `normalize_material` が「定義の既定（`apply_shader_defaults`）→ 名前で補う（`fill_from_custom_names`）」の順に呼ぶ（#262）。
    Shader Graph のマテリアルは URP Lit の `_WorkflowMode` / `_Surface` を持つので指紋で URP Lit と読まれるが、テクスチャは独自の名前で持つことがある
    （Synty の POLYGON シリーズは `_Albedo_Map` / `_Base_Map` / `_Normal_Map` / `_Normal_Amount`。URP Lit の `_BaseMap` だけを読んでいたため、すべて白かった。#158）。
-   表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）
+   表で分かるシェーダーには当てない（`_BaseMap` が空なら、残りの独自名を拾わずにテクスチャ無しとする）。
+   名前で見つからなければ、Shader Graph の表示名（Inspector に出る名前）でも探す（`ShaderDefaults.display_names`、#236）。参照名が自動で
+   `Texture2D_E1B0D043` のように付いたグラフは、役割が表示名（「Base Map」「Normal Map」）でしか分からない（Terrain Asset Pack の草が白かった。
+   Water Caustics の砂も表示名「BaseMap」で付くようになった）。照合では大文字小文字・`_`・空白を無視する。
+   それでも見つからず、宣言の分かる自作シェーダー（前のシェーダーの残りを外したもの）で、役割の分かる語（ramp・normal・mask・foam・theme・array など。
+   名前か表示名の部分一致）を含まないテクスチャが 1 枚だけなら、それをベースカラーにする（`fill_sole_texture`、#239）。Toon Harbor Pack の `TH_CustomToon` は
+   色を `_TextureSample1`、陰の段階を `_TextureRamp` に持つ。2 枚以上残れば決められないので当てない。組み込みのテクスチャ（GUID が `0000000000000000` で始まる）は除く。
+   除外する語は、手元の 71 パッケージで色ではない画像（水の効果・色見本・Texture2DArray・室内の擬似表現など）に当たったものから足した
    発光も同じく、一般名で見つからなければ独自の名前（ON / OFF は `_Enable_Emission` / `_UseEmission` など、色は `_Emission_Color` / `_EmissiveColor` など、
    テクスチャは `_Emission_Map` / `_EmissiveMap` など、強さは `_Emission_Intensity` など）で探す（`fill_emission_from_aliases`。#167）。発光は「色 × テクスチャ」とし
    （Synty の Shader Graph は ON のとき Emission_Map × Emission_Color。テクスチャを指定しなければ白）、ON / OFF が OFF なら光らせず、色が黒なら光らせない。
    色の項目が無ければテクスチャがあるときだけ白とする。Unity 標準の `_EmissionColor` / `_EmissionMap` と HDRP の `_EmissiveColor` / `_EmissiveColorMap` は各プロファイルが
    条件付きで読む（#52 のキーワードの判定など）ので、別名の検索では拾わない。トゥーン系のプロファイルで読んだマテリアルには当てない。
+   表に無いシェーダーで一般名から発光を読んだときも、独自の名前の強さ（`_EmissiveIntensity`、`_EmissionMultiplier`、Corals の綴り違いの `_EmissionMultiplayer` など）を掛ける
+   （`scale_emission_by_alias`。#241）。Corals は `_EmissionColor × _EmissionMultiplayer × 画像` で強さ 0、Dreamscape Nature Meadows の Shader Graph は
+   `_EmissiveColor × _EmissiveIntensity` で、強さ 0 のベンチなどが白く光っていた。
    独自シェーダーへの対応はこの汎用の仕組みで拾える範囲に限り、専用のプロファイルは分野の標準になっているシェーダーだけに作る（2026-11-09 に決定）
 
 **パッケージに入っているシェーダーの定義で、残りのプロパティを外す（Issue #118）**
@@ -783,6 +872,32 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
   `AlphaTest` のキューで `decal:blend`（半透明に重ねる）だから。マテリアルにカリングのプロパティが無く、シェーダーが固定の `Cull Off` なら両面にする。
   Tokyo Street の `Flowers`（`AE/Leaves`。`clip(_Base_Color.a - _Cutoff)` で切り抜く両面のシェーダー）が、葉の周りの四角い板ごと不透明に出ていた。
   手元の 17 パッケージで変わるのは同じ作者の 4 つ（Tokyo Street の Flowers・Decals_Wall、Japanese Street の AE_Flower・AE_Grass_01 が両面に）だけ。
+- パスが常に切り抜くシェーダーは、タグが `Opaque` でも切り抜きにする（`ShaderDefaults.alpha_test`、#235 / #241）。最初の `SubShader` の中の `#define _ALPHATEST_ON` と、
+  キーワードを 1 つだけ書いた `#pragma multi_compile… _ALPHATEST_ON`（無効の選択肢が無いので常に有効になる。`shader_feature` や `multi_compile _ _ALPHATEST_ON` は
+  マテリアルのキーワード次第なので含めない）。Amplify Shader Editor の URP テンプレートの形で、The Basilica Cathedral の葉（`Tripolygon(URP)/Leaf`。`#define`）と
+  Corals（`ASE_StandartCutout2Sided`。マテリアルにキーワードは無いが、URP の Unity 6000.6.9f1 で描画して切り抜かれることを確かめた）。
+  このときマテリアルに `_Cutoff` が無ければ、テンプレートのしきい値 `_AlphaCutoff` を使う。
+- `[HideInInspector]` で宣言されたプロパティも覚え（`ShaderDefaults.hidden`）、`_EmissionColor` が隠されていて発光の画像も無ければ、発光として読まない。
+  Amplify の URP テンプレートは、使わなくても白い `_EmissionColor` を隠して宣言し、マテリアルにも白が残る（Basilica の葉が真っ白に光っていた。#235）。
+  手元の 71 パッケージで読み方が変わったのは Corals・Basilica・Dreamscape Nature Meadows・Water Caustics の 62 マテリアル。
+- `.shadergraph` からは、ターゲット（URP / Built-in / HDRP）の描画の設定を読む（`_graph_settings`、Issue #257）。Alpha Clipping（`m_AlphaClip`、HDRP は `m_AlphaTest`）、
+  Surface Type（`m_SurfaceType` が 1 なら半透明）、Render Face（`m_RenderFace` が 0 = Both なら両面。古い形式のマスターノードは `m_TwoSided`、HDRP は `m_DoubleSidedMode`）。
+  どれかのターゲットで有効なら有効とする。Allow Material Override を入れたターゲット（`m_AllowMaterialOverride: true`）はマテリアルの `_Surface` / `_AlphaClip` / `_Cull` が
+  優先されるので使わない（新しい形式はオブジェクトを空行で並べるので、そのまとまりごとに判定する）。使い方は `.shader` のタグと同じ（表に無いシェーダーで、マテリアルからは
+  不透明としか読めず、キューが既定のままなら）。以前は .shadergraph からプロパティの表示名しか読まず、Dreamscape Nature Meadows の草・花（Foliage.shadergraph）が
+  切り抜かれず板になり、木の葉（Leaves.shadergraph）が片面になっていた。Shader Graph の Built-in ターゲットのキーワード `_BUILTIN_ALPHATEST_ON` /
+  `_BUILTIN_SURFACE_TYPE_TRANSPARENT` も、`_ALPHATEST_ON` / `_SURFACE_TYPE_TRANSPARENT` と同じに扱う。手元の 91 パッケージで変わったのは、Synty の Decals
+  （116 個。URP のターゲットが Transparent）、Dreamscape の植物と炎、Haunted House のおばけと霧、Water Caustics のデモのマテリアル。
+- 切り抜き・半透明のマテリアルで、名前が「アルファの画像」（alpha mask / alpha map / opacity mask / opacity など）の画像があれば、その R をアルファにし
+  （`NormalizedMaterial.alpha_tex`。組み立てでは色の画像の A の代わりに Separate Color の Red をつなぐ）、一般名の `_Cutoff` が無ければ
+  「アルファのしきい値」（alpha threshold / alpha clip threshold / cutoff threshold など）をしきい値にする（`fill_alpha_from_aliases`、#266）。
+  Shibuya の路面標示（`M_BaseAlpha.shadergraph`。`_AlphaMask` の R を Alpha に、`_AlphaThreshold` を Alpha Clip Threshold につなぐ）が、色の画像の
+  アルファで切り抜かれて線や文字が消えていた。手元の 91 パッケージで変わったのは、Shibuya の路面標示と植物、Synty の Generic の Shader Graph
+  （`_Alpha_Clip_Threshold` が 0。Unity と同じく、ほぼ切り抜かない）、Water Caustics のデモ、Dreamscape の Impostor の 66 マテリアル。
+- 色が白のままで、名前に「上」（top / upper）と「下」（bottom / lower / base）を含む色の組が 1 つだけあれば、その平均を色にする（`fill_gradient_color`、#257）。
+  様式化した植物のシェーダーは、白黒の葉の画像に高さで上下の色を混ぜて塗る（Dreamscape の `_Color_Top` / `_Color_Base`、`_Foliage_Color_Top` / `_Foliage_Color_Bottom`、
+  Thalassophobia の Seagrass の `_TopColor` / `_BottomColor`）。高さで混ぜることは再現できないので平均で近づける。宣言の分かる自作シェーダーだけに使う
+  （前のシェーダーの色が残っていると組を決められない）。URP の `_BaseColor` は「下」に数えない。
 
 **Shader Graph の中の Tiling & Offset を、テクスチャの Tiling / Offset として読む（Issue #193）**
 
@@ -939,8 +1054,11 @@ def run(ctx, filepath, opts) -> Report:
 - カラースペース: `textureType == 1` or `sRGBTexture == 0` → `Non-Color`、それ以外 `sRGB`。
 - `alpha_mode`: `alphaIsTransparency == 1` → `STRAIGHT`、そうでなくアルファをカット/ブレンドに使う場合は `CHANNEL_PACKED`。
 - 画像ノードの `extension`: `wrapU == 1` → `EXTEND`、それ以外 `REPEAT`。
-- **PSD は Blender で読めない** → 警告して展開のみ行う。TGA/TIFF/EXR/BMP/JPG/PNG は可。
+- PSD は、統合した画像（Photoshop の「互換性を優先」）があれば Blender で読める。読み込んだ直後に大きさを見て、読めなければ（0 × 0）画像を消して警告にする（ピンクの画像を残さない）。以前は PSD を一律に「読めない形式」として展開だけしていて、Toon Harbor Pack の窓の明かり・ロゴや Conifers BOTD の法線が付かなかった（#238）。形式の分からないファイル（`images.load` の RuntimeError）も警告にする。
 - `Pack into .blend` ON なら `image.pack()`。
+- モデルのインポーターが作った画像（.mat に対応付かず FBX のマテリアルを残すときに使われる）のファイルが見つからなければ、パッケージの中の
+  同じファイル名のテクスチャ（複数あればモデルに近いフォルダのもの）に付け替える。FBX に作者の PC のパスが入っているとピンクになっていた
+  （MegapolyArt - Cardboard Boxes Pack）。展開は、組み立てで足りなかったテクスチャと一緒に最後にまとめて行う（`fill_missed_textures`。#220）。
 
 ### 4.9 エラーと警告の分類
 
@@ -953,7 +1071,7 @@ def run(ctx, filepath, opts) -> Report:
 | 未知シェーダー | 警告、generic プロファイル |
 | `_EMISSION` が無効キーワード（別シェーダーからの切り替え残骸） | emission を無効化し警告 |
 | HDRP の白い `_EmissionColor`（`_EmissiveColor` が黒） | 発光させない（`_EmissiveColor` / `_EmissiveColorMap` だけを見る） |
-| 非対応画像形式（PSD 等） | 警告、展開のみ |
+| 読めない画像（統合した画像の無い PSD、形式の分からないファイル） | 警告、展開のみ |
 | .mat の YAML 解析失敗 | 警告、そのマテリアルのみスキップ |
 
 ### 4.10 テスト

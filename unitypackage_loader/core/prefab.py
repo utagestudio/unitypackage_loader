@@ -17,11 +17,11 @@ SkinnedMeshRenderer の ``m_Mesh``）の GUID で決める。パッケージ内�
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
-from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, PartState, pending_renderer_id
-from .placement import ModelNames, ModelPlacement, built_from_renderers, placements
+from .hierarchy import CLASS_MESH_RENDERER, Hierarchy, pending_renderer_id
+from .placement import ModelNames, ModelPlacement, placements
 from .meta import strip_numeric_suffix
 from .unity_ids import mesh_file_id
 
@@ -36,6 +36,7 @@ class RendererMaterials:
     lod_level: int = 0  # LODGroup の段（0 = LOD0、または LODGroup が無い）
     # prefab で表示されているか（GameObject が祖先も含めてアクティブで、Renderer が有効。読み込む単位 Prefabs で隠す。#177）
     visible: bool = True
+    shadows_only: bool = False  # Shadows Only の Renderer（影だけを落とし、本体は描かない。#232）
 
 
 def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> RendererMaterials | None:
@@ -58,18 +59,6 @@ def find_renderer(table: dict[str, RendererMaterials], obj_name: str) -> Rendere
         return rm
     candidates = [r for name, r in table.items() if strip_numeric_suffix(name) == base]
     return candidates[0] if len(candidates) == 1 else None
-
-
-def parts_from_placements(placed: Iterable[ModelPlacement]) -> dict[str, dict[str, PartState]]:
-    """モデルの GUID → モデルの PrefabInstance の中への表示の上書きと削除（``ModelPlacement.parts``。#172）。
-
-    読み込む単位 Prefabs ではモデルを 1 回だけ読み込むので、同じモデルの配置が複数あれば先の配置のものを採る。
-    """
-    result: dict[str, dict[str, PartState]] = {}
-    for placement in placed:
-        if placement.parts and placement.model_guid not in result:
-            result[placement.model_guid] = dict(placement.parts)
-    return result
 
 
 def tables_from_hierarchy(
@@ -103,7 +92,7 @@ def tables_from_hierarchy(
                 continue
             table[name] = RendererMaterials(
                 name, list(renderer.materials), renderer.renderer_class, placement.model_guid,
-                renderer.mesh_file_id, renderer.lod_level, visible,
+                renderer.mesh_file_id, renderer.lod_level, visible, renderer.shadows_only,
             )
     return result
 
@@ -116,54 +105,16 @@ class PrefabAnalysis:
     """
 
     tables: dict[str, dict[str, RendererMaterials]] = field(default_factory=dict)  # モデルの GUID → GameObject 名 → 行
-    whole_models: set[str] = field(default_factory=set)  # FBX を丸ごと置いているモデル（表に無い部品も隠さない。#151）
-    parts: dict[str, dict[str, PartState]] = field(default_factory=dict)  # モデル → 中のオブジェクトの表示の上書きと削除（#172）
-    inactive_models: set[str] = field(default_factory=set)  # prefab の中の配置がすべて非アクティブなモデル（#177）
+    # Unity の Mesh を使う Renderer（``PrimitivePlacement``。#216）。候補の一覧で、この prefab を読み込めるかと
+    # 組むマテリアルを決めるのに使う（置き方はシーンと同じ処理が決める。#240）
+    meshes: list[object] = field(default_factory=list)
 
 
 def analyze_prefab(h: Hierarchy, placed: list[ModelPlacement]) -> PrefabAnalysis:
     """展開した prefab の階層と、その配置（``hierarchy.placements`` の結果）から、読み込み側が使うものを作る。"""
-    return PrefabAnalysis(
-        tables=tables_from_hierarchy(h, (), placed=placed),
-        whole_models=models_placed_whole(h, placed),
-        parts=parts_from_placements(placed),
-        inactive_models=inactive_models(placed),
-    )
-
-
-def inactive_models(placed: list[ModelPlacement]) -> set[str]:
-    """prefab の中の配置がすべて非アクティブなモデルの GUID（読み込む単位 Prefabs で、すべての部品を隠す。#177）。
-
-    非アクティブな GameObject の下に FBX を丸ごと置いたときなど。表の行が無くても隠せるよう、行とは別に求める。
-    """
-    active: dict[str, bool] = {}
-    for placement in placed:
-        active[placement.model_guid] = active.get(placement.model_guid, False) or placement.active
-    return {guid for guid, is_active in active.items() if not is_active}
-
-
-def models_placed_whole(h: Hierarchy, placed: list[ModelPlacement]) -> set[str]:
-    """モデルの PrefabInstance で FBX を丸ごと置いている配置のある、モデルの GUID。
-
-    そのモデルは FBX のすべての部品が Unity にあるので、表に無い部品も隠さない（#151）。
-    """
-    return {p.model_guid for p in placed if not built_from_renderers(h, p)}
-
-
-def unused_parts(table: dict[str, RendererMaterials], objects: Iterable[tuple[str, bool]]) -> set[str]:
-    """表の Renderer が使っていないメッシュのオブジェクト名（読み込む単位 Prefabs で隠すもの。#151）。
-
-    ``objects`` は (Blender のオブジェクト名, メッシュか)。照合は ``find_renderer``（名前 → 連番を外した形 → メッシュ参照の
-    fileID）に加えて、表の名前の連番も外して比べる（Scenes 単位の ``scene_import.unused_in_placement`` と同じ）。
-    FBX のノード名がもともと「Base-Ring.001」のように連番付きだと、同じ FBX を 2 回目に読み込んだとき Blender が
-    「Base-Ring.002」に付け替えるので、片側だけ外したのでは使っている部品まで隠して（消して）しまう。
-    FBX を丸ごと置いたモデル（``models_placed_whole``）には使わない。
-    """
-    stripped = {strip_numeric_suffix(n) for n in table}
-    return {
-        name for name, is_mesh in objects
-        if is_mesh and strip_numeric_suffix(name) not in stripped and find_renderer(table, name) is None
-    }
+    # 表示・部品の扱い（以前の whole_models / parts / inactive_models）は、Prefabs 単位も prefab をシーンと同じく置くように
+    # なって SceneImport が行う（#240）
+    return PrefabAnalysis(tables=tables_from_hierarchy(h, (), placed=placed))
 
 
 def merge_prefab_tables(tables: list[dict[str, RendererMaterials]]) -> dict[str, RendererMaterials]:
