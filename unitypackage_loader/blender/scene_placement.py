@@ -133,7 +133,9 @@ class SceneImport:
             if summary.entry.ext == ".fbx":
                 # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
                 unit = summary.info.unity_unit_scale(read_unit_scale(path))
-                self.unit_scales[summary.guid] = ModelUnits(unit, read_axes(path), summary.info.global_scale)
+                # 軸の変換を考えるのは Bake Axis Conversion を入れたモデルだけ（入れていなければ Y が上と同じに扱って合う。#240）
+                axes = read_axes(path) if summary.info.bake_axis_conversion else None
+                self.unit_scales[summary.guid] = ModelUnits(unit, axes, summary.info.global_scale)
             else:
                 self.unit_scales[summary.guid] = None
         return self.unit_scales[summary.guid]

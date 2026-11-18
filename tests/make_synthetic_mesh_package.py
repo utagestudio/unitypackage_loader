@@ -19,7 +19,7 @@
   Z に 3 動いている）。Prefabs/StripB.prefab は Strips.fbx を展開して Strip.001 だけを使う（GameObject も Strip.001）。シーンでは
   先に Other.fbx を置くので、Strips.fbx を読むときには Strip.001 という名前が使われている（Blender が付け替える。#237）。
   StripB は X に 8 動かして置く。
-- Models/Tall.fbx は Z を上にして書き出した縦長の箱（3ds Max の FBX と同じ軸。UpAxis 2）。Prefabs/Tall.prefab は展開して
+- Models/Tall.fbx は Z を上にして書き出した縦長の箱（3ds Max の FBX と同じ軸。UpAxis 2）で、.meta に Bake Axis Conversion を入れる。Prefabs/Tall.prefab は展開して
   そのノード Tall だけを置く。Unity は Y と Z を入れ替えて縦に立てる（#240）。シーンでは Z に -10 動かして置く。
 - Models/Crate.fbx: .mat の無いマテリアル CrateFbx が、作者の PC のパス（/nonexistent/author/Textures/CrateColor.png）の画像を使う。
   同じファイル名の画像は Textures/CrateColor.png にある（#220）。
@@ -203,7 +203,9 @@ def main() -> None:
 
     export_tall_fbx(tmp / "tall.fbx")
     tall_path = "Assets/Synthetic/Models/Tall.fbx"
-    tall = add(tall_path, (tmp / "tall.fbx").read_bytes(), model_meta(guid_of(tall_path), {}))
+    # Cardboard Boxes Pack の箱と同じく Bake Axis Conversion を入れる（入れたときだけ Unity は Y と Z を入れ替えて頂点に焼き込む）
+    tall_meta = model_meta(guid_of(tall_path), {}) + "    bakeAxisConversion: 1\n"
+    tall = add(tall_path, (tmp / "tall.fbx").read_bytes(), tall_meta)
     tall_prefab_path = "Assets/Synthetic/Prefabs/Tall.prefab"
     tall_ref = f"{{fileID: {mesh_file_id('Tall')}, guid: {tall}, type: 3}}"
     tall_prefab = add(tall_prefab_path, (HEADER + "".join([

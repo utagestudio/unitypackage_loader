@@ -611,8 +611,11 @@ class _ImportSession:
             for obj in target.all_objects:
                 if FBX_NODE_PROP not in obj:
                     obj[FBX_NODE_PROP] = obj.name
-        if model.ext == ".fbx" and not delegated:
-            # Y が上でない FBX（3ds Max の Z が上）は、Unity と同じ向きにそろえる（#240）
+        summary = self.model_by_guid.get(model.guid)
+        if model.ext == ".fbx" and not delegated and summary is not None and summary.info.bake_axis_conversion:
+            # Bake Axis Conversion を入れた、Y が上でない FBX（3ds Max の Z が上）は、Unity と同じ向きにそろえる（#240）。
+            # 入れていないモデルは Unity が軸の変換をルートの回転として持ち、今までの扱い（Y が上と同じ）で合う
+            # （Shibuya の Unreal 由来の FBX は Z が上で、これを当てると 90° 回っていた）
             correction = axis_correction(read_axes(self.paths[model.guid]))
             if correction is not None:
                 for obj in target.all_objects:
