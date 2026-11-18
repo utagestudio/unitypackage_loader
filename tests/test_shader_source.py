@@ -475,6 +475,21 @@ class GraphTargetSettingsTests(unittest.TestCase):
         n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"))
         self.assertEqual(n.base_color, (1.0, 1.0, 1.0, 1.0))
 
+    def test_alpha_mask_and_threshold(self):
+        # Shibuya の M_BaseAlpha: アルファは _AlphaMask の R、しきい値は _AlphaThreshold（#266）
+        graph = graph_with_target(m_AlphaClip=True) + "\n\n" + graph_v2("_BaseMap", "_AlphaMask", "_AlphaThreshold")
+        text = mat_yaml("MI_Crossing", GRAPH, tex=[("_BaseMap", TEX_A, (1, 1), (0, 0)), ("_AlphaMask", TEX_N, (1, 1), (0, 0))],
+                        floats=[("_AlphaThreshold", 0.502)])
+        n = normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph"),
+                               defaults=shader_defaults(graph, ".shadergraph"))
+        self.assertEqual((n.alpha_mode, n.alpha_tex.guid, n.base_color_tex.guid), ("cutout", TEX_N, TEX_A))
+        self.assertAlmostEqual(n.alpha_cutoff, 0.502)
+        self.assertIn(TEX_N, [t.guid for t in n.texture_refs()])
+        # 不透明なら使わない
+        graph = graph_v2("_BaseMap", "_AlphaMask")
+        text = mat_yaml("Opaque", GRAPH, tex=[("_BaseMap", TEX_A, (1, 1), (0, 0)), ("_AlphaMask", TEX_N, (1, 1), (0, 0))])
+        self.assertIsNone(normalize_material(parse_material(text), declared=declared_properties(graph, ".shadergraph")).alpha_tex)
+
     def test_builtin_target_keywords(self):
         text = mat_yaml("M_Bushes_01", GRAPH, tex=[("_MainTex", TEX_A, (1, 1), (0, 0))], keywords=["_BUILTIN_ALPHATEST_ON"])
         self.assertEqual(normalize_material(parse_material(text)).alpha_mode, "cutout")

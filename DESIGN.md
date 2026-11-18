@@ -122,6 +122,10 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     既定で金属感・つや・AO を変えない（Affect MAOS が OFF）ので、Lit から切り替えたときに残る `_MetallicGlossMap` / `_Smoothness: 1` は使わず、
     金属感 0・ラフネス 0.8 にする（Shibuya の点字ブロックが黒い鏡面になっていた）。
     ベースのテクスチャが無いもの・パッケージに無い .mat を指すものは置かずに件数を警告に出す。板は影を落とさない。
+    2026-11-15 にダウンロードし直した版の Shibuya は、DecalProjector の .mat 48 個がデカール用でない Lit の Shader Graph（`M_BaseMaterial`）に
+    変わっていて、画像は前のシェーダーの名残の `Base_Map` にしか無い（宣言に無いので読まない）。Unity 6000.6.9f1（URP）に取り込んで確かめると、
+    どのマテリアルもデカールのパス（DBufferProjector / DecalScreenSpaceProjector / DecalGBufferProjector）を持たず、Unity でも描画されない。
+    なので置かずに警告に出すままにした（#165 で確かめたのは、デカール用の Shader Graph だった前の版）。
   - 置き方は組み込みメッシュと同じ（その GameObject の Empty の子か、親の Empty の下にローカル行列で）。非アクティブ・無効なら隠す。
     オブジェクト名は「GameObject 名 (Decal)」、中身は `unity_decal` に残す。デカールのマテリアルのテクスチャも、使うテクスチャ（#164）に数える。
   - 読み込む単位 Scenes だけ（組み込みメッシュと同じ理由。手元の prefab にデカールは無い）。ダイアログの **Decals**（`scene_decals`）で切り替える。
@@ -884,6 +888,12 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
   切り抜かれず板になり、木の葉（Leaves.shadergraph）が片面になっていた。Shader Graph の Built-in ターゲットのキーワード `_BUILTIN_ALPHATEST_ON` /
   `_BUILTIN_SURFACE_TYPE_TRANSPARENT` も、`_ALPHATEST_ON` / `_SURFACE_TYPE_TRANSPARENT` と同じに扱う。手元の 91 パッケージで変わったのは、Synty の Decals
   （116 個。URP のターゲットが Transparent）、Dreamscape の植物と炎、Haunted House のおばけと霧、Water Caustics のデモのマテリアル。
+- 切り抜き・半透明のマテリアルで、名前が「アルファの画像」（alpha mask / alpha map / opacity mask / opacity など）の画像があれば、その R をアルファにし
+  （`NormalizedMaterial.alpha_tex`。組み立てでは色の画像の A の代わりに Separate Color の Red をつなぐ）、一般名の `_Cutoff` が無ければ
+  「アルファのしきい値」（alpha threshold / alpha clip threshold / cutoff threshold など）をしきい値にする（`fill_alpha_from_aliases`、#266）。
+  Shibuya の路面標示（`M_BaseAlpha.shadergraph`。`_AlphaMask` の R を Alpha に、`_AlphaThreshold` を Alpha Clip Threshold につなぐ）が、色の画像の
+  アルファで切り抜かれて線や文字が消えていた。手元の 91 パッケージで変わったのは、Shibuya の路面標示と植物、Synty の Generic の Shader Graph
+  （`_Alpha_Clip_Threshold` が 0。Unity と同じく、ほぼ切り抜かない）、Water Caustics のデモ、Dreamscape の Impostor の 66 マテリアル。
 - 色が白のままで、名前に「上」（top / upper）と「下」（bottom / lower / base）を含む色の組が 1 つだけあれば、その平均を色にする（`fill_gradient_color`、#257）。
   様式化した植物のシェーダーは、白黒の葉の画像に高さで上下の色を混ぜて塗る（Dreamscape の `_Color_Top` / `_Color_Base`、`_Foliage_Color_Top` / `_Foliage_Color_Bottom`、
   Thalassophobia の Seagrass の `_TopColor` / `_BottomColor`）。高さで混ぜることは再現できないので平均で近づける。宣言の分かる自作シェーダーだけに使う

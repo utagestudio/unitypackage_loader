@@ -132,7 +132,8 @@ ticked):
   Projectors (graffiti, stains, posters) become flat planes with the decal material made semi-transparent, placed in
   the middle of each projector's box (toggle it with **Decals** in the dialog). Decals on flat walls and roads look
   close to Unity; decals spread over uneven ground or around corners, the draw order and normal-only decals are
-  approximations. Unity Terrains become meshes built from the heightmap, with a material that blends the layers'
+  approximations. A Decal Projector whose material is not a decal shader is not drawn in Unity either, so it is skipped
+  and counted in the warnings. Unity Terrains become meshes built from the heightmap, with a material that blends the layers'
   textures (diffuse, normal and mask) by the alphamaps. A fine heightmap is thinned out to the number of vertices per
   side chosen with Terrain under "Also Import" in the dialog (129, 257, 513, 1025 or full; 513 by default), and holes
   are left open. Scenes that hold only a Terrain and no models can be imported too. Terrain trees and grass are not

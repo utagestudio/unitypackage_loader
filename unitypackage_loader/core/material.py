@@ -245,6 +245,8 @@ class NormalizedMaterial:
     alpha_mode: AlphaMode = "opaque"
     alpha_cutoff: float = 0.5
     alpha_from_texture: bool = True  # False なら base_color.a だけを使う
+    # アルファを色の画像とは別の画像の R から取る（自作シェーダーの _AlphaMask など。#266）。None なら base_color_tex の A
+    alpha_tex: TexRef | None = None
     # 半透明の合成の仕方（URP の _Blend）。Blender ではどれも通常のアルファ合成で組む（#116）
     blend_mode: BlendMode = "alpha"
     normal_tex: TexRef | None = None
@@ -286,7 +288,10 @@ class NormalizedMaterial:
     def texture_refs(self) -> list[TexRef]:
         refs = [
             t
-            for t in (self.base_color_tex, self.normal_tex, self.emission_tex, self.metallic_tex, self.specular_tex, self.occlusion_tex)
+            for t in (
+                self.base_color_tex, self.alpha_tex, self.normal_tex, self.emission_tex, self.metallic_tex, self.specular_tex,
+                self.occlusion_tex,
+            )
             if t is not None
         ]
         return refs
@@ -298,7 +303,7 @@ class NormalizedMaterial:
     # ---- JSON 往復（カスタムプロパティへの保存と再構築用） ----
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("base_color_tex", "normal_tex", "emission_tex", "metallic_tex", "specular_tex", "occlusion_tex"):
+        for key in ("base_color_tex", "alpha_tex", "normal_tex", "emission_tex", "metallic_tex", "specular_tex", "occlusion_tex"):
             ref = getattr(self, key)
             data[key] = None if ref is None else {"guid": ref.guid, "scale": list(ref.scale), "offset": list(ref.offset)}
         data.pop("warnings", None)
