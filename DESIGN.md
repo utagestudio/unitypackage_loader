@@ -884,6 +884,12 @@ class NormalizedMaterial:       # シェーダー非依存の中間表現
   切り抜かれず板になり、木の葉（Leaves.shadergraph）が片面になっていた。Shader Graph の Built-in ターゲットのキーワード `_BUILTIN_ALPHATEST_ON` /
   `_BUILTIN_SURFACE_TYPE_TRANSPARENT` も、`_ALPHATEST_ON` / `_SURFACE_TYPE_TRANSPARENT` と同じに扱う。手元の 91 パッケージで変わったのは、Synty の Decals
   （116 個。URP のターゲットが Transparent）、Dreamscape の植物と炎、Haunted House のおばけと霧、Water Caustics のデモのマテリアル。
+- 切り抜き・半透明のマテリアルで、名前が「アルファの画像」（alpha mask / alpha map / opacity mask / opacity など）の画像があれば、その R をアルファにし
+  （`NormalizedMaterial.alpha_tex`。組み立てでは色の画像の A の代わりに Separate Color の Red をつなぐ）、一般名の `_Cutoff` が無ければ
+  「アルファのしきい値」（alpha threshold / alpha clip threshold / cutoff threshold など）をしきい値にする（`fill_alpha_from_aliases`、#266）。
+  Shibuya の路面標示（`M_BaseAlpha.shadergraph`。`_AlphaMask` の R を Alpha に、`_AlphaThreshold` を Alpha Clip Threshold につなぐ）が、色の画像の
+  アルファで切り抜かれて線や文字が消えていた。手元の 91 パッケージで変わったのは、Shibuya の路面標示と植物、Synty の Generic の Shader Graph
+  （`_Alpha_Clip_Threshold` が 0。Unity と同じく、ほぼ切り抜かない）、Water Caustics のデモ、Dreamscape の Impostor の 66 マテリアル。
 - 色が白のままで、名前に「上」（top / upper）と「下」（bottom / lower / base）を含む色の組が 1 つだけあれば、その平均を色にする（`fill_gradient_color`、#257）。
   様式化した植物のシェーダーは、白黒の葉の画像に高さで上下の色を混ぜて塗る（Dreamscape の `_Color_Top` / `_Color_Base`、`_Foliage_Color_Top` / `_Foliage_Color_Bottom`、
   Thalassophobia の Seagrass の `_TopColor` / `_BottomColor`）。高さで混ぜることは再現できないので平均で近づける。宣言の分かる自作シェーダーだけに使う

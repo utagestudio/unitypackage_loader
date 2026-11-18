@@ -6,7 +6,7 @@ base.py に分かれていた）。
 1. ``apply_shader_defaults``: シェーダーの定義に書かれた描画の既定（タグ・固定の Cull・常に切り抜くパス・隠した
    ``_EmissionColor``・Shader Graph のターゲットの設定。``shader_source.ShaderDefaults``。#202 / #235 / #257）
 2. ``fill_from_custom_names``: 一般名で見つからなかったテクスチャ・色・発光を、自作シェーダーでよく使われる名前で探す
-   （別名 #118 / #163、表示名 #236、1 枚だけの画像 #239、上下 2 色 #257、発光 #167 / #241）
+   （別名 #118 / #163、表示名 #236、1 枚だけの画像 #239、上下 2 色 #257、別画像のアルファ #266、発光 #167 / #241）
 
 generic プロファイル（``standard.GenericProfile``）も、別名のテクスチャと発光は自分で探す。
 """
@@ -52,6 +52,7 @@ def fill_from_custom_names(
     ``generic`` は generic プロファイルで読んだか（別名のテクスチャと発光は済ませている）。
     """
     fill_textures_from_aliases(mat, norm, display_names)
+    fill_alpha_from_aliases(mat, norm, display_names)
     if declared_known:
         fill_sole_texture(mat, norm, display_names)
         fill_gradient_color(mat, norm)
@@ -177,6 +178,34 @@ def fill_sole_texture(mat: UnityMaterial, n: NormalizedMaterial, display_names: 
     if len(candidates) == 1:
         n.base_color_tex = candidates[0]
         n.uv_scale, n.uv_offset = texture_transform(n.base_color_tex)
+
+
+# アルファを色の画像とは別の画像で持つ自作シェーダー（Shibuya の M_BaseAlpha は _AlphaMask の R を Alpha に、_AlphaThreshold を
+# Alpha Clip Threshold につなぐ。#266）。完全一致で比べる
+_ALPHA_TEX_ALIASES = (
+    "alphamask", "alphamap", "alphatex", "alphatexture", "opacitymask", "opacitymap", "opacitytex", "opacitytexture", "opacity",
+    "cutoutmask", "cutoutmap", "transparencymask", "transparencymap",
+)
+_ALPHA_THRESHOLD_ALIASES = (
+    "alphathreshold", "alphaclipthreshold", "alphaclippingthreshold", "alphacutoffthreshold", "cutoffthreshold",
+    "clipthreshold", "opacitythreshold", "opacitycutoff",
+)
+
+
+def fill_alpha_from_aliases(mat: UnityMaterial, n: NormalizedMaterial, display_names: Mapping[str, str] | None = None) -> None:
+    """切り抜き・半透明のマテリアルで、アルファの画像としきい値を独自の名前で探す（#266）。
+
+    アルファの画像は R を使う（白黒のマスク）。しきい値は、一般名の ``_Cutoff`` が無いときだけ使う。
+    """
+    if n.alpha_mode == "opaque":
+        return
+    if n.alpha_tex is None:
+        tex = _find_texture(mat, _ALPHA_TEX_ALIASES, display_names)
+        if tex is not None and tex.guid and not tex.guid.startswith(_BUILTIN_GUID_PREFIX):
+            n.alpha_tex = tex
+            n.alpha_from_texture = True
+    if n.alpha_mode == "cutout" and "_Cutoff" not in mat.floats:
+        n.alpha_cutoff = _find_float(mat, _ALPHA_THRESHOLD_ALIASES, n.alpha_cutoff, display_names)
 
 
 _GRADIENT_TOP_WORDS = ("top", "upper")
