@@ -209,7 +209,8 @@ def normalize_material(
     外した名前は ``extras["undeclared_properties"]`` に残す。表で分かるシェーダーは各プロファイルの読み方に任せる。
     同じく表に無いシェーダーで、マテリアルからは不透明としか読めず、m_CustomRenderQueue も -1（シェーダーの既定のまま）なら、
     シェーダーの RenderType / Queue タグから切り抜き・半透明を決める。マテリアルにカリングのプロパティが無く、
-    シェーダーが固定の ``Cull Off`` なら両面にする（#202）。
+    シェーダーが固定の ``Cull Off`` なら両面にする（#202）。表に無いシェーダーを定義と名前から補う処理と、その順番は
+    ``custom_shader.py`` にまとめてある。
     """
     table = table or default_table()
     dropped: list[str] = []
@@ -218,36 +219,19 @@ def normalize_material(
         mat, dropped = restrict_to_declared(mat, declared)
     profile, info = select_profile(mat, table)
     norm = profile.normalize(mat, info)
-    if defaults is not None and custom:
-        if norm.alpha_mode == "opaque" and mat.render_queue < 0 and defaults.alpha_mode is not None:
-            norm.alpha_mode = defaults.alpha_mode
-            norm.alpha_from_texture = True
-            if "_Cutoff" not in mat.floats and "_AlphaCutoff" in mat.floats:
-                # Amplify Shader Editor のテンプレートは _AlphaCutoff をしきい値にする（#235）
-                norm.alpha_cutoff = mat.f("_AlphaCutoff", norm.alpha_cutoff)
-        if defaults.cull_off and cull_backface(mat, default=None) is None:
-            norm.cull_backface = False
-        if "_EmissionColor" in defaults.hidden and norm.emission_tex is None:
-            # Amplify の URP テンプレートは、使わなくても白い _EmissionColor を隠して宣言する。発光として読まない（#235）
-            norm.emission_color = (0.0, 0.0, 0.0, 1.0)
-    if info is None:
-        # 表に無いシェーダーは、指紋で選んだプロファイルの名前でテクスチャが見つからなければ、自作シェーダーの名前でも探す
-        from .standard import (
-            GenericProfile, fill_emission_from_aliases, fill_gradient_color, fill_sole_texture, fill_textures_from_aliases,
-            scale_emission_by_alias,
-        )
+    # 表に無いシェーダー（自作の .shader / Shader Graph / Amplify など）を、シェーダーの定義と名前から補う（custom_shader.py）
+    from .custom_shader import apply_shader_defaults, fill_from_custom_names
+    from .standard import GenericProfile
 
-        display_names = defaults.display_names if defaults is not None else None
-        fill_textures_from_aliases(mat, norm, display_names)
-        if declared and custom:  # 前のシェーダーの残りを外したときだけ（残りがあると 1 枚に決められない）
-            fill_sole_texture(mat, norm, display_names)
-            fill_gradient_color(mat, norm)  # 同じく、前のシェーダーの色が残っていると組を決められない
-        # トゥーン系は発光の項目を各プロファイルが読む（名前の似た別の役割の項目を拾わない）。generic は自分で済ませている
-        if norm.lighting != "toon" and not isinstance(profile, GenericProfile):
-            if norm.has_emission:
-                scale_emission_by_alias(mat, norm)
-            else:
-                fill_emission_from_aliases(mat, norm)
+    if defaults is not None and custom:
+        apply_shader_defaults(mat, norm, defaults)
+    if info is None:
+        fill_from_custom_names(
+            mat, norm,
+            display_names=defaults.display_names if defaults is not None else None,
+            declared_known=bool(declared and custom),
+            generic=isinstance(profile, GenericProfile),
+        )
     if dropped:
         norm.extras["undeclared_properties"] = dropped
     return norm

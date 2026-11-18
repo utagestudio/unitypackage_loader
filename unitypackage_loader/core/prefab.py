@@ -105,8 +105,9 @@ class PrefabAnalysis:
     """
 
     tables: dict[str, dict[str, RendererMaterials]] = field(default_factory=dict)  # モデルの GUID → GameObject 名 → 行
-    # Unity の Mesh を使う Renderer（``PrimitivePlacement``）と、prefab のルートを原点にしたその GameObject のワールド行列（#216）
-    meshes: list[tuple[object, tuple]] = field(default_factory=list)
+    # Unity の Mesh を使う Renderer（``PrimitivePlacement``。#216）。候補の一覧で、この prefab を読み込めるかと
+    # 組むマテリアルを決めるのに使う（置き方はシーンと同じ処理が決める。#240）
+    meshes: list[object] = field(default_factory=list)
 
 
 def analyze_prefab(h: Hierarchy, placed: list[ModelPlacement]) -> PrefabAnalysis:

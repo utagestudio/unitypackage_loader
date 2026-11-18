@@ -15,7 +15,7 @@ from ..core.hierarchy import components as scene_components
 from ..core.lights import LIGHT_CAMERA_BASIS, convert_camera, convert_light
 from ..core.model_ids import PartMatch, PartMatcher
 from ..core.prefab import RendererMaterials
-from ..core.scene_import import PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
+from ..core.scene_import import KIND_PREFAB, KIND_SCENE, PlacedKind, PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
 from ..core.terrain import terrain_data_ref, terrain_local
 from ..core.transform import inverse_affine, multiply, unity_to_blender
 from ..core.unity_yaml import to_float
@@ -56,9 +56,9 @@ class SceneImport:
     同じ処理をコピーしていた。シーン 1 つ分の状態をこのクラスのフィールドにし、手順をメソッドに分けた（#198）。
     """
 
-    def __init__(self, session: _ImportSession, scene_summary: SceneSummary, kind: str = "scene"):
+    def __init__(self, session: _ImportSession, scene_summary: SceneSummary, kind: PlacedKind = KIND_SCENE):
         self.session = session
-        # "scene" か "prefab"（読む単位 Prefabs で、prefab の中の配置をシーンと同じく再現する。#240）
+        # KIND_SCENE か KIND_PREFAB（読む単位 Prefabs で、prefab の中の配置をシーンと同じく再現する。#240）
         self.kind = kind
         self.opts = session.opts
         self.report = session.report
@@ -79,7 +79,7 @@ class SceneImport:
         self.session.collection.children.link(self.target)
         self.target[f"unity_{self.kind}"] = self.pathname
         self.target[f"unity_{self.kind}_guid"] = self.summary.guid
-        if self.kind == "prefab":
+        if self.kind == KIND_PREFAB:
             self.report.prefabs.append(self.pathname)
             self.session.prefab_collections.append(self.target)
         else:
