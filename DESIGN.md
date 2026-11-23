@@ -602,6 +602,8 @@ unitypackage_loader/
 │   └─ preferences.py
 ├─ core/                         # bpy 非依存。純 Python で単体テスト可能
 │   ├─ package.py                # tar 走査・索引・オンデマンド展開
+│   ├─ model_contents.py         # 走査のときにモデルの中身から覚える FBX のノード名・マテリアル名、OBJ のグループ名
+│   ├─ nested_package.py         # 入れ子の .unitypackage の選び方と、外側のアセットとの結合（#217）
 │   ├─ unity_yaml.py             # Unity YAML サブセットパーサー
 │   ├─ unity_binary.py           # バイナリ形式の SerializedFile リーダー（TypeTree 付き）
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り

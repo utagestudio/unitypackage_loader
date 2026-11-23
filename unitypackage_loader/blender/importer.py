@@ -28,7 +28,8 @@ from ..core.mapping import expected_materials, material_textures
 from ..core.meta import strip_numeric_suffix
 from ..core.model_ids import PartMatcher, fbx_node_names
 from ..core.model_space import axis_correction
-from ..core.package import AssetEntry, PackageError, UnityPackage, default_nested_package, merge_nested_package
+from ..core.nested_package import default_nested_package, merge_nested_package
+from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import RendererMaterials, has_pending_renderers, resolve_model_renderers
 from ..core.report import ImportReport
 from ..core.scene_import import KIND_PREFAB, KIND_SCENE, PlacedKind, parts_to_remove

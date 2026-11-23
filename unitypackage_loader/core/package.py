@@ -15,14 +15,13 @@ import hashlib
 import json
 import os
 import shutil
-import struct
 import tarfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from .meta import MetaInfo, legacy_meta
-from .model_ids import parse_fbx_material_names, parse_fbx_node_names, parse_fbx_top_nodes
+from .model_contents import note_model_contents
 
 __all__ = [
     "AssetEntry",
@@ -165,7 +164,7 @@ def _save_record(dest_root: Path, files: dict[str, object]) -> None:
         pass
 
 
-def _split_member(name: str) -> tuple[str, str] | None:
+def split_member(name: str) -> tuple[str, str] | None:
     """tar メンバー名を (guid, part) に分ける。想定外の形なら None。"""
     parts = [p for p in name.split("/") if p not in ("", ".")]
     if len(parts) != 2:
@@ -311,48 +310,10 @@ def _open_for_write(target: Path):
     return os.fdopen(os.open(target, flags, 0o644), "wb")
 
 
-def obj_group_names(data: bytes) -> list[str]:
-    """OBJ のグループ（``g`` の行）の名前。Unity はグループごとにメッシュを作り、グループが無ければ ``default`` 1 つにする（#214）。"""
-    names: dict[str, None] = {}
-    for line in data.splitlines():
-        if line.startswith(b"g ") or line.startswith(b"g\t"):
-            name = line[2:].strip().decode("utf-8", "replace")
-            if name:
-                names.setdefault(name, None)
-    return list(names)
-
-
-def _note_fbx(entry: AssetEntry, data: bytes) -> None:
-    """FBX の中身から、ノードが 1 つだけならその名前を、最上位のノードが 1 つだけならその名前を覚える（#181 / #185）。
-
-    マテリアルの名前も覚える（読み込む前に、使う .mat とテクスチャを決めるため。#164）。OBJ はグループの名前を覚える（#214）。
-    """
-    if entry.ext == ".obj":
-        entry.obj_groups = obj_group_names(data)
-        return
-    if entry.ext != ".fbx":
-        return
-    try:
-        names = parse_fbx_node_names(data)
-        tops = parse_fbx_top_nodes(data)
-    except (ValueError, IndexError, struct.error):
-        return
-    try:
-        entry.fbx_materials = parse_fbx_material_names(data) if names else None
-    except (ValueError, IndexError, struct.error):
-        entry.fbx_materials = None
-    if names and sum(names.values()) == 1:
-        entry.fbx_sole_node = next(iter(names))
-    if tops is not None and len(tops) == 1:
-        entry.fbx_top_node = tops[0]
-    elif tops:
-        entry.fbx_top_nodes = tuple(tops)
-
-
 def _drop_cache(entry: AssetEntry) -> None:
-    """キャッシュしない拡張子の実体を捨てる。捨てる前に FBX のノード名だけ見ておく。"""
+    """キャッシュしない拡張子の実体を捨てる。捨てる前に FBX のノード名などを見ておく（``model_contents``）。"""
     if entry._cache is not None:
-        _note_fbx(entry, entry._cache)
+        note_model_contents(entry, entry._cache)
     entry._cache = None
 
 
@@ -381,62 +342,6 @@ def _settle_legacy_meta(entry: AssetEntry, warnings: list[str]) -> None:
         warnings.append(f"ignored metaData of {entry.pathname}: {exc}")
 
 
-# 入れ子のパッケージを選ばなかったときに優先する中身（Blender のマテリアルにもっとも近い Built-in のもの。#217）
-_NESTED_PREFERRED = ("builtin", "built-in", "birp", "standard", "3d")
-
-
-def default_nested_package(entries: list[AssetEntry]) -> AssetEntry:
-    """入れ子のパッケージのうち、選ばなかったときに読むもの（Built-in 向けらしい名前のもの、無ければ pathname 順の最初）。"""
-    for entry in entries:
-        if any(key in PurePosixPath(entry.pathname).stem.lower() for key in _NESTED_PREFERRED):
-            return entry
-    return entries[0]
-
-
-# 外側のパッケージにあっても読み込みに使わないもの（説明書など）
-_DOCUMENT_EXTS = frozenset({".txt", ".pdf", ".md", ".rtf", ".html", ".htm", ".url"})
-
-
-def merge_nested_package(outer: "UnityPackage", inner_path: Path, dest: Path) -> Path | None:
-    """入れ子のパッケージ ``inner_path`` に、外側のパッケージのアセット（入れ子のパッケージと説明書を除く）を足した
-    パッケージを ``dest`` に書く。外側に足すものが無ければ書かずに None。
-
-    中身の prefab が外側のメッシュやテクスチャを使うことがある（Conifers BOTD の BIRP / URP / HDRP の中身は prefab とマテリアルだけで、
-    メッシュは外側の Sources にある。#217）。中身にある GUID は中身のものを使う。``dest`` が両方より新しければ書き直さない。
-    """
-    outer._require_scan()
-    extra = {
-        e.guid for e in outer.entries.values()
-        if e.has_asset and e.ext != ".unitypackage" and e.ext not in _DOCUMENT_EXTS
-    }
-    if not extra:
-        return None
-    if dest.is_file() and dest.stat().st_mtime >= max(inner_path.stat().st_mtime, outer.path.stat().st_mtime):
-        return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_name(dest.name + ".partial")
-    inner_guids: set[str] = set()
-    try:
-        with tarfile.open(partial, "w:gz", compresslevel=1) as out:
-            for source, wanted in ((inner_path, None), (outer.path, extra)):
-                with tarfile.open(source, "r:*") as tar:
-                    for member in tar:
-                        split = _split_member(member.name)
-                        if split is None or not member.isfile():
-                            continue
-                        guid = split[0]
-                        if wanted is None:
-                            inner_guids.add(guid)
-                        elif guid not in wanted or guid in inner_guids:
-                            continue
-                        out.addfile(member, tar.extractfile(member))
-        partial.replace(dest)
-    except (tarfile.TarError, EOFError, OSError) as exc:
-        partial.unlink(missing_ok=True)
-        raise PackageError(f"cannot combine {inner_path.name} with {outer.path.name}: {exc}") from exc
-    return dest
-
-
 def human_size(size: float) -> str:
     """バイト数を「12.3 MiB」のような表記にする（警告文とダイアログで使う）。"""
     for unit in ("B", "KiB", "MiB", "GiB"):
@@ -462,7 +367,7 @@ class UnityPackage:
         try:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
-                    split = _split_member(member.name)
+                    split = split_member(member.name)
                     if split is None or not member.isfile():
                         continue
                     guid, part = split
@@ -497,7 +402,7 @@ class UnityPackage:
                             if not known:
                                 held = entry
                         elif member.size <= _READ_ASSET_MAX_SIZE and entry.ext in (".fbx", ".obj"):
-                            _note_fbx(entry, tar.extractfile(member).read())
+                            note_model_contents(entry, tar.extractfile(member).read())
                     if progress is not None:
                         progress(0.0, entry.pathname or guid)
         except (tarfile.TarError, EOFError, OSError) as exc:
@@ -590,7 +495,7 @@ class UnityPackage:
         try:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
-                    split = _split_member(member.name)
+                    split = split_member(member.name)
                     if split and split[0] == entry.guid and split[1] == "asset":
                         if member.size > limit:  # 索引と食い違う場合の保険
                             raise PackageError(f"{target} is too large to read into memory ({member.size} bytes)")
@@ -624,7 +529,7 @@ class UnityPackage:
         try:
             with tarfile.open(self.path, "r:*") as tar:
                 for member in tar:
-                    split = _split_member(member.name)
+                    split = split_member(member.name)
                     if split and split[1] == "asset" and split[0] in wanted and member.size <= _read_limit(self.entries[split[0]]):
                         result[split[0]] = tar.extractfile(member).read()
                         wanted.discard(split[0])
@@ -699,7 +604,7 @@ class UnityPackage:
         done = 0
         with tarfile.open(self.path, "r:*") as tar:
             for member in tar:
-                split = _split_member(member.name)
+                split = split_member(member.name)
                 if not split or split[1] != "asset" or split[0] not in pending:
                     continue
                 target = pending.pop(split[0])
