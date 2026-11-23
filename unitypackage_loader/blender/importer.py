@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 from ..core.fbx_units import read_axes
 from ..core.decals import Decal, decal_from_body
@@ -26,6 +27,7 @@ from ..core.lights import PIPELINE_HDRP
 from ..core.mapping import expected_materials, material_textures
 from ..core.meta import strip_numeric_suffix
 from ..core.model_ids import PartMatcher, fbx_node_names
+from ..core.model_space import axis_correction
 from ..core.package import AssetEntry, PackageError, UnityPackage, default_nested_package, merge_nested_package
 from ..core.prefab import RendererMaterials, has_pending_renderers, resolve_model_renderers
 from ..core.report import ImportReport
@@ -63,7 +65,7 @@ from .prepare import (
     prepare_package,
 )
 from .scene_objects import (
-    arrange_collections, axis_correction, find_layer_collection, hide_objects,
+    arrange_collections, find_layer_collection, hide_objects,
     move_collection_contents, remove_parts,
 )
 from .scene_placement import SceneImport
@@ -619,7 +621,7 @@ class _ImportSession:
             if correction is not None:
                 for obj in target.all_objects:
                     if obj.parent is None:
-                        obj.matrix_basis = correction @ obj.matrix_basis
+                        obj.matrix_basis = Matrix(correction) @ obj.matrix_basis
         return delegated
 
     def fbx_node_names_of(self, model: AssetEntry):

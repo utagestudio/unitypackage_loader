@@ -17,6 +17,7 @@ from ..core.model_ids import PartMatch, PartMatcher
 from ..core.prefab import RendererMaterials
 from ..core.scene_import import KIND_PREFAB, KIND_SCENE, PlacedKind, PlacementStats, parts_to_hide, scene_warnings, unused_in_placement
 from ..core.terrain import terrain_data_ref, terrain_local
+from ..core.model_space import ModelUnits
 from ..core.transform import inverse_affine, multiply, unity_to_blender
 from ..core.unity_yaml import to_float
 from ..core.units import SceneSummary
@@ -25,7 +26,6 @@ from .model_import import node_name
 from .unity_meshes import make_mesh_object
 from .prepare import ModelSummary
 from .scene_objects import (
-    ModelUnits,
     SceneTemplate,
     apply_collapsed_root,
     apply_node_transforms,
