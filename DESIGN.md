@@ -32,7 +32,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 | FBX | 1 | Blender から書き出されたもの。テクスチャは **埋め込まれていない** |
 | .mat | 数個 | 全て **lilToon** 系シェーダー |
 | PNG | 数十枚 | メイン / ノーマル / MatCap / マスク。加えて Expression メニュー用アイコン（無関係） |
-| .prefab / .controller / .anim / .asset | 多数 | 全て対象外 |
+| .prefab / .controller / .anim / .asset | 多数 | 当初は全て対象外（prefab は後に配置を、Generic な .anim は #209 で Action を読むようにした） |
 
 ### 0.3 「どのメッシュにどのマテリアルが付くか」の情報源
 
@@ -313,9 +313,10 @@ Material:
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
+- アニメーションクリップ: Generic な `.anim` のシェイプキー・表示の切り替え・オブジェクトの Transform を、クリップごとの Action にしてミュートした NLA トラックに並べる（§4.7.1。#209）。
 
 ### 読み込まない
-- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
+- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、Animator Controller（`.controller`）と Humanoid の `.anim`・ボーンのカーブ（§4.7.1）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
 
 ### マテリアルの対応方針
 Unity と 1:1 は不可能なので、**「Unity マテリアル → シェーダー非依存の中間表現（NormalizedMaterial）→ Blender ノード」** の 2 段変換にし、シェーダーごとの差は「プロファイル」に閉じ込める（§4.5）。
@@ -364,6 +365,7 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | FBX Importer | Enum: `Auto` / `New (C++)` / `Legacy (Python)` = `Auto` | `Auto` と New は `wm.fbx_import`、Legacy だけ `import_scene.fbx`。Scale（常に表示）はモデルのインポーターに渡す |
 | Import Animation / Ignore Leaf Bones | Bool = OFF / ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
+| Animation Clips | Bool = ON | パッケージの Generic な `.anim` を Action にし、ミュートした NLA トラックで並べる（§4.7.1。読み込んだ直後の見た目は変わらないので既定 ON） |
 
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
@@ -561,6 +563,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   - Objects / Materials / Textures の一覧
   - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、読めない画像（統合した画像の無い PSD など）
   - 「Open extract folder」「Copy log」ボタン
+- アニメーションクリップを Action にしたら、その数を要約と N パネルに出し、読まなかったクリップ・カーブの内訳はコンソール（`as_text`）に出す（§4.7.1）
 - 警告はインポートを止めず、可能なところまで進めて記録する。
 
 ### 3.5 アドオン Preferences
@@ -621,6 +624,8 @@ unitypackage_loader/
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
 │   ├─ model_space.py            # 置いたモデルの行列（FBX の単位と軸 ModelUnits、ノードへの上書き、Renderer の位置。#263）
+│   ├─ animation.py              # AnimationClip（.anim）の読み取り、カーブの評価・ベジェのハンドル、オイラー角（#209）
+│   ├─ animation_targets.py      # クリップの階層パスを、読み込んだオブジェクトとボーンに結び付ける（#209）
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
@@ -650,6 +655,7 @@ unitypackage_loader/
 │   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・Terrain・デカール・ライト・カメラ）
 │   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
 │   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
+│   ├─ animation.py              # クリップの Action と NLA トラック（ClipImporter。#209）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の当てはめ（計算は core/model_space.py）・非表示
 │   ├─ materials.py              # ノード生成
@@ -660,6 +666,7 @@ unitypackage_loader/
 └─ tests/
     ├─ test_*.py                 # unittest（bpy 不要）
     ├─ unity_yaml_writer.py      # テストと合成パッケージの生成で使う、Unity の YAML を組み立てる関数
+    ├─ anim_writer.py            # 同じく AnimationClip（.anim）の YAML を組み立てる関数
     ├─ make_synthetic_*.py       # 合成パッケージの生成（Blender で実行）
     ├─ integration_import.py     # blender -b --python で実行し、期待値 JSON と照合する
     ├─ integration_runs.json     # 合成パッケージの生成スクリプトと、どのパッケージをどの期待値で回すかの一覧
@@ -1001,7 +1008,7 @@ def resolve(model_entry, fbx_material_names, index) -> dict[str, str | None]:
 
 1 回の読み込みは `_ImportSession`（`importer.py`）が手順を並べる: 解析（`analyze`）→ 読み込むモデルの決定 → 展開（`extract`）→
 画像の読み込み → prefab のグループごと（`import_group`）かシーンごと（`SceneImport`。`scene_placement.py`）のモデルの読み込み →
-足りなかったテクスチャの補い（`fill_missed_textures`）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
+足りなかったテクスチャの補い（`fill_missed_textures`）→ アニメーションクリップ（`import_clips`。§4.7.1）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
 モデルファイルの読み込みは `model_import.py` にある。以前は `importer.py` 1 つ（約 1,900 行）だったのを、役割ごとに分けた（#198）。
 下の擬似コードは最初の設計で、流れを示すもの。
 
@@ -1050,6 +1057,46 @@ def run(ctx, filepath, opts) -> Report:
 - FBX は新しい C++ のインポーター（`bpy.ops.wm.fbx_import`。Blender 4.5 で追加）を使う。オプションで Legacy を選んだときだけ、Python 製の `bpy.ops.import_scene.fbx` を使う。
   `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。
 - Blender 4.x の `bpy.data.materials.new()` はノードツリーを持たない（5.0 以降は持つ）。こちらで作るマテリアル（スロット分割・アウトライン）は、組み立ての前に `use_nodes` を立てる。
+
+### 4.7.1 アニメーションクリップ（#209）
+
+パッケージの `.anim`（AnimationClip）を、読み込んだオブジェクトの Action にする。Animator Controller は読まない。
+
+- **解析**（`core/animation.py`）: `parse_clip` は YAML でもバイナリ（Force Binary）でも `load_documents` で読み、`m_PositionCurves` /
+  `m_RotationCurves` / `m_EulerCurves` / `m_ScaleCurves`（成分ごとの `Curve` に分ける）と `m_FloatCurves` のうち、シェイプキー
+  （classID 137 の `blendShape.*`）、GameObject の `m_IsActive`、Renderer の `m_Enabled` を返す。実行時のカーブが無いクリップは
+  `m_EditorCurves` を読む。Animator（classID 95）のパスの無いカーブで、マッスル値やルートの動き（`RootT.x`、`Left Arm Down-Up`、
+  `LeftHand.Thumb.1 Stretched` など）の名前のものがあれば Humanoid とし、そのカーブは読まない（ほかのカーブは読む）。
+  マテリアルのプロパティ・Animator のパラメーター・オブジェクト参照のカーブは数だけ数える。壊れた入力には `AnimationParseError`（ValueError）だけを送る。
+- **評価**: キーの間はエルミート（weighted のキーは重みの長さのハンドルの 3 次ベジェ）、接線が無限大の区間は前のキーの値のまま。
+  `bezier_handles` はエルミートの接線を 1/3 の長さのハンドルにして Blender のベジェにする（同じ曲線になる）。
+  オイラー角は Unity の `m_RotationOrder`（既定 4 = ZXY。Z → X → Y の順に回す。`Quaternion.Euler` と同じ）でクォータニオンにする。
+- **対象の決め方**（`core/animation_targets.py`）: クリップは Animator を付けた GameObject からの相対パスしか持たないので、読み込んだ階層
+  （パッケージのコレクションの全オブジェクト）で、パスがいちばん多く解決できるオブジェクトをルートとみなす。Models 単位のように
+  ルートのオブジェクトが無いときは、コレクションごとの最上位のオブジェクトの集まりをルートの候補にする。解決できたパスが半分に満たなければ付けない。
+  同じだけ解決できるルートはすべて対象にする（シーンに同じモデルを複数置いたとき）。ただし別のルートの子孫は外す（prefab の GameObject と、その下に置いた
+  FBX の同じ名前のノードを、両方動かさない。Super Cub の prefab で見つけた）。名前は完全一致 → 連番を外した形が 1 つだけの順で引き、
+  Blender の FBX インポーターがアーマチュアの子にしたスキンメッシュは、Unity と同じくアーマチュアの親の子としても引く。アーマチュアの下はボーン名でたどる。
+  読み込み側が足した Empty（FBX のルートなど）で一致しなければ、Empty の子を 1 段だけ探す。空のパス（ルート自身）だけのクリップは、
+  どのオブジェクトのものか決められないので付けない（Medieval Village の風車など。Animator Controller から引けば決められるが、今は読まない）。
+- **Action と NLA**（`blender/animation.py`）: クリップごとに Action を 1 つ作り（`unity_clip_guid` / `unity_clip_path`）、対象のデータブロック
+  （オブジェクトかシェイプキーの Key）ごとにスロットを作る（Blender 4.4 以降のスロット付き Action）。対象ごとにクリップの名前の NLA トラックを
+  ミュートで足すので、読み込んだ直後の見た目は変わらない。キーはクリップの開始からの秒 × シーンのフレームレートで、ストリップはシーンの開始フレームに置く。
+  ループするクリップ（`m_LoopTime`）の F カーブには Cycles モディファイアーを付ける。
+  - シェイプキー: 値を 1/100 にしてキーと接線をそのままベジェにする。100 を超える重みは `slider_max` を広げる。
+  - 表示: `hide_viewport` / `hide_render` を階段（CONSTANT）で、値が 0.5 未満なら隠す。`m_IsActive` は Unity の階層での子孫にも当てる
+    （スキンメッシュはアーマチュアの子孫にしない）。
+  - Transform: 時刻ごと（フレームごとと、キーの時刻）に Unity のローカルの値を求め、`core/model_space.local_basis` でオブジェクトの行列にして、
+    位置・回転（オブジェクトの回転モード。オイラー角は前のフレームに近い値）・スケールの LINEAR のキーにする。行列の対応 basis = left·L·right は、
+    FBX の最上位のノード（親が配置の Empty か無し）が C·L·A（`node_basis` と同じ）、親も同じモデルの FBX のノードなら A⁻¹·L·A（親子とも C·W·A のため）、
+    シーン・prefab の GameObject の Empty と Unity の Mesh・組み込みメッシュのオブジェクトが C·L·C⁻¹。A はモデルの `ModelUnits.basis_a` で、
+    オブジェクトに残した元のモデルの GUID（`unity_model_guid`）から引く。スキンメッシュ・ボーンの子・ライト・カメラ・Terrain・デカールは
+    Unity と親子や形が違うので当てずに数える。アニメーションしない成分は元の値（オイラー角は元の回転を同じ順のオイラー角にした値）を使う。
+  - ボーンのカーブは読み込まない（#270。FBX インポーターがボーンの軸を付け替えるので、レスト姿勢の差の補正が要る）。
+- **レポート**: 読み込んだクリップの数を要約に、読まなかったものの内訳（Humanoid、ボーンだけ、ルートだけ、当てはまらない、対象が無いカーブ）を
+  `clip_notes` に出す（警告にはしない）。
+- Python から `NlaTrack.mute` を切り替えても依存関係は組み直されず、一度評価したトラックは切り替わらない（NLA エディターでの切り替えでは組み直される）。
+  統合テストはコレクションを付け外しして組み直させてから値を確かめる。
 
 ### 4.8 `blender/textures.py`
 

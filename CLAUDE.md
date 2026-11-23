@@ -8,7 +8,8 @@
 
 - メッシュ（アーマチュア・シェイプキー込み）に、Unity 側のマテリアル設定とテクスチャを反映した状態で読み込む。
 - Unity と Blender のマテリアルは 1:1 に対応しないので「参考にできる値だけ」を反映し、残りはカスタムプロパティに保存する。
-- シェーダー本体、C#、アニメーション、prefab 階層、Expression メニュー等は読み込まない。
+- シェーダー本体、C#、Humanoid のアニメーション・ボーンのカーブ・Animator Controller、Expression メニュー等は読み込まない。
+  Generic な `.anim`（シェイプキー・表示の切り替え・オブジェクトの Transform）は、ミュートした NLA トラックの Action にする（`core/animation.py`。#209）。
 
 ## 設計の要点（詳細は DESIGN.md）
 
@@ -47,7 +48,7 @@
 ```
 unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
-  blender/                bpy 依存（importer / options / log / prepare / model_import / session_materials / scene_placement / scene_objects / terrain / unity_meshes / materials / nodes / textures / toon_group / outline）
+  blender/                bpy 依存（importer / options / log / prepare / model_import / session_materials / scene_placement / scene_objects / terrain / unity_meshes / animation / materials / nodes / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
