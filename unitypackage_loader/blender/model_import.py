@@ -51,6 +51,8 @@ def remove_created(before: dict[str, set[str]]) -> None:
 # 同じ名前のオブジェクトがあると、Blender は新しいほうの名前を付け替える。ノード名がもともと Blender の連番の形
 # （Plane.010 など）だと、連番を外しても元の名前に戻せないので、読み込んだときの名前をここに残し、Unity のデータとの照合に使う
 FBX_NODE_PROP = "unity_fbx_node"
+# 読み込んだオブジェクトの元のモデルの GUID。クリップの Transform を当てるときに、モデルの単位と軸を引く（#209）
+MODEL_GUID_PROP = "unity_model_guid"
 
 
 def node_name(obj: bpy.types.Object) -> str:

@@ -37,9 +37,12 @@ from ..core.unity_yaml import parse_documents
 from ..core.unity_binary import load_documents
 from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
+from .animation import ClipImporter
+from .animation import report_lines as clip_report_lines
 from .log import record_failure, warn_skipped
 from .model_import import (
     FBX_NODE_PROP,
+    MODEL_GUID_PROP,
     adopt_into_collection,
     delegate_to_vrm_addon,
     import_model_file,
@@ -302,12 +305,21 @@ class _ImportSession:
                 done += 1
         self.fill_missed_textures()
         self.materials.warn_slotless()
+        if self.opts.import_clips:
+            self.step(0.96, "Importing animation clips")
+            self.import_clips()
         hide_objects(self.context, [obj for obj in self.hidden_objects if not is_removed(obj)])
         if self.opts.arrange == "SIDE_BY_SIDE" and len(self.prefab_collections) > 1:
             arrange_collections(self.context, self.prefab_collections)
 
         self.collection["unity_package"] = self.package_path.name
         self.step(1.0, "Done")
+
+    def import_clips(self) -> None:
+        """パッケージの AnimationClip を Action にして、読み込んだオブジェクトの NLA にミュートで並べる（#209）。"""
+        stats = ClipImporter(self, self.collection).run()
+        self.report.clips.extend(stats.loaded)
+        self.report.clip_notes.extend(clip_report_lines(stats))
 
     def analyze(self) -> None:
         """パッケージを解析し（ダイアログで解析済みなら使う）、解析中の警告と読み込めないモデルをレポートに写す。"""
@@ -564,6 +576,7 @@ class _ImportSession:
         new = new_since(before)
         adopt_into_collection(new, self.scene, target)
         for obj in new["objects"]:
+            obj[MODEL_GUID_PROP] = model.guid
             if obj.type == "ARMATURE":
                 # メッシュを覆って見づらいので、オブジェクトの表示を線にする（Object > Viewport Display > Display As。#260）。
                 # ボーンの形（Data の Display As）は変えない

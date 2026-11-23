@@ -48,6 +48,17 @@ if TYPE_CHECKING:
     from .importer import _ImportSession
 
 
+
+def model_units(summary: ModelSummary, path) -> ModelUnits | None:
+    """モデルの FBX の単位と軸（配置の計算の fileScale と軸の変換に使う。#53 / #240）。FBX 以外は None。"""
+    if summary.entry.ext != ".fbx":
+        return None
+    # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
+    unit = summary.info.unity_unit_scale(read_unit_scale(path))
+    # 軸の変換を考えるのは Bake Axis Conversion を入れたモデルだけ（入れていなければ Y が上と同じに扱って合う。#240）
+    axes = read_axes(path) if summary.info.bake_axis_conversion else None
+    return ModelUnits(unit, axes, summary.info.global_scale)
+
 class SceneImport:
     """シーン 1 つの読み込み（``_ImportSession.import_scene``）。
 
@@ -129,15 +140,7 @@ class SceneImport:
     def unit_scale(self, summary: ModelSummary) -> ModelUnits | None:
         """モデルの FBX の単位と軸（配置の計算の fileScale と軸の変換に使う。#53 / #240）。FBX 以外は None。"""
         if summary.guid not in self.unit_scales:
-            path = self.session.paths[summary.guid]
-            if summary.entry.ext == ".fbx":
-                # Unity 4 のモデルは読み込みで Unity と同じ大きさにしてあるので、fileScale を m_GlobalScale にする（#233）
-                unit = summary.info.unity_unit_scale(read_unit_scale(path))
-                # 軸の変換を考えるのは Bake Axis Conversion を入れたモデルだけ（入れていなければ Y が上と同じに扱って合う。#240）
-                axes = read_axes(path) if summary.info.bake_axis_conversion else None
-                self.unit_scales[summary.guid] = ModelUnits(unit, axes, summary.info.global_scale)
-            else:
-                self.unit_scales[summary.guid] = None
+            self.unit_scales[summary.guid] = model_units(summary, self.session.paths[summary.guid])
         return self.unit_scales[summary.guid]
 
     # --- モデルの配置 ---
