@@ -35,8 +35,11 @@ from unitypackage_loader.core.shader_source import declared_properties, shader_d
 from unitypackage_loader.core.terrain import read_terrain_data, read_terrain_layer, terrain_mesh
 from unitypackage_loader.core.unity_binary import load_documents
 from tests.terrain_writer import terrain_data_asset, terrain_layer_yaml
+from tests.anim_writer import clip_yaml
 from tests.unity_mesh_writer import mesh_document
 from unitypackage_loader.core.unity_mesh import read_mesh
+from unitypackage_loader.core.animation import bezier_handles, parse_clip, sample_times, transform_spec
+from unitypackage_loader.core.animation_targets import TargetObject, TargetTree, bind_paths
 
 SEED = 20260915
 ROUNDS = 80  # フィクスチャ 1 つあたりの壊し方の数
@@ -287,6 +290,30 @@ class ParserFuzzTest(unittest.TestCase):
                                  alphamaps=[(2, 2, bytes(16))], argb=True)
         self.fuzz("old terrain data", run_terrain, old, mutate_bytes)
         self.fuzz("terrain layer", read_terrain_layer, terrain_layer_yaml("Road", "c" * 32, "d" * 32), mutate_text)
+
+    def test_animation_clip(self):
+        # AnimationClip（#209）。読めたクリップは、カーブの評価・ハンドル・Transform の値・パスの照合まで通す
+        tree = TargetTree([TargetObject("r", "Root"), TargetObject("b", "Body", "r"), TargetObject("d", "Door", "r")])
+
+        def run_clip(data) -> None:
+            clip = parse_clip(data)
+            bind_paths(tree, clip.paths)
+            for curve in clip.curves:
+                bezier_handles(curve.keys, 0.01)
+            for time in sample_times(clip.curves, clip.start, clip.stop, 30)[:50]:
+                transform_spec(clip.curves, time, (0.0, 0.0, 0.0, 1.0))
+
+        inf = float("inf")
+        text = clip_yaml(
+            "Fuzz",
+            float_curves=[("Body", "blendShape.smile", 137, [(0, 0, 0, 0), (1, 100, 0, 0, 3, 0.2, 0.7)]),
+                          ("Door", "m_IsActive", 1, [(0, 1, inf, inf)])],
+            vector_curves={"m_EulerCurves": [("Door", [(0, (0, 0, 0), (0, 0, 0), (0, 0, 0)), (1, (0, 90, 0), (0, 0, 0), (0, 0, 0))])],
+                           "m_RotationCurves": [("Door", [(0, (0, 0, 0, 1), (0, 0, 0, 0), (0, 0, 0, 0))])]},
+            pptr=1,
+        )
+        self.fuzz("animation clip", run_clip, text, mutate_text)
+        self.fuzz("animation clip bytes", run_clip, text.encode("utf-8"), mutate_bytes)
 
     def test_fbx_node_names(self):
         # 表の無いモデルの中への上書きの対象を決めるときに読む、FBX のノード名（#31）

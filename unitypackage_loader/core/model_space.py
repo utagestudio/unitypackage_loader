@@ -19,7 +19,6 @@ from dataclasses import dataclass
 
 from .fbx_units import blender_axis_matrix, unity_axis_matrix
 from .transform import (
-    BLENDER_TO_UNITY,
     IDENTITY,
     UNITY_TO_BLENDER,
     Mat4,
@@ -135,14 +134,29 @@ def node_basis(basis: Mat4, spec: dict, basis_a: Mat4) -> Mat4:
     Unity 6 が読んだノードの値と突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分は
     その値のまま使う。
     """
-    location, rotation, scale = decompose(chain((BLENDER_TO_UNITY, basis, _inverse(basis_a))))
-    values = {"position": list(location), "rotation": list(rotation), "scale": list(scale)}
+    return local_basis(basis, spec, UNITY_TO_BLENDER, basis_a)
+
+
+def local_values(basis: Mat4, left: Mat4, right: Mat4) -> tuple[list[float], list[float], list[float]]:
+    """行列 basis = left·L·right の、Unity のローカルの値 L（位置, 回転のクォータニオン, スケール）。"""
+    location, rotation, scale = decompose(chain((_inverse(left), basis, _inverse(right))))
+    return list(location), list(rotation), list(scale)
+
+
+def local_basis(basis: Mat4, spec: dict, left: Mat4, right: Mat4) -> Mat4:
+    """basis = left·L·right の L の成分を ``spec`` で置き換えた行列（``node_basis`` は left = C、right = A）。
+
+    FBX の中で親が FBX のノードのオブジェクトは left = A⁻¹、right = A（親子とも C·W·A の形のため）。
+    シーンの GameObject の Empty は left = C、right = C⁻¹（#209 のアニメーションで使う）。
+    """
+    location, rotation, scale = local_values(basis, left, right)
+    values = {"position": location, "rotation": rotation, "scale": scale}
     for key, current in values.items():
         for index, value in enumerate(spec.get(key, [])):
             if value is not None and index < len(current):
                 current[index] = value
     local = trs(tuple(values["position"]), tuple(values["rotation"]), tuple(values["scale"]))  # type: ignore[arg-type]
-    return chain((UNITY_TO_BLENDER, local, basis_a))
+    return chain((left, local, right))
 
 
 def collapsed_root(basis: Mat4, spec: dict, basis_a: Mat4) -> tuple[Mat4, Mat4]:
