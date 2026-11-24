@@ -2,6 +2,8 @@
 
 English | [日本語](README_ja.md) | [Website](https://utagestudio.github.io/unitypackage_loader/) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
+Developed by [UTAGE.STUDIO](https://utage.studio/)
+
 A Blender Extension that imports `.unitypackage` files directly from File > Import, placing meshes
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 

@@ -2,6 +2,8 @@
 
 日本語 | [English](README.md) | [紹介ページ](https://utagestudio.github.io/unitypackage_loader/ja/) | [GitHub](https://github.com/utagestudio/unitypackage_loader)
 
+制作: [UTAGE.STUDIO](https://utage.studio/)
+
 `.unitypackage` を Blender の File > Import から直接読み込み、メッシュ（アーマチュア・シェイプキー込み）に
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
