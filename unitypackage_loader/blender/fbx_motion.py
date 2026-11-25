@@ -15,6 +15,7 @@ Unity はモデルの .meta の ``clipAnimations`` で、テイクから名前�
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -63,6 +64,7 @@ class _Clip:
     action: bpy.types.Action
     start: float  # Blender のフレーム（Action の中の範囲）
     end: float
+    loop: bool = False
 
 
 def _slot_owner(slot, objects: list[bpy.types.Object]):
@@ -184,7 +186,7 @@ class MotionBuilder:
                 if count:
                     self.stats.state += 1
                 continue
-            clips.append(_Clip(setting.name, action, setting.first_frame + ANIM_OFFSET, setting.last_frame + ANIM_OFFSET))
+            clips.append(_Clip(setting.name, action, setting.first_frame + ANIM_OFFSET, setting.last_frame + ANIM_OFFSET, setting.loop))
         return clips
 
     def _add_track(self, owner: bpy.types.ID, clip: _Clip, slot) -> None:
@@ -196,7 +198,21 @@ class MotionBuilder:
         if strip.action_slot != slot:
             strip.action_slot = slot
         set_strip_range(strip, clip.start, clip.end)
+        if clip.loop:
+            loop_strip(strip, self.scene)
         track.mute = not active
+
+
+def loop_strip(strip, scene: bpy.types.Scene) -> None:
+    """ループするクリップ（Unity の Loop Time）のストリップを、シーンのフレーム範囲の終わりまで繰り返す。
+
+    NLA はストリップの範囲の外を評価しない（Action の Cycles モディファイアーは範囲の中でしか働かない）ので、繰り返しの回数で表す。
+    """
+    length = strip.action_frame_end - strip.action_frame_start
+    if length <= 0:
+        return
+    span = scene.frame_end - strip.frame_start + 1
+    strip.repeat = float(max(1, math.ceil(span / length)))
 
 
 def set_strip_range(strip, start: float, end: float) -> None:
@@ -304,6 +320,7 @@ def copy_track(animation_data, track, strip, action: bpy.types.Action) -> None:
     if slot is not None and new_strip.action_slot != slot:
         new_strip.action_slot = slot
     set_strip_range(new_strip, strip.action_frame_start, strip.action_frame_end)
+    new_strip.repeat = strip.repeat
     new_track.mute = track.mute or has_active
 
 
