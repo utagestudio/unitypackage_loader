@@ -8,7 +8,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 (including armatures and shape keys) with the material settings and textures from the Unity side applied.
 
 - Supported Blender: 4.5 or later (developed on 5.2 LTS, tested on 4.5 LTS and 5.2 LTS)
-- What is imported: FBX / OBJ / glTF / VRM / Collada (Blender 4.5 only; removed in Blender 5.0) / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), referenced textures, and Generic animation clips (`.anim`: blend shapes, object visibility and transforms) as actions on muted NLA tracks
+- What is imported: FBX / OBJ / glTF / VRM / Collada (Blender 4.5 only; removed in Blender 5.0) / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), referenced textures, and animation as actions on muted NLA tracks: the animation takes inside models (split into Unity's clips; motion-only FBX files with the same skeleton are merged into one armature) and Generic animation clips (`.anim`: blend shapes, object visibility and transforms)
 - What is not imported: shader source code, C# scripts, Humanoid animation clips, animation curves on bones, Animator Controllers, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
@@ -79,8 +79,8 @@ The options show Material Mode and Scale; everything else is folded into the Mod
 | (always shown) | Material Mode | `Auto` (Toon for toon-style shaders, Principled for PBR) / `Principled BSDF` / `Toon (Node Group)` / `Unlit (Emission)` / `Names Only` |
 | | Scale | Scale passed to the model importer |
 | Model | FBX Importer | Prefer the new C++ importer (`Auto`) / choose explicitly |
-| | Import Animation / Ignore Leaf Bones | Passed to the FBX importer (OFF / ON by default) |
-| | Animation Clips | Turn the package's Generic `.anim` clips into actions on muted NLA tracks (default ON). See [Animation clips](#animation-clips) |
+| | Animation | `Muted` (default): import the models' animation takes and the package's `.anim` clips as muted NLA tracks / `Active`: the same, but unmute the first track of each object / `None`: do not import animation. See [Animation clips](#animation-clips) |
+| | Ignore Leaf Bones | Passed to the FBX importer (default ON) |
 | | VRM via VRM Add-on | Import `.vrm` with the VRM format add-on when installed (default ON); otherwise fall back to the glTF importer and rebuild materials from `.mat` |
 | | Import Bundled .blend Files | Append objects from `.blend` files inside the package (default OFF). See [Security notes](#security-notes) |
 | Materials | Force Opaque | Ignore Unity's Cutout / Transparent settings |
@@ -172,6 +172,26 @@ Textures > Extract To to `Custom Path` and choose a short folder such as `C:\upi
 
 ### Animation clips
 
+Animation is added as **muted** NLA tracks named after each clip, so the scene looks the same right after the import.
+To preview a clip, unmute its track in the NLA editor (or click its star to solo it), or select the strip and press Tab to
+edit the action. With Animation set to `Active`, the first track of each object is unmuted instead (only one, because
+unmuted NLA tracks override each other).
+
+#### Motions inside models
+
+Animation takes inside FBX files (for example motion packs, or `model@motion.fbx` files) are split into the clips that the
+model's `.meta` defines in Unity (Model Import Settings > Animation: name, first and last frame). All clips of a take share
+one action, and each strip plays its own frame range. Models without clip settings get one clip per take. Short clips
+(0.1 seconds or shorter, such as a T-pose take) are skipped, and the active action that the FBX importer assigns is cleared.
+
+When several motion-only models (no meshes, one armature) share the same skeleton, they are merged into one armature
+that has all the motions as NLA tracks (Models only). An FBX without a skin uses its default pose as the rest pose, so
+the rest pose differs from file to file; the keys are converted so that each motion keeps its pose on the remaining
+armature. A skeleton that lacks some bones (for example weapon bones) is merged too; the missing bones stay at rest.
+When a scene places the same model many times, the actions of its takes are shared.
+
+#### Generic `.anim` clips
+
 Generic animation clips (`.anim`) in the package become one action per clip. These curves are read:
 
 - Blend shape weights (`blendShape.<name>`, 0–100 in Unity) → shape key values (0–1)
@@ -180,16 +200,14 @@ Generic animation clips (`.anim`) in the package become one action per clip. The
 
 A clip does not say which model it belongs to, so the importer looks for the imported object under which the most curve
 paths resolve, and treats it as the object the clip is played on (all placements of the same model get the clip).
-Each clip is added as a **muted** NLA track (named after the clip) on every object or shape key it animates, so the
-scene looks the same right after the import. To preview a clip, unmute its track in the NLA editor (or click its star to solo it),
-or select the strip and press Tab to edit the action. Keys start at the scene's start frame and use the scene's frame rate.
+Each clip gets an NLA track on every object or shape key it animates. Keys start at the scene's start frame and use the scene's frame rate.
 Looping clips get a Cycles modifier on their F-curves.
 
 Clips that only switch a state are skipped: clips whose values never change, or that end within 0.1 seconds. Unity's
 Animator uses such clips as states and makes the motion with transitions (outfit toggles and expressions of VRChat avatars,
 the steering angle of a vehicle, and so on), so they have nothing to play back in Blender.
 
-Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (the body motion is stored as muscle curves, so the whole clip is skipped, including its other curves),
+Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (the body motion is stored as muscle curves, so the whole clip is skipped, including its other curves; the original motion is usually in an FBX in the package, which is imported as above),
 curves on bones, clips that only animate the object they are played on (no path, so the object is unknown), and curves on
 materials or object references. Clips whose paths match no imported object are skipped too. Animator Controllers are not read.
 

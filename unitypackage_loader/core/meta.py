@@ -18,6 +18,7 @@ from .unity_yaml import UnityRef, parse_text
 __all__ = [
     "LEGACY_GLOBAL_SCALE",
     "MetaInfo",
+    "ModelClip",
     "ModelImporterInfo",
     "TextureImporterInfo",
     "legacy_meta",
@@ -103,6 +104,26 @@ def _unit(unit_scale: float | None) -> float:
     return unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0
 
 
+@dataclass(frozen=True)
+class ModelClip:
+    """モデルの .meta の ``animations.clipAnimations`` の 1 行（Unity でモデルのテイクから切り出したクリップ。#276）。
+
+    ``first_frame`` / ``last_frame`` は FBX のフレームレートでのフレーム番号（テイクの時刻と同じ数え方）。
+    """
+
+    name: str
+    take: str
+    first_frame: float
+    last_frame: float
+    loop: bool = False
+
+
+def _frame(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
 @dataclass
 class ModelImporterInfo:
     external_materials: dict[str, str] = field(default_factory=dict)  # FBX 内マテリアル名 → .mat GUID
@@ -120,6 +141,10 @@ class ModelImporterInfo:
     # これだけを掛ける（Japanese School Cafeteria: cm の FBX も m の FBX も 0.01 で、頂点はどちらも cm の値）。
     # Unity 5 以降のモデルでは None
     legacy_global_scale: float | None = None
+    # アニメーションを取り込む設定（animations.importAnimation。無ければ取り込む）と、テイクから切り出したクリップ（#276）。
+    # クリップが空なら、Unity はテイクごとに全体を 1 つのクリップにする
+    import_animation: bool = True
+    clips: list[ModelClip] = field(default_factory=list)
 
     @classmethod
     def from_meta(cls, meta: MetaInfo | str) -> "ModelImporterInfo":
@@ -168,6 +193,24 @@ class ModelImporterInfo:
             info.use_file_scale = bool(meshes.get("useFileScale", 1))
             info.bake_axis_conversion = bool(meshes.get("bakeAxisConversion", 0))
             info.import_blend_shapes = bool(meshes.get("importBlendShapes", 1))
+        info.import_animation = bool(data.get("importAnimation", 1))
+        animations = data.get("animations") or {}
+        raw_clips = animations.get("clipAnimations") if isinstance(animations, dict) else None
+        for item in raw_clips if isinstance(raw_clips, list) else []:
+            if not isinstance(item, dict):
+                continue
+            first, last = _frame(item.get("firstFrame")), _frame(item.get("lastFrame"))
+            take = item.get("takeName")
+            if first is None or last is None or last < first or take is None:
+                continue
+            name = item.get("name")
+            info.clips.append(ModelClip(
+                name=str(name) if name is not None else str(take),
+                take=str(take),
+                first_frame=first,
+                last_frame=last,
+                loop=bool(item.get("loopTime", 0)),
+            ))
         return info
 
     def import_scale(self, unit_scale: float | None) -> float:

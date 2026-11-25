@@ -1,0 +1,19 @@
+{
+  "options": {
+    "unit": "MODELS",
+    "animation": "ACTIVE"
+  },
+  "errors": 0,
+  "clips": {
+    "count": 4,
+    "armatures": 2,
+    "unmuted": {
+      "Rig": ["Walk_Start"],
+      "CharRig": ["CharRig|wave_take"]
+    },
+    "tracks": {
+      "Rig": ["Walk_Start", "Walk", "Rig|run_take"],
+      "CharRig": ["CharRig|wave_take"]
+    }
+  }
+}

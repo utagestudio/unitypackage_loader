@@ -314,6 +314,7 @@ Material:
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
 - アニメーションクリップ: Generic な `.anim` のシェイプキー・表示の切り替え・オブジェクトの Transform を、クリップごとの Action にしてミュートした NLA トラックに並べる（§4.7.1。#209）。
+- モデルの中のモーション: FBX のテイクを、.meta の `clipAnimations` どおりのクリップにして NLA に並べる。同じ骨格のモーションだけのモデルは 1 体のアーマチュアにまとめる（§4.7.2。#276）。
 
 ### 読み込まない
 - シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、Animator Controller（`.controller`）と Humanoid の `.anim`・ボーンのカーブ（§4.7.1）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
@@ -364,8 +365,8 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | FBX Importer | Enum: `Auto` / `New (C++)` / `Legacy (Python)` = `Auto` | `Auto` と New は `wm.fbx_import`、Legacy だけ `import_scene.fbx`。Scale（常に表示）はモデルのインポーターに渡す |
-| Import Animation / Ignore Leaf Bones | Bool = OFF / ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
-| Animation Clips | Bool = ON | パッケージの Generic な `.anim` を Action にし、ミュートした NLA トラックで並べる（§4.7.1。読み込んだ直後の見た目は変わらないので既定 ON） |
+| Animation | Enum: `Muted` / `Active` / `None` = `Muted` | モデルのテイク（§4.7.2）とパッケージの `.anim`（§4.7.1）を NLA トラックにする。`Muted` はすべてミュート（読み込んだ直後の見た目は変わらない）、`Active` はオブジェクトごとに最初の 1 本だけミュートを外す（上のトラックが下を上書きするので 1 本だけ）、`None` は読まない（FBX インポーターの `use_anim` も切る）。以前の Import Animation（FBX に渡すだけ、既定 OFF）と Animation Clips（#209）を 1 つにした（#276） |
+| Ignore Leaf Bones | Bool = ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
 
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
@@ -656,6 +657,7 @@ unitypackage_loader/
 │   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
 │   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
 │   ├─ animation.py              # クリップの Action と NLA トラック（ClipImporter。#209）
+│   ├─ fbx_motion.py             # モデルのテイクのクリップへの分割、モーションだけのアーマチュアのまとめ（MotionBuilder。#276）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の当てはめ（計算は core/model_space.py）・非表示
 │   ├─ materials.py              # ノード生成
@@ -1008,7 +1010,8 @@ def resolve(model_entry, fbx_material_names, index) -> dict[str, str | None]:
 
 1 回の読み込みは `_ImportSession`（`importer.py`）が手順を並べる: 解析（`analyze`）→ 読み込むモデルの決定 → 展開（`extract`）→
 画像の読み込み → prefab のグループごと（`import_group`）かシーンごと（`SceneImport`。`scene_placement.py`）のモデルの読み込み →
-足りなかったテクスチャの補い（`fill_missed_textures`）→ アニメーションクリップ（`import_clips`。§4.7.1）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
+足りなかったテクスチャの補い（`fill_missed_textures`）→ モーションだけのアーマチュアのまとめ（`merge_motion_rigs`。§4.7.2）→ アニメーションクリップ（`import_clips`。§4.7.1）。
+モデルのテイクは、モデルを読み込むたびに `build_model` から `MotionBuilder.arrange` で NLA に並べる（§4.7.2）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
 モデルファイルの読み込みは `model_import.py` にある。以前は `importer.py` 1 つ（約 1,900 行）だったのを、役割ごとに分けた（#198）。
 下の擬似コードは最初の設計で、流れを示すもの。
 
@@ -1103,6 +1106,40 @@ def run(ctx, filepath, opts) -> Report:
   `clip_notes` に出す（警告にはしない）。
 - Python から `NlaTrack.mute` を切り替えても依存関係は組み直されず、一度評価したトラックは切り替わらない（NLA エディターでの切り替えでは組み直される）。
   統合テストはコレクションを付け外しして組み直させてから値を確かめる。
+- Animation が `Active` なら、対象ごとに最初のトラックだけミュートを外す（モデルのテイクのトラックが先にあれば、そちらが残る）。
+
+### 4.7.2 モデルの中のモーション（#276）
+
+モーション集（32 RPG Animations）や `@` 付きの FBX（Everyday Motion Pack）は、モーションを `.anim` ではなく FBX のテイクに持つ。
+Blender の FBX インポーターはテイクごとにテイクの名前の Action を作り、最初のテイクをアクティブにする（多くは 1 フレームの T ポーズ）。
+
+- **クリップの設定**（`core/meta.py` の `ModelClip`）: .meta の `animations.clipAnimations` の `name` / `takeName` / `firstFrame` /
+  `lastFrame` / `loopTime` と、`importAnimation`（0 ならテイクを並べない）。フレームは FBX のフレームレートで、テイクの時刻と同じ数え方。
+- **NLA**（`blender/fbx_motion.py` の `MotionBuilder.arrange`）: モデルを読み込むたびに、新しい Action をテイクの名前で引き
+  （.meta のテイク名と完全一致 → Blender の連番を外した形）、クリップごとにクリップの名前のトラックとストリップを足す。
+  ストリップの範囲は firstFrame / lastFrame + 1（FBX インポーターの `anim_offset`）で、同じテイクのクリップは Action を共有する。
+  スロットの対象は、スロットの識別子と読み込んだオブジェクトの FBX のノード名（`unity_fbx_node`）で引く。クリップの設定が無ければ
+  テイクごとに全体を 1 クリップにする。0.1 秒以下のクリップ（`STATE_CLIP_MAX_LENGTH`。T ポーズのテイク）は置かない。
+  どのクリップにも使われないテイクの Action は消し、アクティブな Action は外す（読み込んだ直後の見た目をアニメーションを読まない
+  ときと同じにする）。Action には `unity_take` / `unity_take_model` を残す。
+- **使い回し**: シーンで同じモデルを配置ごとに読み直すときは、最初に読んだときの Action を使い、新しく作られた分は消す。
+  前の読み込みが失敗して Action が消えていたら作り直す。
+- **アーマチュアのまとめ**（`merge_motion_rigs`。Models 単位）: メッシュが無く、アーマチュアが 1 体で、トラックを持つモデルを
+  モーションだけのモデルとし、骨格（ボーンの名前と親の組）が含まれる関係にあり、置き場所（親のワールドの行列）が同じものを
+  1 体にまとめる。残すのはボーンがいちばん多く、その中で先に読んだもの。
+  - スキンの無い FBX はファイルの既定の姿勢をレストにするので、レストはファイルごとに違う（32 RPG Animations では指のボーンで
+    100 以上違った）。親からの相対のレストを R（元）、R'（残す側）とすると、ローカルの行列 B を B' = R'⁻¹·R·B にすれば同じ姿勢になる
+    （`retarget_action`）。キーの時刻ごとに求め直し、LINEAR のキーにする（フレームごとにキーがあるので見た目は変わらない）。
+  - FBX のルートのボーンがアーマチュアのオブジェクトになったもの（Everyday Motion Pack の Bip001）は、オブジェクトの Transform が
+    ファイルの最初のフレームの値で、モーションごとに違う。オブジェクトのカーブは絶対値なのでそのまま使い、動かさないチャンネルには
+    元のアーマチュアの値の一定のキーを足す。
+  - 32 RPG Animations（31 体 → 1 体）と Everyday Motion Pack（244 体 → 1 体。21 秒）で、元の FBX を直接読んだときと、ボーンの
+    ワールドの姿勢が 1e-4 以内で一致することを確かめた。
+- **レポート**: 置いたクリップを `clips`（"モデルのパス: クリップ名"）に、外したクリップの数・見つからなかったテイク・まとめた
+  アーマチュアの数を `clip_notes` に出す。
+- FBX インポーターは、アニメーションを読むかどうかによらずシーンのフレームレートをファイルのものにする（今までと同じ）。
+  フレームレートの違う FBX を続けて読むと、先に読んだ FBX のモーションの速さがずれる（未対応）。
+- ループ（`loopTime`）はまだ NLA に反映しない（ストリップは範囲の終わりで止まる）。
 
 ### 4.8 `blender/textures.py`
 

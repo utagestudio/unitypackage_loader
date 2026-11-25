@@ -1,0 +1,19 @@
+{
+  "options": {
+    "unit": "SCENES"
+  },
+  "errors": 0,
+  "clips": {
+    "count": 1,
+    "take_actions": 1,
+    "instances": {
+      "CharRig": 2
+    },
+    "tracks": {
+      "CharRig": ["CharRig|wave_take"]
+    },
+    "values": [
+      { "track": "CharRig|wave_take", "object": "CharRig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } }
+    ]
+  }
+}

@@ -181,7 +181,7 @@ def _import_fbx(path: Path, opts: ImportOptions, scale: float = 1.0) -> None:
     kwargs = dict(
         filepath=str(path),
         global_scale=opts.global_scale * scale,
-        use_anim=opts.use_anim,
+        use_anim=opts.animation != "NONE",
         ignore_leaf_bones=opts.ignore_leaf_bones,
         use_custom_normals=True,
     )

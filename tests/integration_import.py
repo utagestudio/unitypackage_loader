@@ -641,10 +641,19 @@ def _world(obj) -> Matrix:
 
 
 def check_clips(ctx: Context) -> None:
-    """パッケージの .anim から作った Action と NLA トラック（#209）。"""
+    """パッケージの .anim と、モデルのテイクから作った Action と NLA トラック（#209 / #276）。"""
     c, spec = ctx.c, ctx.exp.get("clips")
     if spec is None:
         return
+    if "armatures" in spec:  # モーションだけのモデルをまとめた後のアーマチュアの数
+        c.eq("armature count", len([o for o in bpy.data.objects if o.type == "ARMATURE"]), spec["armatures"])
+    if "take_actions" in spec:  # モデルのテイクから作った Action（同じモデルを何度読んでも 1 つ）
+        c.eq("take actions", len([a for a in bpy.data.actions if a.get("unity_take")]), spec["take_actions"])
+    unmuted = spec.get("unmuted", {})  # Animation が Active のときに、ミュートを外したトラック
+    for name, tracks in unmuted.items():
+        for obj in [o for o in bpy.data.objects if _strip_suffix(o.name) == name]:
+            actual = sorted(t.name for d in _clip_datablocks(obj) if d.animation_data for t in d.animation_data.nla_tracks if not t.mute)
+            c.eq(f"{obj.name} unmuted NLA tracks", actual, sorted(tracks))
     if "count" in spec:
         c.eq("clip count", len(ctx.report.clips), spec["count"])
     if "actions" in spec:
@@ -659,7 +668,7 @@ def check_clips(ctx: Context) -> None:
         for obj in objects:
             c.eq(f"{obj.name} NLA tracks", _clip_tracks(obj), sorted(tracks))
             for d in _clip_datablocks(obj):
-                if d.animation_data:
+                if d.animation_data and name not in unmuted:
                     c.true(f"{obj.name} NLA tracks are muted", all(t.mute for t in d.animation_data.nla_tracks))
     for value in spec.get("values", []):
         objects = [o for o in bpy.data.objects if _strip_suffix(o.name) == value["object"]]
@@ -683,6 +692,14 @@ def check_clips(ctx: Context) -> None:
                 _at_clip_time([obj, other], value["track"], value["seconds"])
                 distance = (_world(obj).translation - _world(other).translation).length
                 c.close(f"{label} distance to {other.name} at {value['seconds']}s", distance, value["distance"], 1e-3)
+            if "bone_direction" in value:  # ボーンの向き（頭から尾へのワールドの単位ベクトル）
+                spec_bone = value["bone_direction"]
+                _at_clip_time([obj], value["track"], value["seconds"])
+                evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+                direction = (evaluated.matrix_world.to_3x3() @ evaluated.pose.bones[spec_bone["bone"]].matrix.col[1].xyz).normalized()
+                error = max(abs(a - b) for a, b in zip(direction, spec_bone["vector"]))
+                c.true(f"{label} {spec_bone['bone']} direction at {value['seconds']}s", error < 1e-3,
+                       f"expected {spec_bone['vector']}, got {[round(v, 4) for v in direction]}")
             if "rotation_delta" in value:
                 delta = value["rotation_delta"]
                 _at_clip_time([obj], value["track"], delta["from"])
