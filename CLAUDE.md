@@ -10,6 +10,7 @@
 - Unity と Blender のマテリアルは 1:1 に対応しないので「参考にできる値だけ」を反映し、残りはカスタムプロパティに保存する。
 - シェーダー本体、C#、Humanoid のアニメーション・ボーンのカーブ・Animator Controller、Expression メニュー等は読み込まない。
   Generic な `.anim`（シェイプキー・表示の切り替え・オブジェクトの Transform）は、ミュートした NLA トラックの Action にする（`core/animation.py`。#209）。
+  値が変わらないか 0.1 秒以下で終わる、状態を切り替えるだけのクリップ（Animator のステート用）は読み込まない。
 
 ## 設計の要点（詳細は DESIGN.md）
 

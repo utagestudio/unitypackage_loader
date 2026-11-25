@@ -183,7 +183,11 @@ scene looks the same right after the import. To preview a clip, unmute its track
 or select the strip and press Tab to edit the action. Keys start at the scene's start frame and use the scene's frame rate.
 Looping clips get a Cycles modifier on their F-curves.
 
-Not imported (the report lists how many were skipped): Humanoid clips (muscle curves; only their other curves are read),
+Clips that only switch a state are skipped: clips whose values never change, or that end within 0.1 seconds. Unity's
+Animator uses such clips as states and makes the motion with transitions (outfit toggles and expressions of VRChat avatars,
+the steering angle of a vehicle, and so on), so they have nothing to play back in Blender.
+
+Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (muscle curves; only their other curves are read),
 curves on bones, clips that only animate the object they are played on (no path, so the object is unknown), and curves on
 materials or object references. Clips whose paths match no imported object are skipped too. Animator Controllers are not read.
 
