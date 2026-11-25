@@ -75,6 +75,14 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         ),
     )
     use_anim: BoolProperty(name="Import Animation", default=False)
+    import_clips: BoolProperty(
+        name="Animation Clips",
+        default=True,
+        description=(
+            "Turn the package's .anim files (blend shapes, object visibility and transforms) into actions, "
+            "added as muted NLA tracks on the objects they animate. Humanoid clips and bone curves are skipped"
+        ),
+    )
     ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
     import_blend: BoolProperty(
         name="Import Bundled .blend Files",
@@ -177,6 +185,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         if body:
             body.prop(self, "fbx_importer")
             body.prop(self, "use_anim")
+            body.prop(self, "import_clips")
             body.prop(self, "ignore_leaf_bones")
             body.prop(self, "use_vrm_addon")
             body.prop(self, "import_blend")

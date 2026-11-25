@@ -1,0 +1,15 @@
+{
+  "options": {
+    "unit": "MODELS",
+    "import_clips": false
+  },
+  "errors": 0,
+  "clips": {
+    "count": 0,
+    "actions": [],
+    "tracks": {
+      "Face": [],
+      "Door": []
+    }
+  }
+}

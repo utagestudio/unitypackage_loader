@@ -1,0 +1,76 @@
+{
+  "options": {
+    "unit": "SCENES"
+  },
+  "errors": 0,
+  "scenes": {
+    "count": 1
+  },
+  "clips": {
+    "count": 4,
+    "actions": [
+      "DoorOpen",
+      "HatOff",
+      "Smile",
+      "Wave"
+    ],
+    "instances": {
+      "Face": 2,
+      "Door": 2,
+      "Knob": 2
+    },
+    "tracks": {
+      "Face": [
+        "Smile"
+      ],
+      "Hat": [
+        "HatOff"
+      ],
+      "Door": [
+        "DoorOpen"
+      ],
+      "Knob": [
+        "DoorOpen"
+      ],
+      "Body": [
+        "Wave"
+      ]
+    },
+    "values": [
+      {
+        "track": "Smile",
+        "object": "Face",
+        "seconds": 0.5,
+        "shape_key": "smile",
+        "value": 0.5
+      },
+      {
+        "track": "HatOff",
+        "object": "Hat",
+        "seconds": 0.75,
+        "hidden": true
+      },
+      {
+        "track": "DoorOpen",
+        "object": "Door",
+        "rotation_delta": {
+          "from": 0,
+          "to": 1,
+          "axis": [
+            0,
+            0,
+            1
+          ],
+          "degrees": -90
+        }
+      },
+      {
+        "track": "DoorOpen",
+        "object": "Knob",
+        "seconds": 0,
+        "distance_to": "Door",
+        "distance": 111.8034
+      }
+    ]
+  }
+}

@@ -39,6 +39,7 @@ class ImportOptions:
     max_extract_size: int = 0  # 1 回のインポートで展開する合計バイト数の上限（0 は無制限。Preferences から）
     fbx_importer: str = "AUTO"  # AUTO / NEW / LEGACY
     use_anim: bool = False
+    import_clips: bool = True  # パッケージの .anim を Action にして NLA にミュートで並べる（#209）
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
     import_blend: bool = False  # 同梱 .blend を append するか（Python スクリプトを含み得るので既定 OFF）

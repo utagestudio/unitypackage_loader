@@ -8,8 +8,8 @@
 Unity 側のマテリアル設定とテクスチャを反映した状態で配置する Extension です。
 
 - 対応 Blender: 4.5 以降（開発は 5.2 LTS、検証は 4.5 LTS と 5.2 LTS）
-- 読み込むもの: FBX / OBJ / glTF / VRM / Collada（Blender 4.5 のみ。5.0 で削除された）/ 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ
-- 読み込まないもの: シェーダー本体、C#、アニメーション、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
+- 読み込むもの: FBX / OBJ / glTF / VRM / Collada（Blender 4.5 のみ。5.0 で削除された）/ 同梱 .blend（オプトイン）、`.mat`（lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile（Quest 向け）シェーダー、その他は一般規則で最善努力）、参照テクスチャ、Generic なアニメーションクリップ（`.anim` のシェイプキー・表示の切り替え・Transform。ミュートした NLA トラックの Action にする）
+- 読み込まないもの: シェーダー本体、C#、Humanoid のアニメーションクリップ、ボーンのアニメーションのカーブ、Animator Controller、Expression メニュー等。prefab の階層、ライト、カメラは、シーンを読み込むときだけ再現します
 - VRM: [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on が入っていれば `.vrm` はそちらに委譲します（MToon マテリアル、Humanoid リグ、スプリングボーン、表情は add-on が再現）。無ければ glTF インポーターで読み、同梱の `.mat` からマテリアルを組み直します。
 
 ## インストール
@@ -78,6 +78,7 @@ Settings > Pages > Source を "GitHub Actions" にしてください。
 | | Scale | モデルのインポーターに渡すスケール |
 | Model | FBX Importer | 新 C++ インポーター優先（`Auto`）/ 明示指定 |
 | | Import Animation / Ignore Leaf Bones | FBX インポーターに渡す（既定はそれぞれ OFF / ON） |
+| | Animation Clips | パッケージの Generic な `.anim` を、ミュートした NLA トラックの Action にする（既定 ON）。[アニメーションクリップ](#アニメーションクリップ) を参照 |
 | | VRM via VRM Add-on | `.vrm` を VRM format add-on で読む（既定 ON）。add-on が無ければ glTF インポーターで読んで `.mat` から組み直す |
 | | Import Bundled .blend Files | パッケージ内の `.blend` からオブジェクトを append する（既定 OFF）。[セキュリティ上の注意](#セキュリティ上の注意) を参照 |
 | Materials | Force Opaque | Unity の Cutout / Transparent 設定を無視する |
@@ -150,6 +151,28 @@ prefab のルートをその Collection の原点に置きます。
 収まらない場合は、何も書かずにインポートを中止します。
 Windows のパスの長さの上限に当たらないよう、フルパスが長くなるファイルは展開先の `_long/` の下の短いフォルダに置きます。
 展開先のフォルダ自体が長すぎるとエラーになるので、その場合は Textures の Extract To を `Custom Path` にして `C:\upi` のような短いフォルダを選んでください。
+
+### アニメーションクリップ
+
+パッケージの Generic なアニメーションクリップ（`.anim`）を、クリップごとに 1 つの Action にします。読むカーブは次のとおりです。
+
+- シェイプキーの重み（`blendShape.<名前>`。Unity では 0〜100）→ シェイプキーの値（0〜1）
+- GameObject のアクティブ（`m_IsActive`）と Renderer の `m_Enabled` → `hide_viewport` / `hide_render`（GameObject を非アクティブにすると子も隠れる）
+- Transform の位置・回転（クォータニオンかオイラー角）・スケール → オブジェクトの位置・回転・スケール（フレームごとに求める）
+
+クリップは対象のモデルを持たないので、カーブの階層パスがいちばん多く当てはまる読み込んだオブジェクトを、クリップを再生する
+オブジェクトとみなします（同じモデルを複数置いていれば、すべてに付けます）。動かすオブジェクトとシェイプキーごとに、
+クリップの名前の NLA トラックを**ミュート**で足すので、読み込んだ直後の見た目は変わりません。確かめるときは NLA エディターで
+トラックのミュートを外すか、星のアイコンでソロにします。ストリップを選んで Tab で Action を編集することもできます。
+キーはシーンの開始フレームから、シーンのフレームレートで並べます。ループするクリップの F カーブには Cycles モディファイアーを付けます。
+
+状態を切り替えるだけのクリップ（値が変わらないもの、0.1 秒以下で終わるもの）は読み込みません。Unity の Animator はこうしたクリップを
+ステートとして使い、動きは遷移で作ります（VRChat のアバターの衣装の切り替えや表情、車両のハンドルの角度など）。
+Blender では再生しても何も動かないためです。
+
+読み込まないもの（件数はレポートに出ます）: 状態を切り替えるだけのクリップ（上記）、Humanoid のクリップ（体の動きがマッスル値で入っているため、ほかのカーブも含めてクリップごと外します。元の FBX にモーションがあれば #276 で取り出す予定）、ボーンのカーブ、
+再生するオブジェクト自身だけを動かすクリップ（パスが無く、どのオブジェクトか決められない）、マテリアルやオブジェクト参照のカーブ。
+読み込んだオブジェクトにパスが当てはまらないクリップも外します。Animator Controller は読みません。
 
 ### セキュリティ上の注意
 

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 import tempfile
 import traceback
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -604,6 +605,97 @@ def check_shape_keys(ctx: Context) -> None:
             c.eq(f"{obj_name}.shape_keys", actual, count)
 
 
+def _clip_datablocks(obj) -> list:
+    """オブジェクトと、そのシェイプキー（クリップの NLA トラックを持つもの）。"""
+    result = [obj]
+    if obj.type == "MESH" and obj.data is not None and obj.data.shape_keys is not None:
+        result.append(obj.data.shape_keys)
+    return result
+
+
+def _clip_tracks(obj) -> list[str]:
+    return sorted(t.name for d in _clip_datablocks(obj) if d.animation_data for t in d.animation_data.nla_tracks)
+
+
+def _at_clip_time(objects, track: str, seconds: float):
+    """``objects`` の ``track`` の NLA トラックだけを有効にして ``seconds`` 秒のフレームにする（戻すときは同じ関数を None で呼ぶ）。"""
+    scene = bpy.context.scene
+    fps = scene.render.fps / scene.render.fps_base
+    for obj in objects:
+        for d in _clip_datablocks(obj):
+            if d.animation_data:
+                for t in d.animation_data.nla_tracks:
+                    t.mute = t.name != track if seconds is not None else True
+    # Python からミュートを切り替えても依存関係は組み直されず、評価済みのトラックは切り替わらない（NLA エディターの操作では
+    # 組み直される）。コレクションを付け外しして組み直させる
+    temp = bpy.data.collections.new("_clip_check")
+    scene.collection.children.link(temp)
+    scene.collection.children.unlink(temp)
+    bpy.data.collections.remove(temp)
+    scene.frame_set(scene.frame_start + round((seconds or 0) * fps))
+    bpy.context.view_layer.update()
+
+
+def _world(obj) -> Matrix:
+    return obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world.copy()
+
+
+def check_clips(ctx: Context) -> None:
+    """パッケージの .anim から作った Action と NLA トラック（#209）。"""
+    c, spec = ctx.c, ctx.exp.get("clips")
+    if spec is None:
+        return
+    if "count" in spec:
+        c.eq("clip count", len(ctx.report.clips), spec["count"])
+    if "actions" in spec:
+        c.eq("actions", sorted(a.name for a in bpy.data.actions if a.get("unity_clip_guid")), sorted(spec["actions"]))
+    for text in spec.get("notes_contain", []):
+        c.true(f"clip note contains {text!r}", any(text in n for n in ctx.report.clip_notes), f"notes: {ctx.report.clip_notes}")
+    for name, count in spec.get("instances", {}).items():  # 同じ名前のオブジェクトの数（シーンに同じモデルを複数置いたとき）
+        c.eq(f"objects named {name}", len([o for o in bpy.data.objects if _strip_suffix(o.name) == name]), count)
+    for name, tracks in spec.get("tracks", {}).items():
+        objects = [o for o in bpy.data.objects if _strip_suffix(o.name) == name]
+        c.true(f"objects named {name} exist", bool(objects))
+        for obj in objects:
+            c.eq(f"{obj.name} NLA tracks", _clip_tracks(obj), sorted(tracks))
+            for d in _clip_datablocks(obj):
+                if d.animation_data:
+                    c.true(f"{obj.name} NLA tracks are muted", all(t.mute for t in d.animation_data.nla_tracks))
+    for value in spec.get("values", []):
+        objects = [o for o in bpy.data.objects if _strip_suffix(o.name) == value["object"]]
+        if not objects:
+            c.true(f"object {value['object']} exists", False)
+            continue
+        label = f"{value['track']} {value['object']}"
+        for obj in objects:
+            if "shape_key" in value:
+                _at_clip_time([obj], value["track"], value["seconds"])
+                key = obj.data.shape_keys.evaluated_get(bpy.context.evaluated_depsgraph_get())
+                actual = key.key_blocks[value["shape_key"]].value
+                c.close(f"{label} {value['shape_key']} at {value['seconds']}s", actual, value["value"], 1e-3)
+            if "hidden" in value:
+                _at_clip_time([obj], value["track"], value["seconds"])
+                evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+                c.eq(f"{label} hidden at {value['seconds']}s", (evaluated.hide_viewport, evaluated.hide_render), (value["hidden"],) * 2)
+            if "distance_to" in value:
+                other = min((o for o in bpy.data.objects if _strip_suffix(o.name) == value["distance_to"]),
+                            key=lambda o: (o.matrix_world.translation - obj.matrix_world.translation).length)
+                _at_clip_time([obj, other], value["track"], value["seconds"])
+                distance = (_world(obj).translation - _world(other).translation).length
+                c.close(f"{label} distance to {other.name} at {value['seconds']}s", distance, value["distance"], 1e-3)
+            if "rotation_delta" in value:
+                delta = value["rotation_delta"]
+                _at_clip_time([obj], value["track"], delta["from"])
+                before = _world(obj).to_3x3().normalized()
+                _at_clip_time([obj], value["track"], delta["to"])
+                after = _world(obj).to_3x3().normalized()
+                expected = Matrix.Rotation(math.radians(delta["degrees"]), 3, delta["axis"])
+                error = max(abs(a - b) for row_a, row_b in zip(after @ before.inverted(), expected) for a, b in zip(row_a, row_b))
+                c.true(f"{label} world rotation from {delta['from']}s to {delta['to']}s", error < 1e-3,
+                       f"expected {delta['degrees']} deg about {delta['axis']}, got {[[round(v, 3) for v in r] for r in after @ before.inverted()]}")
+    _at_clip_time(list(bpy.data.objects), "", None)
+
+
 # 読み込みの後に、この順で確かめる。``steps`` の手順の ``checks`` も同じ表で確かめる（片付けの確認を除く）
 CHECKS: list[Callable[[Context], None]] = [
     check_objects,
@@ -624,6 +716,7 @@ CHECKS: list[Callable[[Context], None]] = [
     check_scene_settings,
     check_shared_meshes,
     check_shape_keys,
+    check_clips,
 ]
 
 
