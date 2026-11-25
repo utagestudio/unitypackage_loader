@@ -187,7 +187,7 @@ Clips that only switch a state are skipped: clips whose values never change, or 
 Animator uses such clips as states and makes the motion with transitions (outfit toggles and expressions of VRChat avatars,
 the steering angle of a vehicle, and so on), so they have nothing to play back in Blender.
 
-Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (muscle curves; only their other curves are read),
+Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (the body motion is stored as muscle curves, so the whole clip is skipped, including its other curves),
 curves on bones, clips that only animate the object they are played on (no path, so the object is unknown), and curves on
 materials or object references. Clips whose paths match no imported object are skipped too. Animator Controllers are not read.
 

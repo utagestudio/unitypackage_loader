@@ -1066,7 +1066,9 @@ def run(ctx, filepath, opts) -> Report:
   `m_RotationCurves` / `m_EulerCurves` / `m_ScaleCurves`（成分ごとの `Curve` に分ける）と `m_FloatCurves` のうち、シェイプキー
   （classID 137 の `blendShape.*`）、GameObject の `m_IsActive`、Renderer の `m_Enabled` を返す。実行時のカーブが無いクリップは
   `m_EditorCurves` を読む。Animator（classID 95）のパスの無いカーブで、マッスル値やルートの動き（`RootT.x`、`Left Arm Down-Up`、
-  `LeftHand.Thumb.1 Stretched` など）の名前のものがあれば Humanoid とし、そのカーブは読まない（ほかのカーブは読む）。
+  `LeftHand.Thumb.1 Stretched` など）の名前のものがあれば Humanoid とし、マッスル値のカーブは返さない。ほかのカーブは返すが、`ClipImporter` はクリップごと外す
+  （体の動きはマッスル値にあり、残りは補助のボーン（ひねりのボーンなど）の動かないカーブだけで使い道が無い。Everyday Motion Pack で、
+  それだけを読んで動かないトラックが並んでいた。元のモーションは `@` 付きの FBX のテイクにあり、#276 で扱う）。
   マテリアルのプロパティ・Animator のパラメーター・オブジェクト参照のカーブは数だけ数える。壊れた入力には `AnimationParseError`（ValueError）だけを送る。
 - **評価**: キーの間はエルミート（weighted のキーは重みの長さのハンドルの 3 次ベジェ）、接線が無限大の区間は前のキーの値のまま。
   `bezier_handles` はエルミートの接線を 1/3 の長さのハンドルにして Blender のベジェにする（同じ曲線になる）。
