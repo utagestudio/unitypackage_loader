@@ -39,6 +39,7 @@ from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
 from .animation import ClipImporter
 from .animation import report_lines as clip_report_lines
+from .fbx_motion import MODE_NONE, MotionBuilder, merge_motion_rigs
 from .log import record_failure, warn_skipped
 from .model_import import (
     FBX_NODE_PROP,
@@ -260,6 +261,8 @@ class _ImportSession:
         # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
         self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
+        # モデルの中のアニメーションのテイクを NLA に並べる（#276）。アニメーションを読まないなら None
+        self.motions = MotionBuilder(self.scene, opts.animation) if opts.animation != MODE_NONE else None
         self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
         self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
@@ -305,7 +308,11 @@ class _ImportSession:
                 done += 1
         self.fill_missed_textures()
         self.materials.warn_slotless()
-        if self.opts.import_clips:
+        if self.motions is not None and not scenes:
+            self.merge_motion_rigs([summary.guid for group in groups for summary, _ in group.models])
+        if self.motions is not None:
+            self.report.clips.extend(self.motions.stats.clips)
+            self.report.clip_notes.extend(self.motions.stats.report_lines())
             self.step(0.96, "Importing animation clips")
             self.import_clips()
         hide_objects(self.context, [obj for obj in self.hidden_objects if not is_removed(obj)])
@@ -314,6 +321,22 @@ class _ImportSession:
 
         self.collection["unity_package"] = self.package_path.name
         self.step(1.0, "Done")
+
+    def merge_motion_rigs(self, model_order: list[str]) -> None:
+        """同じ骨格のモーションだけのモデルを、1 体のアーマチュアにまとめる（Models 単位。#276）。"""
+        removed = merge_motion_rigs(list(self.collection.all_objects), model_order)
+        if not removed:
+            return
+        self.motions.stats.merged_rigs += sum(1 for o in removed if o.type == "ARMATURE")
+        gone = {o.name for o in removed}
+        self.report.objects[:] = [name for name in self.report.objects if name not in gone]
+        data = [o.data for o in removed if o.data is not None]
+        actions = {s.action for o in removed if o.animation_data for t in o.animation_data.nla_tracks for s in t.strips if s.action}
+        bpy.data.batch_remove(removed)
+        bpy.data.batch_remove([d for d in data if d.users == 0])
+        # 変換した Action に置き換わり、どこからも使われなくなった元の Action
+        # （FBX インポーターが Action にフェイクユーザーを付けるので、それを除いて数える）
+        bpy.data.batch_remove([a for a in actions if a.users - int(a.use_fake_user) == 0])
 
     def import_clips(self) -> None:
         """パッケージの AnimationClip を Action にして、読み込んだオブジェクトの NLA にミュートで並べる（#209）。"""
@@ -593,6 +616,8 @@ class _ImportSession:
             )
         self.report.models.append(model.pathname)
         self.report.objects.extend(o.name for o in new["objects"])
+        if self.motions is not None:
+            self.motions.arrange(model.guid, model.pathname, summary.info, new["objects"], new["actions"])
 
         prefab_table = self.match_model_parts(model, prefab_table or {}, new["objects"], before, with_parts)
         self.materials.assign_materials(summary, prefab_table, new, delegated, existing_materials)

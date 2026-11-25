@@ -200,11 +200,12 @@ class ClipImporter:
     def _add_track(self, datablock, action, slot, name: str) -> None:
         animation_data = datablock.animation_data or datablock.animation_data_create()
         track = animation_data.nla_tracks.new()
+        active = self.session.opts.animation == "ACTIVE" and not any(not t.mute for t in animation_data.nla_tracks)
         track.name = name
-        track.mute = True
         nla_strip = track.strips.new(name, self.frame_start, action)
         if nla_strip.action_slot != slot:
             nla_strip.action_slot = slot
+        track.mute = not active
 
     # 各種のカーブ ------------------------------------------------------
 
