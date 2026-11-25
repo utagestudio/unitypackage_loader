@@ -11,7 +11,7 @@
     "actions": ["DoorOpen", "HatOff", "Smile", "Wave"],
     "notes_contain": [
       "skipped 2 animation clip(s) that only switch a state",
-      "skipped 1 Humanoid animation clip",
+      "skipped 2 Humanoid animation clip",
       "skipped 1 animation clip(s) that only animate the object",
       "skipped 4 animation curve(s) targeting bones",
       "1 animation clip(s) did not match"

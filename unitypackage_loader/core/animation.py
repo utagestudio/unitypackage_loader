@@ -7,7 +7,8 @@ Generic なクリップのうち、次のカーブを ``Curve`` にそろえて�
 - Transform: ``m_PositionCurves`` / ``m_RotationCurves``（クォータニオン）/ ``m_EulerCurves``（度）/ ``m_ScaleCurves``。
   3〜4 成分のカーブは成分ごとの ``Curve`` に分ける（``attribute`` は ``m_LocalPosition.x`` などエディターのカーブと同じ名前）
 
-Humanoid のクリップ（Animator のマッスル値のカーブ）は ``humanoid`` を立てるだけで、カーブは返さない。
+Humanoid のクリップ（Animator のマッスル値のカーブ）は ``humanoid`` を立て、マッスル値のカーブは返さない
+（ほかのカーブは返すが、読み込む側はクリップごと外す）。
 それ以外のカーブ（マテリアルのプロパティ、オブジェクト参照の差し替えなど）は数だけ数える。
 
 カーブの評価は Unity の AnimationCurve と同じく、キーの間をエルミート（weighted のキーは 3 次ベジェ）でつなぎ、

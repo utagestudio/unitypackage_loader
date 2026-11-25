@@ -12,6 +12,7 @@
   - DoorOpen.anim: Door のオイラー回転を (0, 0, 0) → (0, 90, 0)（1 秒）、Door/Knob の位置を (0.5, 1, 0)。ループする。
   - Wave.anim: ボーン Armature/Hips/Spine の回転（読み込まない。#270）と、Body の m_Enabled を 0。
   - Gesture.anim: Humanoid のマッスル値だけ（読み込まない）。
+  - Fist.anim: Humanoid のマッスル値と、Face のシェイプキー（値が変わる）。Humanoid なのでクリップごと読み込まない。
   - Spin.anim: ルート自身（空のパス）の回転だけ（どのオブジェクトのものか決められない）。
   - Elsewhere.anim: どこにも無いパス（1 秒で値が変わる）。
   - DoorAjar.anim / Blink.anim: 状態を切り替えるだけのクリップ（読み込まない）。DoorAjar は Door の回転を (0, 45, 0) に置くだけ、
@@ -122,6 +123,7 @@ def main() -> None:
         stop_time=1,
     ))
     clip("Gesture", clip_yaml("Gesture", float_curves=[("", "LeftHand.Index.1 Stretched", 95, [(0, -1, 0, 0)]), ("", "RootT.y", 95, [(0, 1, 0, 0)])]))
+    clip("Fist", clip_yaml("Fist", float_curves=[("", "Left Arm Down-Up", 95, [(0, 0, 0, 0), (1, 1, 0, 0)]), ("Face", "blendShape.smile", 137, [(0, 0, 0, 0), (1, 100, 0, 0)])], stop_time=1))
     clip("Spin", clip_yaml("Spin", vector_curves={"m_EulerCurves": [("", [(0, ZERO3, ZERO3, ZERO3), (2, (0, 360, 0), ZERO3, ZERO3)])]}, loop=True, stop_time=2))
     clip("Elsewhere", clip_yaml("Elsewhere", float_curves=[("Nothing/Here", "m_IsActive", 1, [(0, 1, INF, INF), (1, 0, INF, INF)])], stop_time=1))
     clip("DoorAjar", clip_yaml("DoorAjar", vector_curves={"m_EulerCurves": [("Door", [(0, (0, 45, 0), ZERO3, ZERO3), (1 / 12, (0, 45, 0), ZERO3, ZERO3)])]}, stop_time=1 / 12))

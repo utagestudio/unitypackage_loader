@@ -49,8 +49,7 @@ class ClipStats:
 
     loaded: list[str] = field(default_factory=list)  # 読み込んだクリップの pathname
     state: list[str] = field(default_factory=list)  # 状態を切り替えるだけのクリップ（読み込まない）
-    humanoid: list[str] = field(default_factory=list)  # Humanoid だけのクリップ（読み込まない）
-    humanoid_partial: list[str] = field(default_factory=list)  # Humanoid のクリップのうち、マッスル値以外のカーブだけ読んだもの
+    humanoid: list[str] = field(default_factory=list)  # Humanoid のクリップ（マッスル値以外のカーブがあっても読み込まない）
     root_only: list[str] = field(default_factory=list)  # ルート自身だけを動かすクリップ（どのオブジェクトのものか決められない）
     unbound: list[str] = field(default_factory=list)  # 対象のオブジェクトが見つからなかったクリップ
     empty: list[str] = field(default_factory=list)  # 読み込める種類のカーブが無いクリップ
@@ -111,8 +110,12 @@ class ClipImporter:
             except Exception as exc:  # noqa: BLE001 - そのクリップだけを外して続ける
                 warn_skipped(self.report.warn, f"could not read animation clip {entry.pathname}", exc)
                 continue
+            if clip.humanoid:
+                # 体の動きはマッスル値にあり、残りのカーブ（補助のボーンなど）だけでは使い道が無い
+                self.stats.humanoid.append(entry.pathname)
+                continue
             if not clip.curves:
-                (self.stats.humanoid if clip.humanoid else self.stats.empty).append(entry.pathname)
+                self.stats.empty.append(entry.pathname)
                 continue
             if is_state_clip(clip):
                 self.stats.state.append(entry.pathname)
@@ -130,8 +133,6 @@ class ClipImporter:
                 result = self.build(entry, clip, bindings)
                 if result == "loaded":
                     self.stats.loaded.append(entry.pathname)
-                    if clip.humanoid:
-                        self.stats.humanoid_partial.append(entry.pathname)
                 elif result == "bones":
                     self.stats.bone_only.append(entry.pathname)
                 else:
@@ -352,8 +353,6 @@ def report_lines(stats: ClipStats) -> Iterable[str]:
         yield f"skipped {len(stats.state)} animation clip(s) that only switch a state (constant values or 0.1 s or shorter)"
     if stats.humanoid:
         yield f"skipped {len(stats.humanoid)} Humanoid animation clip(s) (muscle curves are not supported)"
-    if stats.humanoid_partial:
-        yield f"imported only the non-muscle curves of {len(stats.humanoid_partial)} Humanoid animation clip(s)"
     if stats.root_only:
         yield f"skipped {len(stats.root_only)} animation clip(s) that only animate the object they are played on (target unknown)"
     if stats.bone_only:
