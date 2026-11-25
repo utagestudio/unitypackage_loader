@@ -1,27 +1,34 @@
 """シーンの読み込みで、Blender のオブジェクトを作り・置くための関数。
 
-Empty・ライト・カメラの作成、読み込んだモデルの複製、行列の補正、非表示、コレクションの移動と並べ方。
-読み込みの流れは ``importer.py``、bpy に依存しない判定は ``core/scene_import.py``。
+Empty・ライト・カメラの作成、読み込んだモデルの複製、行列の当てはめ、非表示、コレクションの移動と並べ方。
+読み込みの流れは ``importer.py``、bpy に依存しない判定は ``core/scene_import.py``、行列の計算は ``core/model_space.py``。
 """
 
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 
 import bpy
 from mathutils import Matrix, Vector
 
 from ..core.arrange import arrange_offsets
-from ..core.fbx_units import blender_axis_matrix, unity_axis_matrix
 from ..core.hierarchy import Hierarchy
 from ..core.lights import BlenderCamera, BlenderLight
 from ..core.meta import strip_numeric_suffix
+from ..core.model_space import (
+    ModelUnits,
+    collapsed_root,
+    node_basis,
+    offset_world,
+    positive_scale,
+    renderer_world,
+    same_placement,
+)
 from ..core.prefab import RendererMaterials, find_renderer
 from ..core.decals import Decal, decal_plane
 from ..core.primitives import PrimitiveMesh, build_primitive
-from ..core.transform import BLENDER_TO_UNITY, UNITY_TO_BLENDER, trs, unity_to_blender
+from ..core.transform import Mat4, unity_to_blender
 from ..core.unity_yaml import UnityRef
 from .model_import import node_name
 
@@ -210,7 +217,7 @@ def attach_to_empty(objects: list[bpy.types.Object], root, scale: float) -> None
     if root is None:
         return
     members = set(objects)
-    inverse = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 and scale != 1 else Matrix.Identity(4)
+    inverse = Matrix.Scale(scale, 4) if positive_scale(scale) not in (None, 1) else Matrix.Identity(4)
     for obj in objects:
         if obj.parent is None or obj.parent not in members:
             obj.parent = root
@@ -244,71 +251,13 @@ def _by_object_name(table: dict, name: str):
     return table.get(strip_numeric_suffix(name))
 
 
-def _file_scale(unit_scale: float | None) -> float:
-    """Unity の fileScale（= FBX の UnitScaleFactor / 100）。読めなければ 1 として扱う。"""
-    return (unit_scale if unit_scale and math.isfinite(unit_scale) and unit_scale > 0 else 1.0) / 100.0
-
-
-@dataclass(frozen=True)
-class ModelUnits:
-    """配置の計算に使う、モデルの FBX の単位と軸（``read_unit_scale`` / ``read_axes``。FBX 以外は空）。"""
-
-    unit_scale: float | None = None
-    axes: tuple[int, ...] | None = None
-    global_scale: float = 1.0  # .meta の globalScale（Unity は頂点と子の位置に焼き込む）
-
-    def basis_a(self) -> Matrix:
-        """Blender のオブジェクトのローカル座標（FBX のファイルの座標）→ Unity のノード空間（A = f·U）。
-
-        U は Unity がこの FBX に掛ける軸の変換（``fbx_units.unity_axis_matrix``）。Y が上の FBX では diag(-1, 1, 1) で、
-        A = diag(-f, f, f)（#53 で確かめた形）。3ds Max の Z が上の FBX では Y と Z の入れ替え（Cardboard Boxes Pack。#240）。
-        """
-        f = _file_scale(self.unit_scale)
-        return Matrix.Diagonal((f, f, f, 1.0)) @ Matrix(unity_axis_matrix(self.axes)).to_4x4()
-
-    def world_basis_a(self) -> Matrix:
-        """``basis_a`` に globalScale も掛けたもの（ルートの Empty の下で、親の逆行列を通さずにワールドで置くとき）。"""
-        g = self.global_scale if math.isfinite(self.global_scale) and self.global_scale > 0 else 1.0
-        return Matrix.Diagonal((g, g, g, 1.0)) @ self.basis_a()
-
-
-def axis_correction(axes: tuple[int, ...] | None) -> Matrix | None:
-    """Y が上でない FBX を読み込んだ直後に、最上位のオブジェクトへ左から掛けて Unity と同じ向きにする行列（K = C·U·B⁻¹）。
-
-    Blender の FBX インポーターはファイルの上の軸を +Z にする（B。Z が上の 3ds Max の FBX では回転を掛けない）が、Unity は
-    U で Y が上にする（#240）。Y が上の FBX では K が単位行列（C·diag(-1, 1, 1) = B）なので None。
-    """
-    if axes is None or axes[0] != 2:
-        return None
-    unity = Matrix(unity_axis_matrix(axes)).to_4x4()
-    blender = Matrix(blender_axis_matrix(axes)).to_4x4()
-    return Matrix(UNITY_TO_BLENDER) @ unity @ blender.inverted_safe()
+def _mat4(matrix: Matrix) -> Mat4:
+    """``mathutils.Matrix`` を ``core`` の行列（行優先タプル）にする。"""
+    return tuple(tuple(row) for row in matrix)  # type: ignore[return-value]
 
 
 def _units(units: ModelUnits | None) -> ModelUnits:
     return units if units is not None else ModelUnits()
-
-
-def _node_basis(basis: Matrix, spec: dict, basis_a: Matrix) -> Matrix:
-    """ノードへの上書きを当てたオブジェクトの行列（C·M·A）。
-
-    Unity のノード空間の行列 L と、原点に読み込んだ Blender のオブジェクトの行列 N の関係は N = C·L·A
-    （C は Unity → Blender の基底、A は ``ModelUnits.basis_a``。Y が上の FBX では diag(-f, f, f)、f は Unity の fileScale
-    = FBX の UnitScaleFactor / 100）。Japanese Apartment の FBX（UnitScaleFactor 100 と 1）と Blender 由来の FBX で、
-    Unity 6 が読んだノードの値と突き合わせて確かめた（Issue #53）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分は
-    その値のまま使う。
-    """
-    basis_a_inverse = basis_a.inverted_safe()
-    location, rotation, scale = (Matrix(BLENDER_TO_UNITY) @ basis @ basis_a_inverse).decompose()
-    position = [location.x, location.y, location.z]
-    quaternion = [rotation.x, rotation.y, rotation.z, rotation.w]  # Unity の並び
-    scaling = [scale.x, scale.y, scale.z]
-    for values, key in ((position, "position"), (quaternion, "rotation"), (scaling, "scale")):
-        for index, value in enumerate(spec.get(key, [])):
-            if value is not None and index < len(values):
-                values[index] = value
-    local = Matrix(trs(tuple(position), tuple(quaternion), tuple(scaling)))
-    return Matrix(UNITY_TO_BLENDER) @ local @ basis_a
 
 
 def _movable(obj, members: set) -> bool:
@@ -321,7 +270,7 @@ def apply_node_transforms(template: SceneTemplate, objects, overrides, units: Mo
     """モデルの中のノードへの位置・回転・スケールの上書き（古い形式の .meta で名前を引けたもの）を当てる。
 
     当てるのはモデルの最上位のオブジェクトだけ（入れ子やアーマチュアで変形するものは数えて飛ばす）。
-    行列の組み立ては ``_node_basis`` を参照。
+    行列の組み立ては ``core.model_space.node_basis`` を参照。
     """
     basis_a = _units(units).basis_a()
     members = set(objects)
@@ -333,30 +282,28 @@ def apply_node_transforms(template: SceneTemplate, objects, overrides, units: Mo
         if not _movable(obj, members):
             skipped += 1
             continue
-        obj.matrix_basis = _node_basis(template.basis[original], spec, basis_a)
+        obj.matrix_basis = Matrix(node_basis(_mat4(template.basis[original]), spec, basis_a))
     return skipped
 
 
 def apply_collapsed_root(template: SceneTemplate, objects, root, name: str, spec: dict, units: ModelUnits | None) -> bool:
     """1 メッシュの FBX をモデルの PrefabInstance で置いた配置を、FBX のノードの変換ぶんも含めて置き直す（#99）。
 
-    この形の FBX では Unity のモデルのルートの Transform の値が FBX のノードの変換 L で、シーンの上書きは
-    その成分を置き換える（上書きしなかった成分は L のまま）。展開した階層は単位行列を基準に組み立てているので、
-    ここでルートの Empty を C·M·C⁻¹（M = L に上書きを当てた行列）に直し、オブジェクトはノードを単位行列にした
-    C·A にする。Empty を直すのは、そこに付けたシーンの子も Unity と同じ位置にするため。置き直せなければ False。
+    行列は ``core.model_space.collapsed_root``。Empty を直すのは、そこに付けたシーンの子も Unity と同じ位置にするため。
+    置き直せなければ False。
     """
     if root is None:
         return False
     basis_a = _units(units).basis_a()
-    neutral = Matrix(UNITY_TO_BLENDER) @ basis_a  # ノードを単位行列にしたオブジェクトの行列
     members = set(objects)
     for original, obj in zip(template.objects, objects):
         if _by_object_name({name: spec}, node_name(obj)) is None:
             continue
         if not _movable(obj, members):
             return False
-        root.matrix_basis = _node_basis(template.basis[original], spec, basis_a) @ neutral.inverted_safe()
-        obj.matrix_basis = neutral
+        root_matrix, object_matrix = collapsed_root(_mat4(template.basis[original]), spec, basis_a)
+        root.matrix_basis = Matrix(root_matrix)
+        obj.matrix_basis = Matrix(object_matrix)
         return True
     return False
 
@@ -527,24 +474,12 @@ def _parent_frame(obj) -> Matrix | None:
     return parent_world @ obj.matrix_parent_inverse if obj.parent is not None else Matrix.Identity(4)
 
 
-def _same_placement(a: Matrix, b: Matrix) -> bool:
-    """2 つの行列が、float の誤差を除いて同じ置き方か（列の長さに対する相対誤差と、位置の誤差）。
-
-    位置は 0.1 mm に、座標の大きさに比例する float の誤差（100 万分の 1）を足した範囲で比べる。座標に比例させるだけだと、
-    原点から離れた部品の数 cm のずれを見逃す（Farm の 216 m 先の門扉で 2 cm）。
-    """
-    size = max(1.0, *(a.col[i].xyz.length for i in range(3)))
-    if any(abs(a[r][c] - b[r][c]) > 1e-4 * size for r in range(3) for c in range(3)):
-        return False
-    return all(abs(a[r][3] - b[r][3]) <= 1e-4 + 1e-6 * abs(a[r][3]) for r in range(3))
-
-
 def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dict, units: ModelUnits | None) -> int:
     """FBX を展開した配置で、Renderer の GameObject が FBX のノードと違う位置にあるオブジェクトを、Unity の位置に置き直す。
 
     ``renderers`` は配置の Renderer（``PlacedRenderer``）。``relative`` が Unity でのルートから GameObject までの行列 R。
-    原点に読み込んだオブジェクトの行列は C·L·A（``_node_basis``）なので、ルートの Empty の行列 E の下では E·C·R·A が
-    Unity と同じ置き方になる。展開した Transform の値そのものを Unity 上で動かした部品（上書き前の行列も同じなので、
+    原点に読み込んだオブジェクトの行列は C·L·A（``core.model_space.node_basis``）なので、ルートの Empty の行列 E の下では
+    E·C·R·A（``core.model_space.renderer_world``）が Unity と同じ置き方になる。展開した Transform の値そのものを Unity 上で動かした部品（上書き前の行列も同じなので、
     上書きからは分からない）と、上書きで動かした部品の両方をこれで扱う。いまの置き方と同じ（誤差の範囲）なら触らない。
 
     オブジェクトと Renderer の対応は prefab の表と同じ照合（``find_renderer``。Blender が連番を付け替えた名前も引ける。#155）で、
@@ -559,7 +494,7 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
     base = _world_matrix(root)
     if base is None:
         return 0
-    base = base @ Matrix(UNITY_TO_BLENDER)
+    base = _mat4(base)
     table = {name: RendererMaterials(name, mesh_file_id=r.mesh_file_id) for name, r in renderers.items()}
     claimed: dict[str, list] = {}
     for original, obj in zip(template.objects, objects):
@@ -570,13 +505,13 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
     for name, found in claimed.items():
         relative = renderers[name].relative
         if relative is not None and len(found) == 1:
-            targets.append((found[0], Matrix(relative)))
+            targets.append((found[0], relative))
 
     skipped = 0
     for obj, relative in sorted(targets, key=lambda item: _depth(item[0])):
         current = _world_matrix(obj)
-        target = base @ relative @ basis_a
-        if current is not None and _same_placement(current, target):
+        target = Matrix(renderer_world(base, relative, basis_a))
+        if current is not None and same_placement(_mat4(current), _mat4(target)):
             continue
         frame = _parent_frame(obj)
         if current is None or frame is None:
@@ -589,15 +524,12 @@ def apply_renderer_worlds(template: SceneTemplate, objects, root, renderers: dic
 def apply_offsets(objects, root_world, offsets, scale: float) -> int:
     """中のノードが上書きで動いたオブジェクトを、そのノードから逆算した位置に置く。アーマチュアで変形するものは数えて飛ばす。
 
-    ``root_world`` は配置のルートの Unity での行列。置いた直後のオブジェクトの行列は「ルートの行列 · globalScale ·
-    原点に読み込んだときの行列」なので、そこから原点での行列を求め、逆算したルートの行列を掛け直す。
+    ``root_world`` は配置のルートの Unity での行列。行列の組み立ては ``core.model_space.offset_world``。
     行列は親をたどって計算で求める（以前はオブジェクトごとに ``view_layer.update()`` を呼んでいた。#75）。
     """
     targets = [o for o in objects if _by_object_name(offsets, node_name(o)) is not None]
     if not targets:
         return 0
-    scale_matrix = Matrix.Scale(scale, 4) if math.isfinite(scale) and scale > 0 else Matrix.Identity(4)
-    to_origin = (Matrix(unity_to_blender(root_world)) @ scale_matrix).inverted_safe()
     worlds = {o: _world_matrix(o) for o in targets}  # 動かす前にまとめて求める
     skipped = 0
     for obj in sorted(targets, key=_depth):
@@ -605,6 +537,7 @@ def apply_offsets(objects, root_world, offsets, scale: float) -> int:
         if worlds[obj] is None or frame is None:
             skipped += 1
             continue
-        world = Matrix(unity_to_blender(_by_object_name(offsets, node_name(obj)))) @ scale_matrix @ to_origin @ worlds[obj]
+        offset = _by_object_name(offsets, node_name(obj))
+        world = Matrix(offset_world(offset, root_world, scale, _mat4(worlds[obj])))
         obj.matrix_basis = frame.inverted_safe() @ world
     return skipped
