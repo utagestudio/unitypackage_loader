@@ -47,7 +47,7 @@
       {
         "track": "HatOff",
         "object": "Hat",
-        "seconds": 0,
+        "seconds": 0.75,
         "hidden": true
       },
       {

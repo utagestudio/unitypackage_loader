@@ -13,6 +13,10 @@ Humanoid のクリップ（Animator のマッスル値のカーブ）は ``human
 カーブの評価は Unity の AnimationCurve と同じく、キーの間をエルミート（weighted のキーは 3 次ベジェ）でつなぎ、
 接線が無限大の区間は前のキーの値のまま（階段）にする。
 
+Animator のステートで使う前提の「状態を切り替えるだけ」のクリップ（値が一定か、0.1 秒以下で終わるもの。
+VRChat のアバターの衣装の切り替えや表情、車両のハンドルの角度など）は、Blender で再生しても意味が無いので
+``is_state_clip`` で見分けて読み込まない。
+
 解析は Unity YAML でもバイナリ（Force Binary）でも ``unity_binary.load_documents`` で ``UnityDocument`` にしてから行う。
 壊れた入力には ``AnimationParseError``（``ValueError``）だけを送出する。
 """
@@ -41,6 +45,7 @@ __all__ = [
     "KIND_SCALE",
     "TRANSFORM_KINDS",
     "parse_clip",
+    "is_state_clip",
     "evaluate",
     "bezier_handles",
     "euler_to_quaternion",
@@ -367,6 +372,41 @@ def parse_clip(data: bytes | str) -> AnimationClip:
         if doc.class_id == CLASS_ANIMATION_CLIP or doc.type_name == "AnimationClip":
             return clip_from_body(doc.body)
     raise AnimationParseError("no AnimationClip in the asset")
+
+
+# ---------------------------------------------------------------------------
+# 状態を切り替えるだけのクリップ
+# ---------------------------------------------------------------------------
+
+# これ以下の長さで終わるクリップは、動きではなく状態（Unity の 60fps で 6 フレーム。よくある 1/12 秒・0.1 秒を含む）
+STATE_CLIP_MAX_LENGTH = 0.1 + 1e-6
+
+
+def _flat_slope(slope: float) -> bool:
+    return slope == 0.0 or math.isinf(slope)
+
+
+def _curve_constant(keys: Sequence[Key]) -> bool:
+    """値が時間で変わらないカーブ。キーの値がすべて同じで、キーの間の接線が 0 か無限大（階段）のもの。"""
+    if len(keys) <= 1:
+        return True
+    first = keys[0].value
+    if any(k.value != first for k in keys):
+        return False
+    return all(_flat_slope(k0.out_slope) and _flat_slope(k1.in_slope) for k0, k1 in zip(keys, keys[1:]))
+
+
+def is_state_clip(clip: AnimationClip) -> bool:
+    """Animator のステートで使う前提の、状態を切り替えるだけのクリップか。
+
+    どのカーブも値が変わらないか、キーのある範囲が ``STATE_CLIP_MAX_LENGTH`` 以下のもの。カーブが無いクリップは False。
+    """
+    if not clip.curves:
+        return False
+    if all(_curve_constant(c.keys) for c in clip.curves):
+        return True
+    times = [k.time for c in clip.curves for k in c.keys]
+    return max(times) - min(times) <= STATE_CLIP_MAX_LENGTH
 
 
 # ---------------------------------------------------------------------------

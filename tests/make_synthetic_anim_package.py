@@ -8,12 +8,14 @@
   スキンメッシュ Body はアーマチュアの子として書き出す。Unity では Armature と兄弟）。
 - Animations/
   - Smile.anim: Face の blendShape.smile を 0 → 100（1 秒、接線 0）。
-  - HatOff.anim: Hat の m_IsActive を 0（階段）。
+  - HatOff.anim: Hat の m_IsActive を 0.5 秒で 1 → 0（階段。1 秒）。
   - DoorOpen.anim: Door のオイラー回転を (0, 0, 0) → (0, 90, 0)（1 秒）、Door/Knob の位置を (0.5, 1, 0)。ループする。
   - Wave.anim: ボーン Armature/Hips/Spine の回転（読み込まない。#270）と、Body の m_Enabled を 0。
   - Gesture.anim: Humanoid のマッスル値だけ（読み込まない）。
   - Spin.anim: ルート自身（空のパス）の回転だけ（どのオブジェクトのものか決められない）。
-  - Elsewhere.anim: どこにも無いパス。
+  - Elsewhere.anim: どこにも無いパス（1 秒で値が変わる）。
+  - DoorAjar.anim / Blink.anim: 状態を切り替えるだけのクリップ（読み込まない）。DoorAjar は Door の回転を (0, 45, 0) に置くだけ、
+    Blink は smile を 1/12 秒で 0 → 100。
 - Scenes/Two.unity: Rig.fbx を X に -2 と 2 の 2 か所に置く（同じクリップが両方に付く）。
 """
 
@@ -103,7 +105,7 @@ def main() -> None:
     rig = add(rig_path, (tmp / "rig.fbx").read_bytes(), model_meta(guid_of(rig_path), {}))
 
     clip("Smile", clip_yaml("Smile", float_curves=[("Face", "blendShape.smile", 137, [(0, 0, 0, 0), (1, 100, 0, 0)])], stop_time=1))
-    clip("HatOff", clip_yaml("HatOff", float_curves=[("Hat", "m_IsActive", 1, [(0, 0, INF, INF)])]))
+    clip("HatOff", clip_yaml("HatOff", float_curves=[("Hat", "m_IsActive", 1, [(0, 1, INF, INF), (0.5, 0, INF, INF), (1, 0, INF, INF)])], stop_time=1))
     clip("DoorOpen", clip_yaml(
         "DoorOpen",
         vector_curves={
@@ -121,7 +123,9 @@ def main() -> None:
     ))
     clip("Gesture", clip_yaml("Gesture", float_curves=[("", "LeftHand.Index.1 Stretched", 95, [(0, -1, 0, 0)]), ("", "RootT.y", 95, [(0, 1, 0, 0)])]))
     clip("Spin", clip_yaml("Spin", vector_curves={"m_EulerCurves": [("", [(0, ZERO3, ZERO3, ZERO3), (2, (0, 360, 0), ZERO3, ZERO3)])]}, loop=True, stop_time=2))
-    clip("Elsewhere", clip_yaml("Elsewhere", float_curves=[("Nothing/Here", "m_IsActive", 1, [(0, 0, INF, INF)])]))
+    clip("Elsewhere", clip_yaml("Elsewhere", float_curves=[("Nothing/Here", "m_IsActive", 1, [(0, 1, INF, INF), (1, 0, INF, INF)])], stop_time=1))
+    clip("DoorAjar", clip_yaml("DoorAjar", vector_curves={"m_EulerCurves": [("Door", [(0, (0, 45, 0), ZERO3, ZERO3), (1 / 12, (0, 45, 0), ZERO3, ZERO3)])]}, stop_time=1 / 12))
+    clip("Blink", clip_yaml("Blink", float_curves=[("Face", "blendShape.smile", 137, [(0, 0, 0, 0), (1 / 12, 100, 0, 0)])], stop_time=1 / 12))
 
     scene_path = "Assets/Synthetic/Scenes/Two.unity"
     scene = HEADER + "".join([

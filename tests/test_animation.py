@@ -17,6 +17,7 @@ from unitypackage_loader.core.animation import (
     bezier_handles,
     euler_to_quaternion,
     evaluate,
+    is_state_clip,
     parse_clip,
     quaternion_to_euler,
     sample_times,
@@ -136,6 +137,33 @@ class ParseTest(unittest.TestCase):
         text = text.replace("time: 1", "time: nan", 1).replace("value: 1", "value: abc", 1)
         clip = parse_clip(text)
         self.assertEqual([(k.time, k.value) for k in clip.curves[0].keys], [(0.0, 0.0)])
+
+
+class StateClipTest(unittest.TestCase):
+    """Animator のステート用の、状態を切り替えるだけのクリップ（読み込まない）。"""
+
+    def _clip(self, keys, attribute="blendShape.a"):
+        return parse_clip(clip_yaml("C", float_curves=[("Body", attribute, 137, keys)], stop_time=1))
+
+    def test_single_key_and_constant_values(self):
+        self.assertTrue(is_state_clip(self._clip([(0, 50, 0, 0)])))
+        self.assertTrue(is_state_clip(self._clip([(0, 50, 0, 0), (1, 50, 0, 0)])))
+        self.assertTrue(is_state_clip(self._clip([(0, 1, INF, INF), (2, 1, INF, INF)], "m_Enabled")))
+
+    def test_short_clip_is_state_even_if_values_change(self):
+        # 1/12 秒で 0 → 15°（車両のペダルの角度など）
+        clip = parse_clip(clip_yaml("Pedal", vector_curves={"m_EulerCurves": [("Pedal", [(0, (0, 0, 0), (0, 0, 0), (0, 0, 0)), (1 / 12, (15, 0, 0), (0, 0, 0), (0, 0, 0))])]}))
+        self.assertTrue(is_state_clip(clip))
+        self.assertTrue(is_state_clip(self._clip([(0, 0, 0, 0), (0.1, 100, 0, 0)])))
+
+    def test_motion(self):
+        self.assertFalse(is_state_clip(self._clip([(0, 0, 0, 0), (1, 100, 0, 0)])))
+        self.assertFalse(is_state_clip(self._clip([(0, 1, INF, INF), (0.5, 0, INF, INF)], "m_Enabled")))
+        # 値は同じでも、接線があれば途中で膨らむ
+        self.assertFalse(is_state_clip(self._clip([(0, 0, 0, 100), (1, 0, 0, 0)])))
+
+    def test_no_curves(self):
+        self.assertFalse(is_state_clip(parse_clip(clip_yaml("Empty"))))
 
 
 class EvaluateTest(unittest.TestCase):

@@ -26,6 +26,7 @@ from ..core.animation import (
     AnimationClip,
     Curve,
     bezier_handles,
+    is_state_clip,
     parse_clip,
     sample_times,
     transform_spec,
@@ -47,6 +48,7 @@ class ClipStats:
     """クリップの読み込みの集計（レポートに書く）。"""
 
     loaded: list[str] = field(default_factory=list)  # 読み込んだクリップの pathname
+    state: list[str] = field(default_factory=list)  # 状態を切り替えるだけのクリップ（読み込まない）
     humanoid: list[str] = field(default_factory=list)  # Humanoid だけのクリップ（読み込まない）
     humanoid_partial: list[str] = field(default_factory=list)  # Humanoid のクリップのうち、マッスル値以外のカーブだけ読んだもの
     root_only: list[str] = field(default_factory=list)  # ルート自身だけを動かすクリップ（どのオブジェクトのものか決められない）
@@ -111,6 +113,9 @@ class ClipImporter:
                 continue
             if not clip.curves:
                 (self.stats.humanoid if clip.humanoid else self.stats.empty).append(entry.pathname)
+                continue
+            if is_state_clip(clip):
+                self.stats.state.append(entry.pathname)
                 continue
             if clip.paths == {""}:
                 self.stats.root_only.append(entry.pathname)
@@ -343,6 +348,8 @@ def _escape(name: str) -> str:
 
 def report_lines(stats: ClipStats) -> Iterable[str]:
     """レポートの警告に足す行（読み込まなかったものの内訳）。"""
+    if stats.state:
+        yield f"skipped {len(stats.state)} animation clip(s) that only switch a state (constant values or 0.1 s or shorter)"
     if stats.humanoid:
         yield f"skipped {len(stats.humanoid)} Humanoid animation clip(s) (muscle curves are not supported)"
     if stats.humanoid_partial:
