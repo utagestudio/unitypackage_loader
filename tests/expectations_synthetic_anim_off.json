@@ -1,7 +1,7 @@
 {
   "options": {
     "unit": "MODELS",
-    "import_clips": false
+    "animation": "NONE"
   },
   "errors": 0,
   "clips": {

@@ -1,0 +1,27 @@
+{
+  "options": {
+    "unit": "MODELS"
+  },
+  "errors": 0,
+  "clips": {
+    "count": 4,
+    "armatures": 2,
+    "take_actions": 3,
+    "notes_contain": [
+      "skipped 1 model animation clip(s) that only switch a state",
+      "merged 1 motion-only armature(s)"
+    ],
+    "tracks": {
+      "Rig": ["Walk_Start", "Walk", "Rig|run_take"],
+      "CharRig": ["CharRig|wave_take"]
+    },
+    "values": [
+      { "track": "Walk_Start", "object": "Rig", "seconds": 0.2, "bone_direction": { "bone": "Spine", "vector": [0, -0.2938, 0.9559] } },
+      { "track": "Walk", "object": "Rig", "seconds": 0.5, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } },
+      { "track": "Walk", "object": "Rig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -1, 0] } },
+      { "track": "Rig|run_take", "object": "Rig", "seconds": 0, "bone_direction": { "bone": "Spine", "vector": [0, 0.4961, 0.8682] } },
+      { "track": "Rig|run_take", "object": "Rig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -0.5039, 0.8638] } },
+      { "track": "CharRig|wave_take", "object": "CharRig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } }
+    ]
+  }
+}
