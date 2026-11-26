@@ -39,7 +39,7 @@ from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
 from .animation import ClipImporter
 from .animation import report_lines as clip_report_lines
-from .fbx_motion import MODE_NONE, MotionBuilder, merge_motion_rigs
+from .fbx_motion import MotionBuilder
 from .log import record_failure, warn_skipped
 from .model_import import (
     FBX_NODE_PROP,
@@ -59,6 +59,7 @@ from .model_import import (
     snapshot,
     vrm_addon_available,
 )
+from .nla import MODE_NONE
 from .options import ImportOptions
 from .prepare import (
     BLEND_DISABLED_REASON,
@@ -69,6 +70,7 @@ from .prepare import (
     build_shader_table,
     prepare_package,
 )
+from .rig_merge import merge_motion_rigs
 from .scene_objects import (
     arrange_collections, find_layer_collection, hide_objects,
     move_collection_contents, remove_parts,
