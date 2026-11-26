@@ -86,6 +86,28 @@ class ModelImporterTests(unittest.TestCase):
         info = ModelImporterInfo.from_meta("ModelImporter:\n  meshes:\n    bakeAxisConversion: 0\n")
         self.assertFalse(info.bake_axis_conversion)
 
+    def test_clip_animations(self):
+        # 32 RPG Animations の Jumps.fbx と同じ形（1 つのテイクを 2 つのクリップに分ける。#276）
+        text = (
+            "ModelImporter:\n"
+            "  animations:\n"
+            "    clipAnimations:\n"
+            "    - serializedVersion: 16\n      name: tpose\n      takeName: tpose\n      firstFrame: 0\n      lastFrame: 1\n      loopTime: 0\n"
+            "    - serializedVersion: 16\n      name: Jump_Up\n      takeName: human_male_jumpup\n      firstFrame: 2\n      lastFrame: 18\n      loopTime: 1\n"
+            "    - serializedVersion: 16\n      name: Broken\n      takeName: x\n      firstFrame: 5\n      lastFrame: 2\n"
+            "    - serializedVersion: 16\n      name: 123\n      takeName: Take 001\n      firstFrame: 0.5\n      lastFrame: 30\n"
+            "  importAnimation: 1\n"
+        )
+        info = ModelImporterInfo.from_meta(text)
+        self.assertTrue(info.import_animation)
+        self.assertEqual(
+            [(c.name, c.take, c.first_frame, c.last_frame, c.loop) for c in info.clips],
+            [("tpose", "tpose", 0.0, 1.0, False), ("Jump_Up", "human_male_jumpup", 2.0, 18.0, True), ("123", "Take 001", 0.5, 30.0, False)],
+        )
+        info = ModelImporterInfo.from_meta("ModelImporter:\n  animations:\n    clipAnimations: []\n  importAnimation: 0\n")
+        self.assertFalse(info.import_animation)
+        self.assertEqual(info.clips, [])
+
     def test_resolve_material(self):
         info = ModelImporterInfo.from_meta(MODEL_META)
         self.assertEqual(info.resolve_material("MatA"), "d" * 32)

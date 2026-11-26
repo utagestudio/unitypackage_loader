@@ -262,6 +262,8 @@ def prepare_package(
     """パッケージを走査して解析する。``import_blend`` が False なら同梱 .blend は「読み込まない」扱いにする。
 
     ``pkg`` に走査済みのパッケージを渡すと、走査し直さない（入れ子のパッケージの判定で先に走査したとき。#217）。
+    段階は、マテリアル（``_parse_materials``）→ モデル（``_summarize_models``）→ prefab（``_analyze_prefabs``）→
+    パイプラインの判定（``_decide_pipeline``）。シーンの展開は ``PreparedPackage.ensure_scenes`` まで遅らせる。
     """
     path = Path(filepath)
     if pkg is None:
@@ -270,9 +272,34 @@ def prepare_package(
     table = shader_table or default_table()
     warnings: list[str] = list(pkg.warnings) + list(table.warnings)
 
+    unity_mats, normalized = _parse_materials(pkg, table, warnings.append)
+    models = _summarize_models(pkg, unity_mats, import_blend, warnings.append)
+    mesh_assets = _mesh_assets(pkg)
+    if not models and not ((pkg.scenes() or pkg.prefabs()) and (mesh_assets or _has_terrain_data(pkg))):
+        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
+
+    referenced = material_textures(normalized, normalized)
+    missing = {g for g in referenced if pkg.get(g) is None}
+    catalog = _catalog(models, mesh_assets)
+    expander, prefab_analyses = _analyze_prefabs(pkg, models, catalog, warnings.append)
+    pipeline = _decide_pipeline(pkg, normalized, warnings.append)
+    return PreparedPackage(
+        path, pkg, unity_mats, normalized, models, referenced, missing,
+        prefab_analyses=prefab_analyses, warnings=warnings, prefabs=_summarize_prefab_list(pkg, models, prefab_analyses),
+        scene_entries=pkg.scenes(), _expander=expander,
+        pipeline=pipeline.pipeline,
+        pipeline_source=pipeline.source,
+        catalog=catalog,
+    )
+
+
+def _parse_materials(
+    pkg: UnityPackage, table: ShaderTable, warn: Callable[[str], None]
+) -> tuple[dict[str, UnityMaterial], dict[str, NormalizedMaterial]]:
+    """.mat（とマテリアルを入れた .asset）を読み、生データと中間表現を GUID ごとに返す。読めないものは警告して外す（#69）。"""
     unity_mats: dict[str, UnityMaterial] = {}
     normalized: dict[str, NormalizedMaterial] = {}
-    declared = _ShaderDeclarations(pkg, warnings.append)
+    declared = _ShaderDeclarations(pkg, warn)
     # マテリアルを .asset に入れたもの（Terrain Asset Pack の Materials/*.asset。#216）も .mat と同じに読む。
     # .asset は走査でキャッシュしないので、まとめて 1 回で読む
     asset_materials = [
@@ -290,41 +317,52 @@ def prepare_package(
             umat = apply_uv_transforms(umat, declared.uv_transforms(umat.shader_guid))
             norm = normalize_material(umat, table, declared.get(umat.shader_guid), declared.defaults(umat.shader_guid))
         except Exception as exc:  # noqa: BLE001 - その .mat だけを外して続ける（#69）
-            warn_skipped(warnings.append, f"could not parse {entry.pathname}", exc)
+            warn_skipped(warn, f"could not parse {entry.pathname}", exc)
             continue
         unity_mats[entry.guid] = umat
         normalized[entry.guid] = norm
+    return unity_mats, normalized
 
+
+def _model_skip_reason(entry: AssetEntry, import_blend: bool) -> str:
+    """モデルを読み込めない理由（読み込めるなら空）。"""
+    if entry.ext not in SUPPORTED_MODEL_EXTS:
+        return "model format not supported yet"
+    if entry.ext == ".blend" and not import_blend:
+        return BLEND_DISABLED_REASON
+    if entry.ext == ".dae" and not operator_available("wm", "collada_import"):
+        return COLLADA_UNAVAILABLE_REASON
+    return ""
+
+
+def _summarize_models(
+    pkg: UnityPackage, unity_mats: dict[str, UnityMaterial], import_blend: bool, warn: Callable[[str], None]
+) -> list[ModelSummary]:
+    """モデルごとに .meta を読み、マテリアルの対応付けの数と読み込めるかをまとめる。"""
     models: list[ModelSummary] = []
     for entry in pkg.models():
-        info = _model_info(entry, warnings.append)
+        info = _model_info(entry, warn)
         if entry.ext == ".obj" and entry.obj_groups == []:
             # グループの無い OBJ は、Unity では中のメッシュが "default"、Blender ではファイル名のオブジェクトになる（#214）
             info.recycle_names = {k: (Path(entry.pathname).stem if v == OBJ_DEFAULT_NAME else v) for k, v in info.recycle_names.items()}
         names = list(info.external_materials)
         resolution = resolve_materials(names, info, unity_mats, entry.pathname)
         resolved = sum(1 for r in resolution.values() if r.guid)
-        skip_reason = ""
-        if entry.ext not in SUPPORTED_MODEL_EXTS:
-            skip_reason = "model format not supported yet"
-        elif entry.ext == ".blend" and not import_blend:
-            skip_reason = BLEND_DISABLED_REASON
-        elif entry.ext == ".dae" and not operator_available("wm", "collada_import"):
-            skip_reason = COLLADA_UNAVAILABLE_REASON
+        skip_reason = _model_skip_reason(entry, import_blend)
         models.append(ModelSummary(entry, len(names), resolved, not skip_reason, skip_reason, info))
-    mesh_assets = _mesh_assets(pkg)
-    if not models and not ((pkg.scenes() or pkg.prefabs()) and (mesh_assets or _has_terrain_data(pkg))):
-        raise PackageError("the package contains no model files (.fbx/.obj/.gltf/.glb/.vrm/.dae/.blend)")
+    return models
 
-    referenced = material_textures(normalized, normalized)
-    missing = {g for g in referenced if pkg.get(g) is None}
 
-    # prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
-    # 展開結果はキャッシュされ、あとでシーンを展開するときにも使う
-    model_guids = [m.guid for m in models]
-    catalog = _catalog(models, mesh_assets)
+def _analyze_prefabs(
+    pkg: UnityPackage, models: list[ModelSummary], catalog: ModelCatalog, warn: Callable[[str], None]
+) -> tuple[Expander, dict[str, PrefabAnalysis]]:
+    """prefab を展開して、モデルへの割り当ての表を作る。展開器（キャッシュ付き）と、表のある prefab の解析を返す。
+
+    prefab は Scenes 単位と同じ展開器で展開する（Prefab Variant・ネスト・上書き・削除・古い形式。#71）。
+    展開結果はキャッシュされ、あとでシーンを展開するときにも使う。当たり判定にだけ使うモデルには ``collider_only`` を立てる（#166）。
+    """
     collider_meshes: set[str] = set()
-    expander = catalog.expander(_prefab_reader(pkg, warnings.append, collider_meshes))
+    expander = catalog.expander(_prefab_reader(pkg, warn, collider_meshes))
     used_by_prefabs: set[str] = set()  # prefab の Renderer か配置が使うモデル
     prefab_analyses: dict[str, PrefabAnalysis] = {}
     for entry in pkg.prefabs():
@@ -338,10 +376,10 @@ def prepare_package(
                 analysis.meshes = [p for p in catalog.summarize(hierarchy).primitives if p.mesh_guid]
             used_by_prefabs.update(p.model_guid for p in placed)
         except Exception as exc:  # noqa: BLE001 - その prefab の割り当てだけを外して続ける（#69）
-            warn_skipped(warnings.append, f"could not resolve prefab {entry.pathname}", exc)
+            warn_skipped(warn, f"could not resolve prefab {entry.pathname}", exc)
             continue
         if hierarchy.unresolved_material_overrides:  # 位置などの上書きは Models / Prefabs 単位では使わないので数えない
-            warnings.append(
+            warn(
                 f"prefab {entry.pathname}: {hierarchy.unresolved_material_overrides} material override(s) on objects inside a model "
                 "are not read yet; the model's own assignments are used for them"
             )
@@ -349,29 +387,36 @@ def prepare_package(
             prefab_analyses[entry.pathname] = analysis
     for m in models:
         m.collider_only = m.guid in collider_meshes and m.guid not in used_by_prefabs
-    unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
-    # シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
-    # シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）
+    return expander, prefab_analyses
+
+
+def _decide_pipeline(pkg: UnityPackage, normalized: dict[str, NormalizedMaterial], warn: Callable[[str], None]):
+    """パッケージのレンダーパイプラインを判定する（``lights.decide_pipeline`` の結果）。
+
+    シェーダー表で分かったマテリアルだけを手掛かりにする。指紋で URP / HDRP と読んだ表に無いシェーダーは使わない（#116）。
+    シーン・prefab のライト・カメラに URP / HDRP の追加データがあれば、そちらを優先する（#120）。
+    """
     pipeline = decide_pipeline(
         (n.family for n in normalized.values() if n.shader_name),
         pipelines_in_assets(_asset_bytes(pkg, pkg.scenes() + pkg.prefabs())),
     )
     if pipeline.warning:
-        warnings.append(pipeline.warning)
+        warn(pipeline.warning)
+    return pipeline
+
+
+def _summarize_prefab_list(
+    pkg: UnityPackage, models: list[ModelSummary], prefab_analyses: dict[str, PrefabAnalysis]
+) -> list[PrefabSummary]:
+    """選択ダイアログに出す prefab の一覧。"""
+    unsupported = {m.guid: m.skip_reason for m in models if not m.supported}
     prefab_tables = {pathname: analysis.tables for pathname, analysis in prefab_analyses.items()}
     prefab_meshes = {
         pathname: [g for p in analysis.meshes for g in p.materials if g]
         for pathname, analysis in prefab_analyses.items() if analysis.meshes
     }
-    prefabs = summarize_prefabs(
-        ((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, model_guids, unsupported, prefab_meshes
-    )
-    return PreparedPackage(
-        path, pkg, unity_mats, normalized, models, referenced, missing,
-        prefab_analyses=prefab_analyses, warnings=warnings, prefabs=prefabs, scene_entries=pkg.scenes(), _expander=expander,
-        pipeline=pipeline.pipeline,
-        pipeline_source=pipeline.source,
-        catalog=catalog,
+    return summarize_prefabs(
+        ((e.guid, e.pathname) for e in pkg.prefabs()), prefab_tables, [m.guid for m in models], unsupported, prefab_meshes
     )
 
 

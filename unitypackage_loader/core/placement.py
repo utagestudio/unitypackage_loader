@@ -40,7 +40,7 @@ from .hierarchy import (
 )
 from .primitives import builtin_mesh_kind
 from .terrain import terrain_data_ref
-from .transform import Mat4, inverse_affine, multiply
+from .transform import IDENTITY, Mat4, inverse_affine, multiply
 from .unity_ids import mesh_file_id
 
 
@@ -261,138 +261,218 @@ def placements(
     Renderer から作った配置のルートがそのノード（GameObject 名か、ルートの Renderer のメッシュ参照で判定）なら、
     そのノードを単位行列にする。表の有無によらない（表ではルートが ``//RootNode`` になり、ノード名として引けないため）。Issue #185。
     """
-    root_names = _model_names(model_guids)
-    models = set(root_names)
-    tops = {g.lower(): name for g, name in (top_nodes or {}).items() if name}
-    top_levels = {g.lower(): names for g, names in (top_level_nodes or {}).items() if names}
-    tables = {g.lower(): table for g, table in (name_tables or {}).items()}
-    node_names = {g: names for g, table in tables.items() if (names := node_names_in_table(table)) is not None}
-    # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
-    sole = {
-        g.lower(): name for g, name in (sole_nodes or {}).items()
-        if name and not tables.get(g.lower()) and g.lower() in models
-    }
-    renderer_tables = {g: table for g, table in tables.items() if g not in sole}
-    for node in h.nodes.values():
-        renderer = node.renderer
-        if renderer is not None and renderer.mesh_guid in sole and renderer.mesh_file_id:
-            renderer_tables.setdefault(renderer.mesh_guid, {})[renderer.mesh_file_id] = sole[renderer.mesh_guid]
-    for g in sole:
-        if g in renderer_tables:
-            node_names[g] = set()
-    # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
-    for node in h.nodes.values():
-        renderer = node.renderer
-        if (
-            renderer is not None and renderer.mesh_guid in node_names
-            and renderer.mesh_file_id and renderer.mesh_file_id not in renderer_tables[renderer.mesh_guid]
-        ):
-            del node_names[renderer.mesh_guid]
+    ctx = _PlacementTables.build(h, model_guids, name_tables, sole_nodes, top_nodes, top_level_nodes)
     worlds = world_matrices(h)
     active = effective_active(h)
-    children = h.children()
 
     # 1 回目: Renderer ごとに名前とルートの候補を決める。モデルの PrefabInstance はそのまま配置にする
     items: list[ModelPlacement | _RendererRow] = []
     groups: dict[tuple[int, str], list[_RendererRow]] = {}
     for key, node in h.nodes.items():
         if node.model_guid is not None:
-            placement = ModelPlacement(node.model_guid, key, worlds[key], active[key])
-            for name, slots in node.model_materials.items():
-                placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
-            placement.node_transforms = copy.deepcopy(node.model_transforms)
-            placement.parts = {k: replace(v) for k, v in node.model_parts.items()}
-            _swap_model_mesh(placement, node, tables, sole_nodes or {}, models)
-            # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
-            collapsed = collapsed_root_name(tables.get(placement.model_guid, {}))
-            if collapsed is not None:
-                placement.root_node = collapsed
-                placement.node_transforms.setdefault(collapsed, {})
-            elif node.collapsed_key == SOLE_NODE and SOLE_NODE in placement.node_transforms:
-                # 表の無いモデルでルートを上書きした配置。畳まれた形かは読み込み側がオブジェクトの数で決める（#111）
-                placement.root_node = SOLE_NODE
-            items.append(placement)
+            items.append(_model_instance_placement(key, node, worlds[key], active[key], ctx))
             continue
-        renderer = node.renderer
-        if renderer is None or renderer.mesh_guid not in models:
-            continue
-        # FBX のノード名と同じ GameObject 名を優先する（複数のノードが 1 つのメッシュを共有する FBX もあるため）
-        names = node_names.get(renderer.mesh_guid)
-        table = renderer_tables.get(renderer.mesh_guid, {})
-        mesh_name = table.get(renderer.mesh_file_id)
-        name = unity_base_name(node.name)
-        if not (names and name in names) and mesh_name and mesh_name != ROOT_NODE_NAME:
-            name = mesh_name
-        candidate, own = _root_candidates(h, key, renderer.mesh_guid, table, names)
-        item = _RendererRow(key, name, candidate, own)
-        groups.setdefault((candidate, renderer.mesh_guid), []).append(item)
-        items.append(item)
-
-    # 候補をモデルのルートとみなさないグループ
-    dissolved: set[tuple[int, str]] = set()
-    for (candidate, guid), rows in groups.items():
-        if guid not in node_names or all(own == candidate for _, _, _, own in rows):
-            continue
-        repeated = len({name for _, name, _, _ in rows}) < len(rows)
-        # 部品が 1 つだけのときに限る（照明の prefab にろうそくを足したような、モデルのルートに別のモデルを置いたものは分けない）
-        mixed = len(rows) == 1 and unity_base_name(h.nodes[candidate].name) != root_names.get(guid) and any(
-            _is_foreign(h.nodes[child], guid, models) for child in children.get(candidate, []) if child in h.nodes
-        )
-        if repeated or mixed:
-            dissolved.add((candidate, guid))
+        row = _renderer_row(h, key, node, ctx)
+        if row is not None:
+            groups.setdefault((row.candidate, node.renderer.mesh_guid), []).append(row)
+            items.append(row)
+    dissolved = _dissolved_groups(h, groups, ctx)
 
     # 2 回目: 配置を作る
     result: list[ModelPlacement] = []
     by_root: dict[tuple[int, str], ModelPlacement] = {}
+    unlabeled: set[tuple[int, str]] = set()  # ルートがどの FBX のノードか決まらなかった配置
     for item in items:
         if isinstance(item, ModelPlacement):
             result.append(item)
             continue
-        key, name, candidate, own = item
-        node = h.nodes[key]
-        renderer = node.renderer
-        guid = renderer.mesh_guid
-        root = own if (candidate, guid) in dissolved else candidate
+        guid = h.nodes[item.key].renderer.mesh_guid
+        root = item.own if (item.candidate, guid) in dissolved else item.candidate
         placement = by_root.get((root, guid))
         if placement is None:
             placement = ModelPlacement(guid, root, worlds[root], active[root])
-            names = node_names.get(guid)
-            if names is not None:
-                label = _fbx_node_name(h.nodes[root], guid, renderer_tables.get(guid, {}), names)
-                # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
-                if label is not None:
-                    placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
-            elif guid in top_levels and not tables.get(guid) and root == key:
-                # 表の無い、最上位のノードが複数ある FBX を展開した GameObject（MeshDecals.fbx の RoadDecals.002 だけを置いた
-                # prefab）。ルートの GameObject がその最上位のノードなら、Unity の行列がノードの変換を含むので単位行列にする（#237）
-                base = unity_base_name(h.nodes[root].name)
-                if base in top_levels[guid]:
-                    placement.node_transforms[base] = copy.deepcopy(_IDENTITY_NODE)
-            # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
-            top = tops.get(guid)
-            if top and not placement.node_transforms and _is_top_node(h.nodes[root], guid, top, renderer_tables.get(guid, {})):
-                placement.node_transforms[top] = copy.deepcopy(_IDENTITY_NODE)
+            label = _root_node_label(h, root, item.key, guid, ctx)
+            if label is not None:
+                placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            else:
+                unlabeled.add((root, guid))
             by_root[(root, guid)] = placement
             result.append(placement)
-        if name in placement.renderers:
-            placement.renderers[name].relative = None
-            continue  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
-        # ルート自身の Renderer は置き直さない。FBX の最上位のノードを Unity がルートに畳んだもので、ルートの Transform が
-        # ノードの変換を含むため、オブジェクトの行列との関係が中のノードと違う（置き方は #98 / #181 / #185 で決まっている）
-        root_inverse = inverse_affine(placement.world) if key != root else None
-        placement.renderers[name] = PlacedRenderer(
-            name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
-            renderer.mesh_file_id, renderer.lod_level,
-            multiply(root_inverse, worlds[key]) if root_inverse is not None else None,
-            renderer.shadows_only,
-        )
-        # ルートからこの Node までの、上書き前の行列の積で逆算する
-        inverse = inverse_affine(node.scope_matrix)
-        if inverse is not None and key != root:
-            implied = multiply(multiply(worlds[key], inverse), h.nodes[root].scope_matrix)
-            if not _close(implied, placement.world):
-                placement.offsets[name] = implied
+        _add_renderer(h, placement, item, worlds, active, (root, guid) in unlabeled)
     return result
+
+
+@dataclass
+class _PlacementTables:
+    """``placements`` が使う、モデルごとの表（引数から作る）。"""
+
+    root_names: dict[str, str | None]  # モデルの GUID → ルートの名前
+    models: set[str]
+    tables: dict[str, dict[int, str]]  # .meta の表（fileID → 名前）
+    # Renderer の配置で使う表。表の無い 1 ノードの FBX は、メッシュ参照の fileID → ノード名の表をその場で作る
+    renderer_tables: dict[str, dict[int, str]]
+    node_names: dict[str, set[str]]  # 表から分かる FBX のノード名（ノードが分からないモデルは無い）
+    sole_nodes: Mapping[str, str]  # 引数のまま（#242 の差し替えで使う）
+    tops: dict[str, str]  # 最上位のノードが 1 つだけのモデル → その名前（#185）
+    top_levels: dict[str, frozenset[str]]  # 最上位のノードが複数あるモデル → その名前（#237）
+
+    @classmethod
+    def build(
+        cls,
+        h: Hierarchy,
+        model_guids: ModelNames,
+        name_tables: dict[str, dict[int, str]] | None,
+        sole_nodes: Mapping[str, str] | None,
+        top_nodes: Mapping[str, str] | None,
+        top_level_nodes: Mapping[str, frozenset[str]] | None,
+    ) -> _PlacementTables:
+        root_names = _model_names(model_guids)
+        models = set(root_names)
+        tables = {g.lower(): table for g, table in (name_tables or {}).items()}
+        node_names = {g: names for g, table in tables.items() if (names := node_names_in_table(table)) is not None}
+        sole = {
+            g.lower(): name for g, name in (sole_nodes or {}).items()
+            if name and not tables.get(g.lower()) and g.lower() in models
+        }
+        renderer_tables = {g: table for g, table in tables.items() if g not in sole}
+        for node in h.nodes.values():
+            renderer = node.renderer
+            if renderer is not None and renderer.mesh_guid in sole and renderer.mesh_file_id:
+                renderer_tables.setdefault(renderer.mesh_guid, {})[renderer.mesh_file_id] = sole[renderer.mesh_guid]
+        for g in sole:
+            if g in renderer_tables:
+                node_names[g] = set()
+        # 表に無いメッシュを指す Renderer があれば、その表は一部の行しか無い（古い番号を引き継いだ表）のでノードは分からない
+        for node in h.nodes.values():
+            renderer = node.renderer
+            if (
+                renderer is not None and renderer.mesh_guid in node_names
+                and renderer.mesh_file_id and renderer.mesh_file_id not in renderer_tables[renderer.mesh_guid]
+            ):
+                del node_names[renderer.mesh_guid]
+        return cls(
+            root_names=root_names,
+            models=models,
+            tables=tables,
+            renderer_tables=renderer_tables,
+            node_names=node_names,
+            sole_nodes=sole_nodes or {},
+            tops={g.lower(): name for g, name in (top_nodes or {}).items() if name},
+            top_levels={g.lower(): names for g, names in (top_level_nodes or {}).items() if names},
+        )
+
+
+def _model_instance_placement(key: int, node: Node, world: Mat4, active: bool, ctx: _PlacementTables) -> ModelPlacement:
+    """モデルの PrefabInstance の配置（ルートの Node をそのまま使う）。"""
+    placement = ModelPlacement(node.model_guid, key, world, active)
+    for name, slots in node.model_materials.items():
+        placement.renderers[name] = PlacedRenderer(name, list(slots), CLASS_MESH_RENDERER, True)
+    placement.node_transforms = copy.deepcopy(node.model_transforms)
+    placement.parts = {k: replace(v) for k, v in node.model_parts.items()}
+    _swap_model_mesh(placement, node, ctx.tables, ctx.sole_nodes, ctx.models)
+    # 1 メッシュの FBX は、ルートの Transform が FBX のノードの変換なので、読み込み側で組み立て直す（#99）
+    collapsed = collapsed_root_name(ctx.tables.get(placement.model_guid, {}))
+    if collapsed is not None:
+        placement.root_node = collapsed
+        placement.node_transforms.setdefault(collapsed, {})
+    elif node.collapsed_key == SOLE_NODE and SOLE_NODE in placement.node_transforms:
+        # 表の無いモデルでルートを上書きした配置。畳まれた形かは読み込み側がオブジェクトの数で決める（#111）
+        placement.root_node = SOLE_NODE
+    return placement
+
+
+def _renderer_row(h: Hierarchy, key: int, node: Node, ctx: _PlacementTables) -> _RendererRow | None:
+    """モデルのメッシュを直接指す Renderer の名前とルートの候補。そうでない Node なら None。"""
+    renderer = node.renderer
+    if renderer is None or renderer.mesh_guid not in ctx.models:
+        return None
+    # FBX のノード名と同じ GameObject 名を優先する（複数のノードが 1 つのメッシュを共有する FBX もあるため）
+    names = ctx.node_names.get(renderer.mesh_guid)
+    table = ctx.renderer_tables.get(renderer.mesh_guid, {})
+    mesh_name = table.get(renderer.mesh_file_id)
+    name = unity_base_name(node.name)
+    if not (names and name in names) and mesh_name and mesh_name != ROOT_NODE_NAME:
+        name = mesh_name
+    candidate, own = _root_candidates(h, key, renderer.mesh_guid, table, names)
+    return _RendererRow(key, name, candidate, own)
+
+
+def _dissolved_groups(
+    h: Hierarchy, groups: dict[tuple[int, str], list[_RendererRow]], ctx: _PlacementTables
+) -> set[tuple[int, str]]:
+    """候補をモデルのルートとみなさないグループ（``placements`` の説明を参照）。"""
+    children = h.children()
+    dissolved: set[tuple[int, str]] = set()
+    for (candidate, guid), rows in groups.items():
+        if guid not in ctx.node_names or all(row.own == candidate for row in rows):
+            continue
+        repeated = len({row.name for row in rows}) < len(rows)
+        # 部品が 1 つだけのときに限る（照明の prefab にろうそくを足したような、モデルのルートに別のモデルを置いたものは分けない）
+        mixed = len(rows) == 1 and unity_base_name(h.nodes[candidate].name) != ctx.root_names.get(guid) and any(
+            _is_foreign(h.nodes[child], guid, ctx.models) for child in children.get(candidate, []) if child in h.nodes
+        )
+        if repeated or mixed:
+            dissolved.add((candidate, guid))
+    return dissolved
+
+
+def _root_node_label(h: Hierarchy, root: int, key: int, guid: str, ctx: _PlacementTables) -> str | None:
+    """Renderer から作った配置のルートが FBX の中のノードなら、そのノードの名前（単位行列にする）。
+
+    ``key`` は配置を作るきっかけになった Renderer の Node。
+    """
+    names = ctx.node_names.get(guid)
+    label = None
+    if names is not None:
+        # FBX の中のノードをルートにした。ルートに Renderer が無くても、最初に見たのが子の Renderer でも同じ（#183）
+        label = _fbx_node_name(h.nodes[root], guid, ctx.renderer_tables.get(guid, {}), names)
+    elif guid in ctx.top_levels and not ctx.tables.get(guid) and root == key:
+        # 表の無い、最上位のノードが複数ある FBX を展開した GameObject（MeshDecals.fbx の RoadDecals.002 だけを置いた
+        # prefab）。ルートの GameObject がその最上位のノードなら、Unity の行列がノードの変換を含むので単位行列にする（#237）
+        base = unity_base_name(h.nodes[root].name)
+        if base in ctx.top_levels[guid]:
+            label = base
+    if label is not None:
+        return label
+    # FBX を展開したルートが、Unity が畳んだ最上位のノード（#185）
+    top = ctx.tops.get(guid)
+    if top and _is_top_node(h.nodes[root], guid, top, ctx.renderer_tables.get(guid, {})):
+        return top
+    return None
+
+
+def _add_renderer(h: Hierarchy, placement: ModelPlacement, item: _RendererRow, worlds: dict, active: dict,
+                  unlabeled_root: bool = False) -> None:
+    """配置に Renderer を加える（同名が既にあれば先のものを使い、置き直しの行列を外す）。
+
+    ``unlabeled_root`` は、ルートがどの FBX のノードか決まらなかった配置（``_root_node_label`` が None）。
+    """
+    key, name, root = item.key, item.name, placement.root
+    node = h.nodes[key]
+    renderer = node.renderer
+    if name in placement.renderers:
+        placement.renderers[name].relative = None
+        return  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
+    # ルート自身の Renderer は置き直さない。FBX の最上位のノードを Unity がルートに畳んだもので、ルートの Transform が
+    # ノードの変換を含むため、オブジェクトの行列との関係が中のノードと違う（置き方は #98 / #181 / #185 で決まっている）
+    # ただし、ルートがどの FBX のノードか決まらないとき（新しい形式の .meta で名前の表が無く、GameObject 名もノード名と違う。
+    # Office Assets の Cork Board の紙とピン）は、FBX のノードの変換を消せないので、ルートの位置（単位行列）に置き直す。
+    # Unity は MeshFilter が指すメッシュを、その GameObject の Transform で描く（#272）
+    root_inverse = inverse_affine(placement.world) if key != root else None
+    if root_inverse is not None:
+        relative = multiply(root_inverse, worlds[key])
+    else:
+        relative = IDENTITY if unlabeled_root else None
+    placement.renderers[name] = PlacedRenderer(
+        name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
+        renderer.mesh_file_id, renderer.lod_level, relative, renderer.shadows_only,
+    )
+    # ルートからこの Node までの、上書き前の行列の積で逆算する
+    inverse = inverse_affine(node.scope_matrix)
+    if inverse is not None and key != root:
+        implied = multiply(multiply(worlds[key], inverse), h.nodes[root].scope_matrix)
+        if not _close(implied, placement.world):
+            placement.offsets[name] = implied
 
 
 @dataclass

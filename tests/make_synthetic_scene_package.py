@@ -710,6 +710,11 @@ def main() -> None:
         game_object(6100, "Ring Renamed"),
         transform(6101, 6100, pos=(-20, 0, 0)),
         mesh_renderer(6102, 6103, 6100, rings_model, mats["ProbeRed"], mesh_file_id("Ring.001")),
+        # 同じく Rod.001（FBX の中で x = 2 にある）を名前を変えた GameObject で置く。Unity はメッシュを GameObject の
+        # Transform で描くので、FBX の中のノードの位置の分ずらさない（#272。Office Assets の Cork Board の紙とピン）
+        game_object(6200, "Rod Renamed"),
+        transform(6201, 6200, pos=(-20, 0, 3)),
+        mesh_renderer(6202, 6203, 6200, rings_model, mats["ProbeMat"], mesh_file_id("Rod.001")),
         game_object(6000, "Hidden", active=0),
         transform(6001, 6000, pos=(6, 0, 0)),
         instance(6002, model, 6001, []),

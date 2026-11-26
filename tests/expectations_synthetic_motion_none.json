@@ -1,0 +1,16 @@
+{
+  "options": {
+    "unit": "MODELS",
+    "animation": "NONE"
+  },
+  "errors": 0,
+  "clips": {
+    "count": 0,
+    "armatures": 3,
+    "take_actions": 0,
+    "tracks": {
+      "Rig": [],
+      "CharRig": []
+    }
+  }
+}

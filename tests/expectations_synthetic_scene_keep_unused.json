@@ -38,7 +38,7 @@
     }
   ],
   "warnings_contain": [
-    "scene Assets/Synthetic/Scenes/Probe.unity: 5 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
+    "scene Assets/Synthetic/Scenes/Probe.unity: 6 object(s) from model files are not used by the Unity prefabs or scene and were hidden",
     "scene Assets/Synthetic/Scenes/Legacy.unity: 4 object(s) from model files are not used by the Unity prefabs or scene and were hidden"
   ],
   "warnings_exclude": [

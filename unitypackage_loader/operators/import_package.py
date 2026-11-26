@@ -74,7 +74,16 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
             "Otherwise the glTF importer is used and materials are rebuilt from .mat files"
         ),
     )
-    use_anim: BoolProperty(name="Import Animation", default=False)
+    animation: EnumProperty(
+        name="Animation",
+        items=(
+            ("MUTED", "Muted", "Import the models' animation takes (split into Unity's clips) and the package's .anim clips "
+             "as muted NLA tracks. The scene looks the same right after the import"),
+            ("ACTIVE", "Active", "Same as Muted, but unmute the first track of each object"),
+            ("NONE", "None", "Do not import animation"),
+        ),
+        default="MUTED",
+    )
     ignore_leaf_bones: BoolProperty(name="Ignore Leaf Bones", default=True)
     import_blend: BoolProperty(
         name="Import Bundled .blend Files",
@@ -176,7 +185,7 @@ class IMPORT_SCENE_OT_unitypackage(bpy.types.Operator, ImportHelper):
         header.label(text="Model", icon="MESH_DATA")
         if body:
             body.prop(self, "fbx_importer")
-            body.prop(self, "use_anim")
+            body.prop(self, "animation")
             body.prop(self, "ignore_leaf_bones")
             body.prop(self, "use_vrm_addon")
             body.prop(self, "import_blend")

@@ -32,7 +32,7 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
 | FBX | 1 | Blender から書き出されたもの。テクスチャは **埋め込まれていない** |
 | .mat | 数個 | 全て **lilToon** 系シェーダー |
 | PNG | 数十枚 | メイン / ノーマル / MatCap / マスク。加えて Expression メニュー用アイコン（無関係） |
-| .prefab / .controller / .anim / .asset | 多数 | 全て対象外 |
+| .prefab / .controller / .anim / .asset | 多数 | 当初は全て対象外（prefab は後に配置を、Generic な .anim は #209 で Action を読むようにした） |
 
 ### 0.3 「どのメッシュにどのマテリアルが付くか」の情報源
 
@@ -84,6 +84,12 @@ Blender から `.unitypackage` を直接読み込み、メッシュ（アーマ�
     ルートの Empty の行列 E の下で E·C·R·A（下記の N = C·L·A と同じ関係）を求め、いまの置き方と違うオブジェクトだけを置き直す。上書きで動いた部品もこれで扱うので、
     FBX のモデルでは `offsets` を使わない（FBX 以外のモデルは今までどおり `offsets`）。オブジェクトと Renderer の対応は prefab の表と同じ `prefab.find_renderer`
     （Blender が付け替えた連番も引ける。#155）で、1 つの Renderer に複数のオブジェクトが当たるときと、同じ配置に同名の Renderer があるときは置き直さない。
+  - ルート自身の Renderer は、ふつう R を持たない（Unity が FBX の最上位のノードをルートに畳んだ形で、ノードを単位行列にして扱う。#98 / #181 / #185）。
+    ただし、ルートがどの FBX のノードか決まらないとき（`_root_node_label` が None。新しい形式の .meta で名前の表が無く、GameObject 名もノード名と違う）は、
+    ノードの変換を消せずにその分ずれるので、R を単位行列にして GameObject の位置に置き直す（Unity は MeshFilter が指すメッシュを GameObject の Transform で描く。#272）。
+    Office Assets の Showcase で、Cork Board の紙とピンのほか、本・段ボール箱・PC 本体・飾り棚の小物（計 46 オブジェクト。FBX の中で横に並べて作ったものが、
+    その並びの分 0.2〜1.4 m ずれていた）が GameObject の位置に合った。Cardboard Boxes、NewGen、Destroyed Building Kit、Synty Starter、Japanese Apartment、
+    Cafeteria、Yumeka は変わらない。
     ルートの GameObject 自身の Renderer は対象にしない（Unity がノードをルートに畳んだもので、ルートの Transform がノードの変換を含み、A の関係が成り立たない。
     Train Station の `ts_corebldg` や Starter の `SM_Generic_CloudRing_01` で、スケールが 100 倍違っていた）。位置の比較は 0.1 mm ＋ 座標の 100 万分の 1 の範囲で、
     座標に比例させるだけだと原点から遠い部品の数 cm のずれを見逃す（Farm の 216 m 先の門扉）。
@@ -184,19 +190,19 @@ prefab を挟んだ外側からの上書き（Prefab Variant をシーンに置�
 
 **古い形式のモデルの中への上書き**（Issue #53）: Unity 2018.2 以前の形式のモデルの .meta の `fileIDToRecycleName` を `ModelImporterInfo.recycle_names` に読み、モデルの PrefabInstance の中への上書きを名前付きで配置に記録する（`core/hierarchy.py`）。fileID は「クラス ID × 100000 + 通し番号」で、ルートはふつう 100000 / 400000（`//RootNode`）。Unity 4 で取り込んだモデルは名前順などで番号を振り、`//RootNode` が 100006 / 400006 のように後ろになって 100000 が中のノードを指すことがあるので、表に `//RootNode` の行があればそれをルートにする（`hierarchy.legacy_root_ids`。表が無い・行が足りなければ 100000 / 400000）。以前は 400000 と決め打ちしていて、Japanese School Cafeteria の窓・扉・柵（複数ノードの FBX）では、配置の位置の上書きが中のノードに当たってルートが原点に残っていた。展開したモデルの階層の表にも、この古い形式のルートの番号を載せる（`Expander._model`）。prefab の中に置いたモデルのルートを、外側から「中の PrefabInstance の fileID XOR 元の fileID」で指す上書きが古い形式の番号で書かれていることがあり、新しい形式の定数だけでは当たらなかった（Destroyed Building Kit の `DBK_Big_Scene` が `DBK_Cinderblock_Building.prefab` の中の瓦礫の板 `rubble` を `m_IsActive: 0` で隠している。#244）。
 
-Unity 4 以前に書き出したパッケージは、`asset.meta`（YAML）の代わりに `metaData` を持つ。中身は取り込み結果（GameObject・Mesh など）とインポーターを入れたバイナリの SerializedFile（version 9）で、ヘッダーのファイルサイズの後ろにプレビューの PNG が続く。scan でモデルの `metaData` だけを読み、ModelImporter の `m_FileIDToRecycleName` を上の表と同じ形にする（`meta.legacy_meta` → `AssetEntry.legacy_meta`）。あわせて `m_GlobalScale` も読む。Unity 4 は FBX の単位（UnitScaleFactor）を見ず、頂点の値にこれだけを掛ける（Japanese School Cafeteria では cm の FBX 25 個も m の FBX 28 個も 0.01 で、頂点はどちらも cm の値。エアコンは cm 指定で頂点 80 → 0.8 m、柵は m 指定で頂点 150 → 1.5 m）。Blender の FBX インポーターは UnitScaleFactor / 100 を掛けるので、m 指定のものが 100 倍になっていた。Unity 4 のモデルは読み込みで `m_GlobalScale × 100 / UnitScaleFactor` を掛けて Unity と同じ大きさにし（`ModelImporterInfo.import_scale`）、配置の計算（`_node_basis` などの fileScale）には `m_GlobalScale` を渡す（`unity_unit_scale`）。Models / Prefabs 単位でも同じ大きさで読む。テクスチャの `metaData` は取り込んだ画像まで入っていて大きく、ノーマルマップなどの設定は今は読まない。
+Unity 4 以前に書き出したパッケージは、`asset.meta`（YAML）の代わりに `metaData` を持つ。中身は取り込み結果（GameObject・Mesh など）とインポーターを入れたバイナリの SerializedFile（version 9）で、ヘッダーのファイルサイズの後ろにプレビューの PNG が続く。scan でモデルの `metaData` だけを読み、ModelImporter の `m_FileIDToRecycleName` を上の表と同じ形にする（`meta.legacy_meta` → `AssetEntry.legacy_meta`）。あわせて `m_GlobalScale` も読む。Unity 4 は FBX の単位（UnitScaleFactor）を見ず、頂点の値にこれだけを掛ける（Japanese School Cafeteria では cm の FBX 25 個も m の FBX 28 個も 0.01 で、頂点はどちらも cm の値。エアコンは cm 指定で頂点 80 → 0.8 m、柵は m 指定で頂点 150 → 1.5 m）。Blender の FBX インポーターは UnitScaleFactor / 100 を掛けるので、m 指定のものが 100 倍になっていた。Unity 4 のモデルは読み込みで `m_GlobalScale × 100 / UnitScaleFactor` を掛けて Unity と同じ大きさにし（`ModelImporterInfo.import_scale`）、配置の計算（`model_space.node_basis` などの fileScale）には `m_GlobalScale` を渡す（`unity_unit_scale`）。Models / Prefabs 単位でも同じ大きさで読む。テクスチャの `metaData` は取り込んだ画像まで入っていて大きく、ノーマルマップなどの設定は今は読まない。
 
 Unity 4 のシーンは、PrefabInstance（`m_IsExploded: 1`）の中身を stripped にせず、値ごとふつうの GameObject / Transform / Renderer として保存している（各ドキュメントが `m_PrefabParentObject` で元のオブジェクトを、`m_PrefabInternal` で PrefabInstance を指す）。そのまま読むと、PrefabInstance から差し込んだものと二重になる。`parse_asset` は、展開済みの PrefabInstance の中にあって元を持つドキュメントを stripped と同じく別名として扱い、配置は差し込みと上書きで作る（元を持たないもの＝その PrefabInstance で足したオブジェクトは、シーンのものとして残す）。2018.2 以前でも YAML のシーンは stripped を使い、この値を持たない（手元の SbbUtutuya のパッケージで確認）。
 
 - マテリアル（`m_Materials.Array.data[N]`、クラス 23 / 137）: 配置の `renderers` に入れ、既存のスロット単位の割り当てで当てる。上書きの無いスロットは None で、.meta・名前一致の結果のまま。1 メッシュの FBX では Renderer が `//RootNode` に載るので、表のメッシュ名（クラス 43 がただ 1 つ）をオブジェクト名にする
-- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`blender/scene_objects.py` の `apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）。A は Y が上の FBX（Maya・Blender が書き出すもの）での形で、一般には A = f·U（U は Unity がその FBX の頂点に掛ける軸の変換。`fbx_units.unity_axis_matrix`、`ModelUnits.basis_a`）。Y が上なら U = diag(−1, 1, 1)、3ds Max の Z が上の FBX（GlobalSettings の UpAxis が 2）で、.meta の Bake Axis Conversion（`meshes.bakeAxisConversion`。`ModelImporterInfo.bake_axis_conversion`）が有効なら Y と Z の入れ替え（入れ替えだけで左手系になる）。Bake Axis Conversion が無効（既定）なら、Unity は軸の変換を頂点に焼き込まずルートの回転として持ち、シーン・prefab に保存されるルートの回転にもそれが入るので、Y が上と同じ U = diag(−1, 1, 1) で合う（Unreal 由来の Z が上の FBX を使う Shibuya で、入れ替えを当てると建物などが 90° 回っていた。1.17.0 の開発中に見つけて直した）。Blender の FBX インポーターはファイルの上の軸を +Z にする B（`blender_axis_matrix`）を掛けるが、Z が上の FBX では回転を掛けないので、読み込んだ直後に最上位のオブジェクトへ K = C·U·B⁻¹ を左から掛けて Unity と同じ向きにそろえる（`axis_correction`。Bake Axis Conversion を入れたモデルだけ。Y が上なら K は単位行列で何もしない）。Cardboard Boxes Pack（box0.FBX などがインチ・Z が上・globalScale 2.54）で、展開した prefab の箱が X 軸のまわりに 90° 倒れていた（Issue #240。Unity 6000.6.9f1 で demo シーンを開いて書き出した 1,861 個の Renderer と突き合わせ、一致が 762 → 1,861）。Renderer の GameObject を Unity の位置に置き直すとき（`apply_renderer_worlds`）は、ルートの Empty のワールドから直接置くので、親の逆行列で掛けている globalScale も掛ける（`ModelUnits.world_basis_a`。以前は掛けておらず、globalScale が 1 でないモデルで子の部品が小さく、位置が寄っていた）
+- 位置・回転・スケール（クラス 4）: `node_transforms` に成分ごとに記録し、読み込み時に当てる（`blender/scene_objects.py` の `apply_node_transforms`）。上書きは Unity のノード空間の値で、元の値はパッケージに無い。Unity 6 に室内アセットを展開し、FBX を読んだノードの値・シーンの Renderer の外形とマテリアルを書き出して Blender と突き合わせた結果、原点に読み込んだ Blender のオブジェクトの行列 N と Unity のノードの行列 L は N = C·L·A（A = diag(−f, f, f)、f は Unity の fileScale = FBX の UnitScaleFactor / 100）だった（UnitScaleFactor 100 と 1 の FBX、Blender 由来の FBX で一致）。元のノード値を L = C⁻¹·N·A⁻¹ で求め、上書きの無い成分はそのまま使い、C·L'·A をオブジェクトの `matrix_basis` にする（親は配置の Empty で、globalScale は親の逆行列）。UnitScaleFactor は `core/fbx_units.py` が FBX から読む（バイナリ、ASCII の FBX 7 / 6）。A は Y が上の FBX（Maya・Blender が書き出すもの）での形で、一般には A = f·U（U は Unity がその FBX の頂点に掛ける軸の変換。`fbx_units.unity_axis_matrix`、`model_space.ModelUnits.basis_a`）。Y が上なら U = diag(−1, 1, 1)、3ds Max の Z が上の FBX（GlobalSettings の UpAxis が 2）で、.meta の Bake Axis Conversion（`meshes.bakeAxisConversion`。`ModelImporterInfo.bake_axis_conversion`）が有効なら Y と Z の入れ替え（入れ替えだけで左手系になる）。Bake Axis Conversion が無効（既定）なら、Unity は軸の変換を頂点に焼き込まずルートの回転として持ち、シーン・prefab に保存されるルートの回転にもそれが入るので、Y が上と同じ U = diag(−1, 1, 1) で合う（Unreal 由来の Z が上の FBX を使う Shibuya で、入れ替えを当てると建物などが 90° 回っていた。1.17.0 の開発中に見つけて直した）。Blender の FBX インポーターはファイルの上の軸を +Z にする B（`blender_axis_matrix`）を掛けるが、Z が上の FBX では回転を掛けないので、読み込んだ直後に最上位のオブジェクトへ K = C·U·B⁻¹ を左から掛けて Unity と同じ向きにそろえる（`model_space.axis_correction`。Bake Axis Conversion を入れたモデルだけ。Y が上なら K は単位行列で何もしない）。Cardboard Boxes Pack（box0.FBX などがインチ・Z が上・globalScale 2.54）で、展開した prefab の箱が X 軸のまわりに 90° 倒れていた（Issue #240。Unity 6000.6.9f1 で demo シーンを開いて書き出した 1,861 個の Renderer と突き合わせ、一致が 762 → 1,861）。Renderer の GameObject を Unity の位置に置き直すとき（`apply_renderer_worlds`）は、ルートの Empty のワールドから直接置くので、親の逆行列で掛けている globalScale も掛ける（`ModelUnits.world_basis_a`。以前は掛けておらず、globalScale が 1 でないモデルで子の部品が小さく、位置が寄っていた）
 - 当てるのはモデルの最上位のオブジェクトだけ。入れ子のオブジェクトとアーマチュアで変形するものは件数を警告に出す。表に無い fileID は今までどおり数える
 - 室内アセットのシーンでは、FBX 由来の Renderer 120 個すべてで、Unity の外形の中心との差が 1 cm 未満、マテリアルも一致した
 
 **1 メッシュの FBX をモデルの PrefabInstance で置いた配置**（Issue #99）: この形の FBX では Unity がノードを `//RootNode` に畳み、**モデルのルートの Transform の値が FBX のノードの変換 L** になる（Issue #98 と同じ事実の裏返し）。シーンの上書きは L の成分を置き換えるので、上書きしなかった成分には L の値が残る（位置と回転だけ動かした配置では、スケールは FBX のノードの値のまま）。展開した階層はルートを単位行列で作るため、そのままでは上書きの無い成分が失われ、さらに Blender のオブジェクトが持つノードの変換と二重に掛かっていた。
 
 - `core/hierarchy.py` / `core/expander.py` / `core/placement.py`: 表から畳まれたノードの名前を求め（`collapsed_root_name`）、配置の `root_node` に入れる。ルートの Transform への上書きは、当てるのに加えて成分ごとに `node_transforms[root_node]` へ記録する（上書きの無い成分は None）
-- `blender/scene_objects.py` の `apply_collapsed_root`: 原点に読み込んだオブジェクトの行列から L を逆算し、上書きを当てた M で配置の Empty を C·M·C⁻¹ に直し、オブジェクトはノードを単位行列にした C·A にする。Empty を直すので、そこに付けたシーン側の子も Unity と同じ位置になる
+- `blender/scene_objects.py` の `apply_collapsed_root`（行列は `core/model_space.py` の `collapsed_root`）: 原点に読み込んだオブジェクトの行列から L を逆算し、上書きを当てた M で配置の Empty を C·M·C⁻¹ に直し、オブジェクトはノードを単位行列にした C·A にする。Empty を直すので、そこに付けたシーン側の子も Unity と同じ位置になる
 - 期待値は Unity 6000.6.0f1 で同じ置き方（位置と回転だけ上書き）を再現した頂点のワールド座標で確かめた（合成シーンの `SlabInstance`）
 - 表の無いモデル（Issue #111）: `.meta` の表が空だと 1 メッシュの FBX か分からないので、展開ではルートの Transform への上書きを成分ごとに`node_transforms[SOLE_NODE]` へ記録し、`root_node` を `SOLE_NODE` にしておく（ルートを上書きしていなければ記録しない）。読み込み側は、読み込んだオブジェクトが子の無い 1 つだけなら畳まれた形とみなし、そのオブジェクトの名前で `apply_collapsed_root` を当てる。オブジェクトが複数なら Unity のルートは単位行列が基準なので、展開した行列のまま置く。実例は Shibuya.unitypackage の `SM_MetroEntrance_02`（ノードの回転は Unity で euler (270, 180, 0)。シーンが回転を (270, 2.47, 0) に上書きするので、Y の 180 度は Unity では消える）で、Unity 6000.6.0f1 の batchmode で求めたワールドのバウンディングボックスと突き合わせた。合成シーンでは、`SlabInstance` と同じ FBX を表の無い `.meta` で置いた `SlabBareInstance` で確かめる
 - prefab で包んだ形（Issue #111）: 地下鉄の入口は、FBX をルートの位置 0・回転なしで置いた prefab を、シーンがさらに上書きしている。以前は FBX を直接置いた階層の上書きしか成分付きで記録しておらず、外側の上書きが読み込み側に渡っていなかった（表のあるモデルでも同じ）。そこで畳まれうるモデルのルートの Node に `collapsed_key`（表から求めたノード名か `SOLE_NODE`）を持たせ、`_apply_modification` が位置・回転・スケールを当てるときに、どの階層の上書きでも `model_transforms[collapsed_key]` に記録する。合成シーンの `SlabBareWrapped` / `SlabWrapped` で確かめる
@@ -313,9 +319,11 @@ Material:
 - メッシュ・アーマチュア・シェイプキー・UV・頂点カラー（FBX インポーターの能力の範囲）。
 - マテリアル: `.mat` を解析し、**Blender で意味を持つ情報だけ**をノードに反映。
 - テクスチャ: `.mat` から参照されている画像のみ展開して読み込む（オプションで全画像）。
+- アニメーションクリップ: Generic な `.anim` のシェイプキー・表示の切り替え・オブジェクトの Transform を、クリップごとの Action にしてミュートした NLA トラックに並べる（§4.7.1。#209）。
+- モデルの中のモーション: FBX のテイクを、.meta の `clipAnimations` どおりのクリップにして NLA に並べる。同じ骨格のモーションだけのモデルは 1 体のアーマチュアにまとめる（§4.7.2。#276）。
 
 ### 読み込まない
-- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、アニメーション（`.anim` `.controller`）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
+- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、Animator Controller（`.controller`）と Humanoid の `.anim`・ボーンのカーブ（§4.7.1）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
 
 ### マテリアルの対応方針
 Unity と 1:1 は不可能なので、**「Unity マテリアル → シェーダー非依存の中間表現（NormalizedMaterial）→ Blender ノード」** の 2 段変換にし、シェーダーごとの差は「プロファイル」に閉じ込める（§4.5）。
@@ -363,7 +371,8 @@ File > Import > Unitypackage (.unitypackage)      .unitypackage を 3D View に�
 | VRM via VRM Add-on | Bool = ON | `.vrm` を VRM add-on に委譲する。add-on が無ければ glTF インポーターにフォールバックし警告で案内 |
 | Import bundled .blend files | Bool = OFF | 同梱 `.blend` を append する。`.blend` はドライバー式等で Python を実行し得るため既定 OFF。ON のとき UI に警告を出す。OFF なら該当モデルはスキップして警告に理由を出す |
 | FBX Importer | Enum: `Auto` / `New (C++)` / `Legacy (Python)` = `Auto` | `Auto` と New は `wm.fbx_import`、Legacy だけ `import_scene.fbx`。Scale（常に表示）はモデルのインポーターに渡す |
-| Import Animation / Ignore Leaf Bones | Bool = OFF / ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
+| Animation | Enum: `Muted` / `Active` / `None` = `Muted` | モデルのテイク（§4.7.2）とパッケージの `.anim`（§4.7.1）を NLA トラックにする。`Muted` はすべてミュート（読み込んだ直後の見た目は変わらない）、`Active` はオブジェクトごとに最初の 1 本だけミュートを外す（上のトラックが下を上書きするので 1 本だけ）、`None` は読まない（FBX インポーターの `use_anim` も切る）。以前の Import Animation（FBX に渡すだけ、既定 OFF）と Animation Clips（#209）を 1 つにした（#276） |
+| Ignore Leaf Bones | Bool = ON | FBX インポーターへ渡す（アーマチュアとシェイプキーは常に読む） |
 
 **Materials**
 | 項目 | 型 / 既定値 | 説明 |
@@ -561,6 +570,7 @@ Base × Shadow Color と Base を係数で混ぜ、Shadow Strength で元に戻�
   - Objects / Materials / Textures の一覧
   - 未解決マテリアル（.mat が見つからない）、パッケージに無いテクスチャ GUID、非対応シェーダー、読めない画像（統合した画像の無い PSD など）
   - 「Open extract folder」「Copy log」ボタン
+- アニメーションクリップを Action にしたら、その数を要約と N パネルに出し、読まなかったクリップ・カーブの内訳はコンソール（`as_text`）に出す（§4.7.1）
 - 警告はインポートを止めず、可能なところまで進めて記録する。
 
 ### 3.5 アドオン Preferences
@@ -602,6 +612,8 @@ unitypackage_loader/
 │   └─ preferences.py
 ├─ core/                         # bpy 非依存。純 Python で単体テスト可能
 │   ├─ package.py                # tar 走査・索引・オンデマンド展開
+│   ├─ model_contents.py         # 走査のときにモデルの中身から覚える FBX のノード名・マテリアル名、OBJ のグループ名
+│   ├─ nested_package.py         # 入れ子の .unitypackage の選び方と、外側のアセットとの結合（#217）
 │   ├─ unity_yaml.py             # Unity YAML サブセットパーサー
 │   ├─ unity_binary.py           # バイナリ形式の SerializedFile リーダー（TypeTree 付き）
 │   ├─ meta.py                   # ModelImporter / TextureImporter の読み取り
@@ -618,6 +630,9 @@ unitypackage_loader/
 │   ├─ placement.py              # 展開した階層からモデルの配置を求める（placements / summarize / ModelCatalog）
 │   ├─ scene_import.py           # シーンの読み込みの判定（隠す部品）と警告文
 │   ├─ transform.py              # Unity の Transform の行列と Unity → Blender の座標変換
+│   ├─ model_space.py            # 置いたモデルの行列（FBX の単位と軸 ModelUnits、ノードへの上書き、Renderer の位置。#263）
+│   ├─ animation.py              # AnimationClip（.anim）の読み取り、カーブの評価・ベジェのハンドル、オイラー角（#209）
+│   ├─ animation_targets.py      # クリップの階層パスを、読み込んだオブジェクトとボーンに結び付ける（#209）
 │   ├─ shader_source.py          # パッケージ内の .shader / .shadergraph が宣言するプロパティ名（残りを外す。#118）と描画の既定（#202）
 │   ├─ shader_graph.py           # .shadergraph のつながりから、テクスチャの UV の Tiling & Offset を読む（#193）
 │   ├─ decals.py                 # DecalProjector を投影の箱の中の板で近似する（#165）
@@ -647,8 +662,12 @@ unitypackage_loader/
 │   ├─ scene_placement.py        # シーン 1 つの配置（SceneImport。モデル・組み込みメッシュ・Terrain・デカール・ライト・カメラ）
 │   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
 │   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
+│   ├─ animation.py              # クリップの Action と NLA トラック（ClipImporter。#209）
+│   ├─ fbx_motion.py             # モデルのテイクのクリップへの分割（MotionBuilder。#276）
+│   ├─ rig_merge.py              # モーションだけのアーマチュアのまとめとレストの違いの変換（merge_motion_rigs。#276）
+│   ├─ nla.py                    # クリップを NLA のトラックに置く共通処理（Active のときのミュート・ループ。#281）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
-│   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の補正・非表示
+│   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の当てはめ（計算は core/model_space.py）・非表示
 │   ├─ materials.py              # ノード生成
 │   ├─ nodes.py                  # ノードの組み立ての共通関数
 │   ├─ toon_group.py             # UnityToon ノードグループ
@@ -657,6 +676,7 @@ unitypackage_loader/
 └─ tests/
     ├─ test_*.py                 # unittest（bpy 不要）
     ├─ unity_yaml_writer.py      # テストと合成パッケージの生成で使う、Unity の YAML を組み立てる関数
+    ├─ anim_writer.py            # 同じく AnimationClip（.anim）の YAML を組み立てる関数
     ├─ make_synthetic_*.py       # 合成パッケージの生成（Blender で実行）
     ├─ integration_import.py     # blender -b --python で実行し、期待値 JSON と照合する
     ├─ integration_runs.json     # 合成パッケージの生成スクリプトと、どのパッケージをどの期待値で回すかの一覧
@@ -998,7 +1018,8 @@ def resolve(model_entry, fbx_material_names, index) -> dict[str, str | None]:
 
 1 回の読み込みは `_ImportSession`（`importer.py`）が手順を並べる: 解析（`analyze`）→ 読み込むモデルの決定 → 展開（`extract`）→
 画像の読み込み → prefab のグループごと（`import_group`）かシーンごと（`SceneImport`。`scene_placement.py`）のモデルの読み込み →
-足りなかったテクスチャの補い（`fill_missed_textures`）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
+足りなかったテクスチャの補い（`fill_missed_textures`）→ モーションだけのアーマチュアのまとめ（`merge_motion_rigs`。§4.7.2）→ アニメーションクリップ（`import_clips`。§4.7.1）。
+モデルのテイクは、モデルを読み込むたびに `build_model` から `MotionBuilder.arrange` で NLA に並べる（§4.7.2）。マテリアルの対応付けと組み立ては `SessionMaterials`（`session_materials.py`）、
 モデルファイルの読み込みは `model_import.py` にある。以前は `importer.py` 1 つ（約 1,900 行）だったのを、役割ごとに分けた（#198）。
 下の擬似コードは最初の設計で、流れを示すもの。
 
@@ -1048,6 +1069,87 @@ def run(ctx, filepath, opts) -> Report:
   `bpy.ops` のサブモジュールの `hasattr` はどんな名前でも True になり、C で定義されたオペレーターは `bpy.types` にも現れないので、オペレーターの有無はこの 2 つでは判定できない。
 - Blender 4.x の `bpy.data.materials.new()` はノードツリーを持たない（5.0 以降は持つ）。こちらで作るマテリアル（スロット分割・アウトライン）は、組み立ての前に `use_nodes` を立てる。
 
+### 4.7.1 アニメーションクリップ（#209）
+
+パッケージの `.anim`（AnimationClip）を、読み込んだオブジェクトの Action にする。Animator Controller は読まない。
+
+- **解析**（`core/animation.py`）: `parse_clip` は YAML でもバイナリ（Force Binary）でも `load_documents` で読み、`m_PositionCurves` /
+  `m_RotationCurves` / `m_EulerCurves` / `m_ScaleCurves`（成分ごとの `Curve` に分ける）と `m_FloatCurves` のうち、シェイプキー
+  （classID 137 の `blendShape.*`）、GameObject の `m_IsActive`、Renderer の `m_Enabled` を返す。実行時のカーブが無いクリップは
+  `m_EditorCurves` を読む。Animator（classID 95）のパスの無いカーブで、マッスル値やルートの動き（`RootT.x`、`Left Arm Down-Up`、
+  `LeftHand.Thumb.1 Stretched` など）の名前のものがあれば Humanoid とし、マッスル値のカーブは返さない。ほかのカーブは返すが、`ClipImporter` はクリップごと外す
+  （体の動きはマッスル値にあり、残りは補助のボーン（ひねりのボーンなど）の動かないカーブだけで使い道が無い。Everyday Motion Pack で、
+  それだけを読んで動かないトラックが並んでいた。元のモーションは `@` 付きの FBX のテイクにあり、#276 で扱う）。
+  マテリアルのプロパティ・Animator のパラメーター・オブジェクト参照のカーブは数だけ数える。壊れた入力には `AnimationParseError`（ValueError）だけを送る。
+- **評価**: キーの間はエルミート（weighted のキーは重みの長さのハンドルの 3 次ベジェ）、接線が無限大の区間は前のキーの値のまま。
+  `bezier_handles` はエルミートの接線を 1/3 の長さのハンドルにして Blender のベジェにする（同じ曲線になる）。
+  オイラー角は Unity の `m_RotationOrder`（既定 4 = ZXY。Z → X → Y の順に回す。`Quaternion.Euler` と同じ）でクォータニオンにする。
+- **状態のクリップ**: `is_state_clip` は、どのカーブも値が変わらない（キーの値が同じで、キーの間の接線が 0 か無限大）か、
+  キーのある範囲が 0.1 秒以下のクリップを、状態を切り替えるだけのものとして外す。Animator のステートで使う前提のクリップで、動きは遷移が作るため
+  Blender では再生しても意味が無い。手元では Yumeka の 54 個のうち 53 個（衣装の切り替え・表情）と、Super Cub の 20 個すべて（ハンドルの角度、
+  ウインカーの点灯など。1/12 秒）がこれにあたった。読み込むオプションは設けない（ユーザーの判断）。
+- **対象の決め方**（`core/animation_targets.py`）: クリップは Animator を付けた GameObject からの相対パスしか持たないので、読み込んだ階層
+  （パッケージのコレクションの全オブジェクト）で、パスがいちばん多く解決できるオブジェクトをルートとみなす。Models 単位のように
+  ルートのオブジェクトが無いときは、コレクションごとの最上位のオブジェクトの集まりをルートの候補にする。解決できたパスが半分に満たなければ付けない。
+  同じだけ解決できるルートはすべて対象にする（シーンに同じモデルを複数置いたとき）。ただし別のルートの子孫は外す（prefab の GameObject と、その下に置いた
+  FBX の同じ名前のノードを、両方動かさない。Super Cub の prefab で見つけた）。名前は完全一致 → 連番を外した形が 1 つだけの順で引き、
+  Blender の FBX インポーターがアーマチュアの子にしたスキンメッシュは、Unity と同じくアーマチュアの親の子としても引く。アーマチュアの下はボーン名でたどる。
+  読み込み側が足した Empty（FBX のルートなど）で一致しなければ、Empty の子を 1 段だけ探す。空のパス（ルート自身）だけのクリップは、
+  どのオブジェクトのものか決められないので付けない（Medieval Village の風車など。Animator Controller から引けば決められるが、今は読まない）。
+- **Action と NLA**（`blender/animation.py`）: クリップごとに Action を 1 つ作り（`unity_clip_guid` / `unity_clip_path`）、対象のデータブロック
+  （オブジェクトかシェイプキーの Key）ごとにスロットを作る（Blender 4.4 以降のスロット付き Action）。対象ごとにクリップの名前の NLA トラックを
+  ミュートで足すので（`nla.add_track`。モデルのテイクと共通）、読み込んだ直後の見た目は変わらない。キーはクリップの開始からの秒 × シーンのフレームレートで、ストリップはシーンの開始フレームに置く。
+  ループするクリップ（`m_LoopTime`）は、ストリップの繰り返し（`repeat`）をシーンのフレーム範囲の終わりまでにする（`nla.loop_strip`）。
+  NLA はストリップの範囲の外を評価しないので、F カーブの Cycles モディファイアー（これも付ける。Action を直接再生するとき用）だけではループしない。
+  - シェイプキー: 値を 1/100 にしてキーと接線をそのままベジェにする。100 を超える重みは `slider_max` を広げる。
+  - 表示: `hide_viewport` / `hide_render` を階段（CONSTANT）で、値が 0.5 未満なら隠す。`m_IsActive` は Unity の階層での子孫にも当てる
+    （スキンメッシュはアーマチュアの子孫にしない）。
+  - Transform: 時刻ごと（フレームごとと、キーの時刻）に Unity のローカルの値を求め、`core/model_space.local_basis` でオブジェクトの行列にして、
+    位置・回転（オブジェクトの回転モード。オイラー角は前のフレームに近い値）・スケールの LINEAR のキーにする。行列の対応 basis = left·L·right は、
+    FBX の最上位のノード（親が配置の Empty か無し）が C·L·A（`node_basis` と同じ）、親も同じモデルの FBX のノードなら A⁻¹·L·A（親子とも C·W·A のため）、
+    シーン・prefab の GameObject の Empty と Unity の Mesh・組み込みメッシュのオブジェクトが C·L·C⁻¹。A はモデルの `ModelUnits.basis_a` で、
+    オブジェクトに残した元のモデルの GUID（`unity_model_guid`）から引く。スキンメッシュ・ボーンの子・ライト・カメラ・Terrain・デカールは
+    Unity と親子や形が違うので当てずに数える。アニメーションしない成分は元の値（オイラー角は元の回転を同じ順のオイラー角にした値）を使う。
+  - ボーンのカーブは読み込まない（#270。FBX インポーターがボーンの軸を付け替えるので、レスト姿勢の差の補正が要る）。
+- **レポート**: 読み込んだクリップの数を要約に、読まなかったものの内訳（状態のクリップ、Humanoid、ボーンだけ、ルートだけ、当てはまらない、対象が無いカーブ）を
+  `clip_notes` に出す（警告にはしない）。
+- Python から `NlaTrack.mute` を切り替えても依存関係は組み直されず、一度評価したトラックは切り替わらない（NLA エディターでの切り替えでは組み直される）。
+  統合テストはコレクションを付け外しして組み直させてから値を確かめる。
+- Animation が `Active` なら、対象ごとに最初のトラックだけミュートを外す（モデルのテイクのトラックが先にあれば、そちらが残る）。
+
+### 4.7.2 モデルの中のモーション（#276）
+
+モーション集（32 RPG Animations）や `@` 付きの FBX（Everyday Motion Pack）は、モーションを `.anim` ではなく FBX のテイクに持つ。
+Blender の FBX インポーターはテイクごとにテイクの名前の Action を作り、最初のテイクをアクティブにする（多くは 1 フレームの T ポーズ）。
+
+- **クリップの設定**（`core/meta.py` の `ModelClip`）: .meta の `animations.clipAnimations` の `name` / `takeName` / `firstFrame` /
+  `lastFrame` / `loopTime` と、`importAnimation`（0 ならテイクを並べない）。フレームは FBX のフレームレートで、テイクの時刻と同じ数え方。
+- **NLA**（`blender/fbx_motion.py` の `MotionBuilder.arrange`）: モデルを読み込むたびに、新しい Action をテイクの名前で引き
+  （.meta のテイク名と完全一致 → Blender の連番を外した形）、クリップごとにクリップの名前のトラックとストリップを足す。
+  ストリップの範囲は firstFrame / lastFrame + 1（FBX インポーターの `anim_offset`）で、同じテイクのクリップは Action を共有する。
+  スロットの対象は、スロットの識別子と読み込んだオブジェクトの FBX のノード名（`unity_fbx_node`）で引く。クリップの設定が無ければ
+  テイクごとに全体を 1 クリップにする。0.1 秒以下のクリップ（`STATE_CLIP_MAX_LENGTH`。T ポーズのテイク）は置かない。
+  どのクリップにも使われないテイクの Action は消し、アクティブな Action は外す（読み込んだ直後の見た目をアニメーションを読まない
+  ときと同じにする）。Action には `unity_take` / `unity_take_model` を残す。
+- **使い回し**: シーンで同じモデルを配置ごとに読み直すときは、最初に読んだときの Action を使い、新しく作られた分は消す。
+  前の読み込みが失敗して Action が消えていたら作り直す。
+- **アーマチュアのまとめ**（`blender/rig_merge.py` の `merge_motion_rigs`。Models 単位）: メッシュが無く、アーマチュアが 1 体で、トラックを持つモデルを
+  モーションだけのモデルとし、骨格（ボーンの名前と親の組）が含まれる関係にあり、置き場所（親のワールドの行列）が同じものを
+  1 体にまとめる。残すのはボーンがいちばん多く、その中で先に読んだもの。
+  - スキンの無い FBX はファイルの既定の姿勢をレストにするので、レストはファイルごとに違う（32 RPG Animations では指のボーンで
+    100 以上違った）。親からの相対のレストを R（元）、R'（残す側）とすると、ローカルの行列 B を B' = R'⁻¹·R·B にすれば同じ姿勢になる
+    （`retarget_action`）。キーの時刻ごとに求め直し、LINEAR のキーにする（フレームごとにキーがあるので見た目は変わらない）。
+  - FBX のルートのボーンがアーマチュアのオブジェクトになったもの（Everyday Motion Pack の Bip001）は、オブジェクトの Transform が
+    ファイルの最初のフレームの値で、モーションごとに違う。オブジェクトのカーブは絶対値なのでそのまま使い、動かさないチャンネルには
+    元のアーマチュアの値の一定のキーを足す。
+  - 32 RPG Animations（31 体 → 1 体）と Everyday Motion Pack（244 体 → 1 体。21 秒）で、元の FBX を直接読んだときと、ボーンの
+    ワールドの姿勢が 1e-4 以内で一致することを確かめた。
+- **レポート**: 置いたクリップを `clips`（"モデルのパス: クリップ名"）に、外したクリップの数・見つからなかったテイク・まとめた
+  アーマチュアの数を `clip_notes` に出す。
+- FBX インポーターは、アニメーションを読むかどうかによらずシーンのフレームレートをファイルのものにする（今までと同じ）。
+  フレームレートの違う FBX を続けて読むと、先に読んだ FBX のモーションの速さがずれる（未対応）。
+- ループ（`loopTime`）は、`.anim` と同じくストリップの繰り返しにする（`nla.loop_strip`。まとめたアーマチュアに写すときも回数を引き継ぐ。`nla.copy_track`）。
+
 ### 4.8 `blender/textures.py`
 
 - `bpy.data.images.load(path, check_existing=True)`。
@@ -1083,7 +1185,7 @@ def run(ctx, filepath, opts) -> Report:
 - `tests/test_fbx_units.py`: FBX の UnitScaleFactor（バイナリの数値の型、FBX 6 の文字列属性の数、ASCII の FBX 7 / 6、壊れた値）。古い形式のモデルの中への上書きは、`tests/test_meta.py`（fileIDToRecycleName）、`tests/test_hierarchy.py`（名前付きの記録）、シーン用の合成パッケージの `Legacy.unity`（統合テスト）で確かめる。表の無いモデルの中への上書きは、`tests/test_model_ids.py`（fileID の計算を Unity の表の値と比べる、オブジェクトとの突き合わせ、FBX のノード名の読み取り）、`tests/test_prefab.py`（記録、付け替え、prefab を挟んだ上書き）と、シーン用の合成パッケージの `Kiosk.prefab`（ルートに付く Renderer）/ `Booth.prefab`（2 つのメッシュを両方の世代の fileID で指し、モデルに無い対象は当てずに警告する）/ `Stall.prefab`（表示の上書きと削除。シーンが prefab の上から表示し直し・削除する）で確かめる（統合テストの `warnings_contain` / `warnings_exclude` と、オブジェクトの `hidden` / `absent`）。表示の上書きと削除の記録は `tests/test_hierarchy.py`、オブジェクトへの当て方は `tests/test_model_ids.py` で確かめる。
 - `tests/test_lights.py`: ライトの強さの換算が、Unity（Built-in / URP）と Blender で測った画素値を再現すること（Built-in の点光源は d/R が 0.2〜1 で 1.4 倍以内）、スポットの角度、色の線形化と色温度、カメラの画角・Physical Camera・平行投影、ライト・カメラの向き（Unity の真下向きが Blender の真下向きになる）。
 - `tests/test_transform.py` / `tests/test_hierarchy.py`: 行列計算と座標変換、階層の展開（stripped の対応表、上書き、削除、非アクティブ、循環・自己参照）。配置の数値は Unity 6 で作った調査用シーンに合わせ、Unity が書き出した頂点のワールド座標を再現できることを確かめる。
-- 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。FBX を展開したあと Spike と Group の Transform の値そのものを動かした prefab（`Moved`）も置き、Unity の位置に置き直されることを見る（Issue #186。期待値は、Unity で確かめた B の頂点から Unity の行列で求めたもの）。
+- 読み込む単位 Scenes は、`tests/make_synthetic_scene_package.py` の合成パッケージ（同じ形の FBX と、Unity の保存形式に合わせて手書きした prefab・シーン）を `tests/expectations_synthetic_scene.json` で確認する。配置した各メッシュの突起の頂点の座標（Unity が書き出した値）、非表示、マテリアルの差し替え、メッシュの共有を見る。古い形式のシーンには、FBX から切り離した部品を部屋の下に 2 つ複製して置き、それぞれの位置に置かれることも見る（Issue #60）。ノードが原点から離れた 1 メッシュの FBX（`Slab.fbx`）のメッシュを直接指す prefab も置き、ノードの変換が掛からないことを見る（Issue #98。期待値は Unity で同じ置き方をしたときの頂点のワールド座標）。FBX を展開したあと Spike と Group の Transform の値そのものを動かした prefab（`Moved`）も置き、Unity の位置に置き直されることを見る（Issue #186。期待値は、Unity で確かめた B の頂点から Unity の行列で求めたもの）。表の無い FBX（`Rings.fbx`）の、原点から離れたノード Rod.001 を名前を変えた GameObject（`Rod Renamed`）で指し、GameObject の位置に置かれることも見る（Issue #272）。
 - URP Lit は、`tests/make_synthetic_urp_package.py` の合成パッケージを `tests/expectations_synthetic_urp.json` で確認する（Issue #116）。URP Lit の GUID のマテリアルがあるとパッケージ全体のライトが URP の単位になるので、Built-in のシーン用とは分けてある。どの .mat にも Standard から変換したときの値（別の画像を指す `_MainTex`、黒い `_Color`、`_Mode`、`_Glossiness`）を残し、それらを読まないこと、Metallic マップ・ノーマルマップ・両面・アルファクリップ・半透明の Additive・URP Unlit・表に無い URP Lit 派生のシェーダーの発光、シーンの平行光源と点光源が URP の換算になることを見る。Specular ワークフロー・Simple Lit・Baked Lit は、Principled の IOR・Specular Tint・Metallic・Roughness の値まで見る（Issue #117）。単体テストは `tests/test_profiles_urp.py`。 同じスクリプトが出す `synthetic_urp_standard`（マテリアルのシェーダーだけを Built-in の Standard にしたもの）を `tests/expectations_synthetic_urp_standard.json` で確かめ、ライトの追加データから URP として換算し、食い違いを警告することを見る（Issue #120）。
 - HDRP は、`tests/make_synthetic_hdrp_package.py` の合成パッケージを `tests/expectations_synthetic_hdrp.json` で確認する（Issue #119。ライトの単位が HDRP になるので別のパッケージにしてある）。どの .mat にも互換用の `_Color`（黒）/ `_MainTex` と Standard の `_Mode` / `_Glossiness` を残し、マスクマップと Remap（Principled の Metallic と Roughness がつながり、倍率とオフセットが入ること）、ノーマルマップ、両面、Specular Color、半透明、HDRP/Unlit、LayeredLit のレイヤー 0、シーンの平行光源（lux）・点光源（candela）・面光源（nits。#129）の換算と、グローバルな Volume の固定露出の分をライトに掛け、Blender の露出は変えないこと（優先度の高いローカルな Volume は使わない。#130）を見る。単体テストは `tests/test_profiles_hdrp.py`。
 - 読み込む単位 Prefabs は、合成パッケージの `tests/expectations_synthetic_prefabs.json`（並べる）と `tests/expectations_synthetic_prefabs_stack.json`（原点に重ねる）で、prefab ごとのコレクションの中身・元の .mat・外形の重なりを統合テストで確認する。prefab で表示されていない部品を隠すことは、シーン用の合成パッケージの `StallUnpacked.prefab` / `StallSpare.prefab`（`tests/expectations_synthetic_scene_prefabs*.json`）で確かめる。

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 from ..core.fbx_units import read_axes
 from ..core.decals import Decal, decal_from_body
@@ -26,7 +27,9 @@ from ..core.lights import PIPELINE_HDRP
 from ..core.mapping import expected_materials, material_textures
 from ..core.meta import strip_numeric_suffix
 from ..core.model_ids import PartMatcher, fbx_node_names
-from ..core.package import AssetEntry, PackageError, UnityPackage, default_nested_package, merge_nested_package
+from ..core.model_space import axis_correction
+from ..core.nested_package import default_nested_package, merge_nested_package
+from ..core.package import AssetEntry, PackageError, UnityPackage
 from ..core.prefab import RendererMaterials, has_pending_renderers, resolve_model_renderers
 from ..core.report import ImportReport
 from ..core.scene_import import KIND_PREFAB, KIND_SCENE, PlacedKind, parts_to_remove
@@ -34,9 +37,13 @@ from ..core.unity_yaml import parse_documents
 from ..core.unity_binary import load_documents
 from ..core.units import UNIT_PREFABS, UNIT_SCENES, PrefabSummary, SceneSummary
 from . import outline as outline_builder
+from .animation import ClipImporter
+from .animation import report_lines as clip_report_lines
+from .fbx_motion import MotionBuilder
 from .log import record_failure, warn_skipped
 from .model_import import (
     FBX_NODE_PROP,
+    MODEL_GUID_PROP,
     adopt_into_collection,
     delegate_to_vrm_addon,
     import_model_file,
@@ -52,6 +59,7 @@ from .model_import import (
     snapshot,
     vrm_addon_available,
 )
+from .nla import MODE_NONE
 from .options import ImportOptions
 from .prepare import (
     BLEND_DISABLED_REASON,
@@ -62,8 +70,9 @@ from .prepare import (
     build_shader_table,
     prepare_package,
 )
+from .rig_merge import merge_motion_rigs
 from .scene_objects import (
-    arrange_collections, axis_correction, find_layer_collection, hide_objects,
+    arrange_collections, find_layer_collection, hide_objects,
     move_collection_contents, remove_parts,
 )
 from .scene_placement import SceneImport
@@ -254,6 +263,8 @@ class _ImportSession:
         # 直前の import_model で、中のオブジェクトの fileID を計算したもの（表示の上書きと削除を当てる。#172）
         self.last_matcher: PartMatcher | None = None
         self.failed_models: set[str] = set()  # 読み込みに失敗したモデル（同じモデルを何度も試さない）
+        # モデルの中のアニメーションのテイクを NLA に並べる（#276）。アニメーションを読まないなら None
+        self.motions = MotionBuilder(self.scene, opts.animation) if opts.animation != MODE_NONE else None
         self.primitive_meshes: dict[str, bpy.types.Mesh] = {}  # 組み込みメッシュの種類 → この回で作ったメッシュ（#190）
         self.decal_meshes: dict[tuple, bpy.types.Mesh] = {}  # デカールの形 → この回で作った板（#165）
         self.prefab_collections: list[bpy.types.Collection] = []  # 読み込む単位 Prefabs で prefab ごとに作ったコレクション
@@ -299,12 +310,41 @@ class _ImportSession:
                 done += 1
         self.fill_missed_textures()
         self.materials.warn_slotless()
+        if self.motions is not None and not scenes:
+            self.merge_motion_rigs([summary.guid for group in groups for summary, _ in group.models])
+        if self.motions is not None:
+            self.report.clips.extend(self.motions.stats.clips)
+            self.report.clip_notes.extend(self.motions.stats.report_lines())
+            self.step(0.96, "Importing animation clips")
+            self.import_clips()
         hide_objects(self.context, [obj for obj in self.hidden_objects if not is_removed(obj)])
         if self.opts.arrange == "SIDE_BY_SIDE" and len(self.prefab_collections) > 1:
             arrange_collections(self.context, self.prefab_collections)
 
         self.collection["unity_package"] = self.package_path.name
         self.step(1.0, "Done")
+
+    def merge_motion_rigs(self, model_order: list[str]) -> None:
+        """同じ骨格のモーションだけのモデルを、1 体のアーマチュアにまとめる（Models 単位。#276）。"""
+        removed = merge_motion_rigs(list(self.collection.all_objects), model_order)
+        if not removed:
+            return
+        self.motions.stats.merged_rigs += sum(1 for o in removed if o.type == "ARMATURE")
+        gone = {o.name for o in removed}
+        self.report.objects[:] = [name for name in self.report.objects if name not in gone]
+        data = [o.data for o in removed if o.data is not None]
+        actions = {s.action for o in removed if o.animation_data for t in o.animation_data.nla_tracks for s in t.strips if s.action}
+        bpy.data.batch_remove(removed)
+        bpy.data.batch_remove([d for d in data if d.users == 0])
+        # 変換した Action に置き換わり、どこからも使われなくなった元の Action
+        # （FBX インポーターが Action にフェイクユーザーを付けるので、それを除いて数える）
+        bpy.data.batch_remove([a for a in actions if a.users - int(a.use_fake_user) == 0])
+
+    def import_clips(self) -> None:
+        """パッケージの AnimationClip を Action にして、読み込んだオブジェクトの NLA にミュートで並べる（#209）。"""
+        stats = ClipImporter(self, self.collection).run()
+        self.report.clips.extend(stats.loaded)
+        self.report.clip_notes.extend(clip_report_lines(stats))
 
     def analyze(self) -> None:
         """パッケージを解析し（ダイアログで解析済みなら使う）、解析中の警告と読み込めないモデルをレポートに写す。"""
@@ -561,6 +601,7 @@ class _ImportSession:
         new = new_since(before)
         adopt_into_collection(new, self.scene, target)
         for obj in new["objects"]:
+            obj[MODEL_GUID_PROP] = model.guid
             if obj.type == "ARMATURE":
                 # メッシュを覆って見づらいので、オブジェクトの表示を線にする（Object > Viewport Display > Display As。#260）。
                 # ボーンの形（Data の Display As）は変えない
@@ -577,6 +618,8 @@ class _ImportSession:
             )
         self.report.models.append(model.pathname)
         self.report.objects.extend(o.name for o in new["objects"])
+        if self.motions is not None:
+            self.motions.arrange(model.guid, model.pathname, summary.info, new["objects"], new["actions"])
 
         prefab_table = self.match_model_parts(model, prefab_table or {}, new["objects"], before, with_parts)
         self.materials.assign_materials(summary, prefab_table, new, delegated, existing_materials)
@@ -619,7 +662,7 @@ class _ImportSession:
             if correction is not None:
                 for obj in target.all_objects:
                     if obj.parent is None:
-                        obj.matrix_basis = correction @ obj.matrix_basis
+                        obj.matrix_basis = Matrix(correction) @ obj.matrix_basis
         return delegated
 
     def fbx_node_names_of(self, model: AssetEntry):

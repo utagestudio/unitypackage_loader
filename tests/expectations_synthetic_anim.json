@@ -1,0 +1,39 @@
+{
+  "options": {
+    "unit": "MODELS"
+  },
+  "errors": 0,
+  "objects": {
+    "count": 6
+  },
+  "clips": {
+    "count": 4,
+    "actions": ["DoorOpen", "HatOff", "Smile", "Wave"],
+    "notes_contain": [
+      "skipped 2 animation clip(s) that only switch a state",
+      "skipped 2 Humanoid animation clip",
+      "skipped 1 animation clip(s) that only animate the object",
+      "skipped 4 animation curve(s) targeting bones",
+      "1 animation clip(s) did not match"
+    ],
+    "tracks": {
+      "Face": ["Smile"],
+      "Hat": ["HatOff"],
+      "Door": ["DoorOpen"],
+      "Knob": ["DoorOpen"],
+      "Body": ["Wave"],
+      "Armature": []
+    },
+    "values": [
+      { "track": "Smile", "object": "Face", "seconds": 0, "shape_key": "smile", "value": 0.0 },
+      { "track": "Smile", "object": "Face", "seconds": 0.5, "shape_key": "smile", "value": 0.5 },
+      { "track": "Smile", "object": "Face", "seconds": 1, "shape_key": "smile", "value": 1.0 },
+      { "track": "HatOff", "object": "Hat", "seconds": 0, "hidden": false },
+      { "track": "HatOff", "object": "Hat", "seconds": 0.75, "hidden": true },
+      { "track": "Wave", "object": "Body", "seconds": 0, "hidden": true },
+      { "track": "DoorOpen", "object": "Door", "rotation_delta": { "from": 0, "to": 0.5, "axis": [0, 0, 1], "degrees": -45 } },
+      { "track": "DoorOpen", "object": "Door", "rotation_delta": { "from": 0, "to": 1.5, "axis": [0, 0, 1], "degrees": -45 } },
+      { "track": "DoorOpen", "object": "Knob", "seconds": 0, "distance_to": "Door", "distance": 111.8034 }
+    ]
+  }
+}

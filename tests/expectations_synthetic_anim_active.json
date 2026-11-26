@@ -1,0 +1,24 @@
+{
+  "options": {
+    "unit": "MODELS",
+    "animation": "ACTIVE"
+  },
+  "errors": 0,
+  "clips": {
+    "count": 4,
+    "unmuted": {
+      "Face": ["Smile"],
+      "Hat": ["HatOff"],
+      "Door": ["DoorOpen"],
+      "Knob": ["DoorOpen"],
+      "Body": ["Wave"]
+    },
+    "tracks": {
+      "Face": ["Smile"],
+      "Hat": ["HatOff"],
+      "Door": ["DoorOpen"],
+      "Knob": ["DoorOpen"],
+      "Body": ["Wave"]
+    }
+  }
+}

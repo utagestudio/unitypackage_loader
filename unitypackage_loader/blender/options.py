@@ -38,7 +38,9 @@ class ImportOptions:
     overwrite_extracted: bool = False
     max_extract_size: int = 0  # 1 回のインポートで展開する合計バイト数の上限（0 は無制限。Preferences から）
     fbx_importer: str = "AUTO"  # AUTO / NEW / LEGACY
-    use_anim: bool = False
+    # アニメーション（#276）: MUTED（モデルのテイクと .anim を NLA にミュートで並べる）/ ACTIVE（オブジェクトごとに最初の 1 本だけ
+    # ミュートを外す）/ NONE（読まない）
+    animation: str = "MUTED"
     ignore_leaf_bones: bool = True
     global_scale: float = 1.0
     import_blend: bool = False  # 同梱 .blend を append するか（Python スクリプトを含み得るので既定 OFF）

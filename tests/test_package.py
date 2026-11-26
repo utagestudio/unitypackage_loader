@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests import _paths
+from unitypackage_loader.core import model_contents, nested_package
 from unitypackage_loader.core import package as package_module
 from unitypackage_loader.core.package import (
     LONG_PATH_DIR,
@@ -450,8 +451,8 @@ class ObjGroupTests(unittest.TestCase):
 
     def test_group_names(self):
         data = b"mtllib a.mtl\no Ignored\ng Wall_01\nusemtl m\nf 1 2 3\ng Object001\ng Wall_01\ng\n"
-        self.assertEqual(package_module.obj_group_names(data), ["Wall_01", "Object001"])
-        self.assertEqual(package_module.obj_group_names(b"o amulet1_amulets\nusemtl a\n"), [])
+        self.assertEqual(model_contents.obj_group_names(data), ["Wall_01", "Object001"])
+        self.assertEqual(model_contents.obj_group_names(b"o amulet1_amulets\nusemtl a\n"), [])
 
     def test_scan_records_groups(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -521,8 +522,8 @@ class NestedPackageTests(unittest.TestCase):
             })
             nested = pkg.nested_packages()
             self.assertEqual([e.name for e in nested], ["BuiltIn_Pack.unitypackage", "HDRP.unitypackage", "URP.unitypackage"])
-            self.assertEqual(package_module.default_nested_package(nested).name, "BuiltIn_Pack.unitypackage")
-            self.assertEqual(package_module.default_nested_package(nested[1:]).name, "HDRP.unitypackage")
+            self.assertEqual(nested_package.default_nested_package(nested).name, "BuiltIn_Pack.unitypackage")
+            self.assertEqual(nested_package.default_nested_package(nested[1:]).name, "HDRP.unitypackage")
 
     def test_merge_with_outer_assets(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -534,11 +535,11 @@ class NestedPackageTests(unittest.TestCase):
                 _add(tar, f"{'b' * 32}/asset", b"inner")
             outer = self._package(tmp, {"Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/ReadMe.txt": b"x"})
             dest = Path(tmp) / "merged.unitypackage"
-            self.assertIsNone(package_module.merge_nested_package(outer, inner_path, dest))  # 外側に足すものが無い
+            self.assertIsNone(nested_package.merge_nested_package(outer, inner_path, dest))  # 外側に足すものが無い
             outer = self._package(tmp, {
                 "Assets/Pack/BIRP.unitypackage": inner_path.read_bytes(), "Assets/Pack/Mesh.asset": b"mesh",
             })
-            merged = package_module.merge_nested_package(outer, inner_path, dest)
+            merged = nested_package.merge_nested_package(outer, inner_path, dest)
             self.assertEqual(merged, dest)
             pkg = UnityPackage(merged)
             pkg.scan()
