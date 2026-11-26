@@ -46,6 +46,7 @@
     { "package": "synthetic_mesh.unitypackage", "expectations": "expectations_synthetic_mesh_models.json", "note": "FBX のマテリアルの画像が作者の PC のパスを指すモデル" },
     { "package": "synthetic_anim.unitypackage", "expectations": "expectations_synthetic_anim.json", "note": ".anim の Action（シェイプキー・表示の切り替え・Transform）と、読み込まないクリップの内訳" },
     { "package": "synthetic_anim.unitypackage", "expectations": "expectations_synthetic_anim_scene.json", "note": "シーンに 2 か所置いたモデルの両方にクリップを付ける" },
+    { "package": "synthetic_anim.unitypackage", "expectations": "expectations_synthetic_anim_active.json", "note": "Animation が Active なら、.anim のトラックもオブジェクトごとに最初の 1 本だけミュートを外す" },
     { "package": "synthetic_anim.unitypackage", "expectations": "expectations_synthetic_anim_off.json", "note": "Animation を None にすると Action を作らない" },
     { "package": "synthetic_motion.unitypackage", "expectations": "expectations_synthetic_motion.json", "note": "モデルのテイクを .meta のクリップで分け、同じ骨格のモーションだけのアーマチュアをレストを変換してまとめる" },
     { "package": "synthetic_motion.unitypackage", "expectations": "expectations_synthetic_motion_active.json", "note": "Animation が Active なら、オブジェクトごとに最初のトラックだけミュートを外す" },
