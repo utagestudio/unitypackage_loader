@@ -34,6 +34,7 @@ from ..core.animation import (
 from ..core.animation_targets import Binding, TargetObject, TargetTree, bind_paths
 from ..core.model_space import ModelUnits, local_basis, local_values
 from ..core.transform import IDENTITY, UNITY_TO_BLENDER, Mat4, inverse_affine
+from .fbx_motion import loop_strip
 from .log import warn_skipped
 from .model_import import FBX_NODE_PROP, MODEL_GUID_PROP, node_name
 
@@ -205,6 +206,8 @@ class ClipImporter:
         nla_strip = track.strips.new(name, self.frame_start, action)
         if nla_strip.action_slot != slot:
             nla_strip.action_slot = slot
+        if action.use_cyclic:
+            loop_strip(nla_strip, self.scene)
         track.mute = not active
 
     # 各種のカーブ ------------------------------------------------------

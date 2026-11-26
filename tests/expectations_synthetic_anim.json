@@ -31,7 +31,8 @@
       { "track": "HatOff", "object": "Hat", "seconds": 0, "hidden": false },
       { "track": "HatOff", "object": "Hat", "seconds": 0.75, "hidden": true },
       { "track": "Wave", "object": "Body", "seconds": 0, "hidden": true },
-      { "track": "DoorOpen", "object": "Door", "rotation_delta": { "from": 0, "to": 1, "axis": [0, 0, 1], "degrees": -90 } },
+      { "track": "DoorOpen", "object": "Door", "rotation_delta": { "from": 0, "to": 0.5, "axis": [0, 0, 1], "degrees": -45 } },
+      { "track": "DoorOpen", "object": "Door", "rotation_delta": { "from": 0, "to": 1.5, "axis": [0, 0, 1], "degrees": -45 } },
       { "track": "DoorOpen", "object": "Knob", "seconds": 0, "distance_to": "Door", "distance": 111.8034 }
     ]
   }

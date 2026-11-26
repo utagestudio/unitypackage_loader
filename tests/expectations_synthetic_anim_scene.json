@@ -55,13 +55,13 @@
         "object": "Door",
         "rotation_delta": {
           "from": 0,
-          "to": 1,
+          "to": 0.5,
           "axis": [
             0,
             0,
             1
           ],
-          "degrees": -90
+          "degrees": -45
         }
       },
       {

@@ -188,7 +188,8 @@ When several motion-only models (no meshes, one armature) share the same skeleto
 that has all the motions as NLA tracks (Models only). An FBX without a skin uses its default pose as the rest pose, so
 the rest pose differs from file to file; the keys are converted so that each motion keeps its pose on the remaining
 armature. A skeleton that lacks some bones (for example weapon bones) is merged too; the missing bones stay at rest.
-When a scene places the same model many times, the actions of its takes are shared.
+When a scene places the same model many times, the actions of its takes are shared. Looping clips (Loop Time in Unity)
+repeat their strip until the end of the scene's frame range.
 
 #### Generic `.anim` clips
 
@@ -201,7 +202,7 @@ Generic animation clips (`.anim`) in the package become one action per clip. The
 A clip does not say which model it belongs to, so the importer looks for the imported object under which the most curve
 paths resolve, and treats it as the object the clip is played on (all placements of the same model get the clip).
 Each clip gets an NLA track on every object or shape key it animates. Keys start at the scene's start frame and use the scene's frame rate.
-Looping clips get a Cycles modifier on their F-curves.
+Looping clips (Loop Time in Unity) repeat their strip until the end of the scene's frame range.
 
 Clips that only switch a state are skipped: clips whose values never change, or that end within 0.1 seconds. Unity's
 Animator uses such clips as states and makes the motion with transitions (outfit toggles and expressions of VRChat avatars,

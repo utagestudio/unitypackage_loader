@@ -18,7 +18,8 @@
     "values": [
       { "track": "Walk_Start", "object": "Rig", "seconds": 0.2, "bone_direction": { "bone": "Spine", "vector": [0, -0.2938, 0.9559] } },
       { "track": "Walk", "object": "Rig", "seconds": 0.5, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } },
-      { "track": "Walk", "object": "Rig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -1, 0] } },
+      { "track": "Walk", "object": "Rig", "seconds": 1.5, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } },
+      { "track": "Rig|run_take", "object": "Rig", "seconds": 1.5, "bone_direction": { "bone": "Spine", "vector": [0, -0.5039, 0.8638] } },
       { "track": "Rig|run_take", "object": "Rig", "seconds": 0, "bone_direction": { "bone": "Spine", "vector": [0, 0.4961, 0.8682] } },
       { "track": "Rig|run_take", "object": "Rig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -0.5039, 0.8638] } },
       { "track": "CharRig|wave_take", "object": "CharRig", "seconds": 1, "bone_direction": { "bone": "Spine", "vector": [0, -0.7071, 0.7071] } }
