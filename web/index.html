@@ -398,13 +398,25 @@
           </div>
         </details>
         <details>
+          <summary>Does it import animations?</summary>
+          <div class="answer">
+            <p>Motions inside models and animation clips in the package are imported as NLA tracks, one track per clip, so you can switch them on and off in the NLA editor.</p>
+            <ul>
+              <li>Motions in FBX files are split into clips (name and range) as set in Unity. A motion pack with one file per motion is merged into a single armature for each skeleton.</li>
+              <li>Animation clips (<code>.anim</code>) bring in shape keys, visibility and object movement.</li>
+              <li>Clips set to loop in Unity repeat until the end of the scene.</li>
+            </ul>
+            <p>All tracks are muted right after import, so nothing looks different. Set the Animation option to Active to play the first track right away, or None to skip animations. Humanoid animations and short clips that only switch an Animator state are not imported.</p>
+          </div>
+        </details>
+        <details>
           <summary>Is anything left out?</summary>
           <div class="answer">
             <p>The goal is models and scenes that look right in Blender, so these are not imported:</p>
             <ul>
               <li>Shader source code (material settings are converted)</li>
               <li>C# scripts and components</li>
-              <li>Animations and animator controllers</li>
+              <li>Humanoid animations and animator controllers</li>
               <li>VRChat Expression menus and parameters</li>
               <li>PhysBones and other dynamics, physics and colliders (VRM spring bones are reproduced if the VRM add-on is installed)</li>
               <li>Trees and grass on terrains, UI, and baked results such as lightmaps in scenes</li>
