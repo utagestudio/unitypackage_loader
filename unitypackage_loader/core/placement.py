@@ -40,7 +40,7 @@ from .hierarchy import (
 )
 from .primitives import builtin_mesh_kind
 from .terrain import terrain_data_ref
-from .transform import Mat4, inverse_affine, multiply
+from .transform import IDENTITY, Mat4, inverse_affine, multiply
 from .unity_ids import mesh_file_id
 
 
@@ -281,6 +281,7 @@ def placements(
     # 2 回目: 配置を作る
     result: list[ModelPlacement] = []
     by_root: dict[tuple[int, str], ModelPlacement] = {}
+    unlabeled: set[tuple[int, str]] = set()  # ルートがどの FBX のノードか決まらなかった配置
     for item in items:
         if isinstance(item, ModelPlacement):
             result.append(item)
@@ -293,9 +294,11 @@ def placements(
             label = _root_node_label(h, root, item.key, guid, ctx)
             if label is not None:
                 placement.node_transforms[label] = copy.deepcopy(_IDENTITY_NODE)
+            else:
+                unlabeled.add((root, guid))
             by_root[(root, guid)] = placement
             result.append(placement)
-        _add_renderer(h, placement, item, worlds, active)
+        _add_renderer(h, placement, item, worlds, active, (root, guid) in unlabeled)
     return result
 
 
@@ -438,8 +441,12 @@ def _root_node_label(h: Hierarchy, root: int, key: int, guid: str, ctx: _Placeme
     return None
 
 
-def _add_renderer(h: Hierarchy, placement: ModelPlacement, item: _RendererRow, worlds: dict, active: dict) -> None:
-    """配置に Renderer を加える（同名が既にあれば先のものを使い、置き直しの行列を外す）。"""
+def _add_renderer(h: Hierarchy, placement: ModelPlacement, item: _RendererRow, worlds: dict, active: dict,
+                  unlabeled_root: bool = False) -> None:
+    """配置に Renderer を加える（同名が既にあれば先のものを使い、置き直しの行列を外す）。
+
+    ``unlabeled_root`` は、ルートがどの FBX のノードか決まらなかった配置（``_root_node_label`` が None）。
+    """
     key, name, root = item.key, item.name, placement.root
     node = h.nodes[key]
     renderer = node.renderer
@@ -448,12 +455,17 @@ def _add_renderer(h: Hierarchy, placement: ModelPlacement, item: _RendererRow, w
         return  # 同じモデルに同名の GameObject があれば先のものを使う（prefab の表と同じ）
     # ルート自身の Renderer は置き直さない。FBX の最上位のノードを Unity がルートに畳んだもので、ルートの Transform が
     # ノードの変換を含むため、オブジェクトの行列との関係が中のノードと違う（置き方は #98 / #181 / #185 で決まっている）
+    # ただし、ルートがどの FBX のノードか決まらないとき（新しい形式の .meta で名前の表が無く、GameObject 名もノード名と違う。
+    # Office Assets の Cork Board の紙とピン）は、FBX のノードの変換を消せないので、ルートの位置（単位行列）に置き直す。
+    # Unity は MeshFilter が指すメッシュを、その GameObject の Transform で描く（#272）
     root_inverse = inverse_affine(placement.world) if key != root else None
+    if root_inverse is not None:
+        relative = multiply(root_inverse, worlds[key])
+    else:
+        relative = IDENTITY if unlabeled_root else None
     placement.renderers[name] = PlacedRenderer(
         name, list(renderer.materials), renderer.renderer_class, active[key] and renderer.enabled,
-        renderer.mesh_file_id, renderer.lod_level,
-        multiply(root_inverse, worlds[key]) if root_inverse is not None else None,
-        renderer.shadows_only,
+        renderer.mesh_file_id, renderer.lod_level, relative, renderer.shadows_only,
     )
     # ルートからこの Node までの、上書き前の行列の積で逆算する
     inverse = inverse_affine(node.scope_matrix)
