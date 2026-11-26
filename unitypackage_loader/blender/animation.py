@@ -7,7 +7,7 @@
   そのままベジェ（階段は CONSTANT）にする。GameObject の非アクティブは、Unity の階層での子孫にも当てる。
 - Transform は Unity のローカルの値をフレームごとに求め、オブジェクトの行列にしてから位置・回転・スケールのキーにする
   （行列の対応は ``core/model_space.local_basis``）。ボーンを対象にしたカーブは読み込まない（#270）。
-- 対象ごとに、クリップの名前の NLA トラックをミュートで足す。読み込んだ直後の見た目は変わらない。
+- 対象ごとに、クリップの名前の NLA トラックを足す（``nla.add_track``）。既定はミュートで、読み込んだ直後の見た目は変わらない。
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from ..core.animation import (
 from ..core.animation_targets import Binding, TargetObject, TargetTree, bind_paths
 from ..core.model_space import ModelUnits, local_basis, local_values
 from ..core.transform import IDENTITY, UNITY_TO_BLENDER, Mat4, inverse_affine
-from .fbx_motion import loop_strip
 from .log import warn_skipped
 from .model_import import FBX_NODE_PROP, MODEL_GUID_PROP, node_name
+from .nla import MODE_ACTIVE, add_track
 
 CLIP_GUID_PROP = "unity_clip_guid"
 # GameObject の行列に、向きや形を足して置いたオブジェクト（Transform のカーブを当てない）
@@ -94,7 +94,6 @@ class ClipImporter:
         self.scene = session.scene
         render = self.scene.render
         self.fps = render.fps / (render.fps_base or 1.0)
-        self.frame_start = self.scene.frame_start
         self.stats = ClipStats()
         self._units: dict[str, ModelUnits | None] = {}
         self._tree: TargetTree | None = None
@@ -195,20 +194,9 @@ class ClipImporter:
             bpy.data.actions.remove(action)
             return "bones" if bones else "none"
         for datablock, slot in users.items():
-            self._add_track(datablock, action, slot, clip.name or entry.name)
+            add_track(datablock, clip.name or entry.name, action, slot, self.scene,
+                      active=self.session.opts.animation == MODE_ACTIVE, loop=action.use_cyclic)
         return "loaded"
-
-    def _add_track(self, datablock, action, slot, name: str) -> None:
-        animation_data = datablock.animation_data or datablock.animation_data_create()
-        track = animation_data.nla_tracks.new()
-        active = self.session.opts.animation == "ACTIVE" and not any(not t.mute for t in animation_data.nla_tracks)
-        track.name = name
-        nla_strip = track.strips.new(name, self.frame_start, action)
-        if nla_strip.action_slot != slot:
-            nla_strip.action_slot = slot
-        if action.use_cyclic:
-            loop_strip(nla_strip, self.scene)
-        track.mute = not active
 
     # 各種のカーブ ------------------------------------------------------
 

@@ -663,7 +663,9 @@ unitypackage_loader/
 │   ├─ terrain.py                # Terrain のメッシュと塗り分けのマテリアル（SessionTerrains。#205）
 │   ├─ unity_meshes.py           # Unity の Mesh アセットから作るメッシュ（SessionMeshes。#216）
 │   ├─ animation.py              # クリップの Action と NLA トラック（ClipImporter。#209）
-│   ├─ fbx_motion.py             # モデルのテイクのクリップへの分割、モーションだけのアーマチュアのまとめ（MotionBuilder。#276）
+│   ├─ fbx_motion.py             # モデルのテイクのクリップへの分割（MotionBuilder。#276）
+│   ├─ rig_merge.py              # モーションだけのアーマチュアのまとめとレストの違いの変換（merge_motion_rigs。#276）
+│   ├─ nla.py                    # クリップを NLA のトラックに置く共通処理（Active のときのミュート・ループ。#281）
 │   ├─ log.py                    # 捕まえて続けた例外のログ（Verbose Console Log はオペレーターが渡す）
 │   ├─ scene_objects.py          # シーンの Empty・ライト・カメラ・複製・行列の当てはめ（計算は core/model_space.py）・非表示
 │   ├─ materials.py              # ノード生成
@@ -1096,8 +1098,8 @@ def run(ctx, filepath, opts) -> Report:
   どのオブジェクトのものか決められないので付けない（Medieval Village の風車など。Animator Controller から引けば決められるが、今は読まない）。
 - **Action と NLA**（`blender/animation.py`）: クリップごとに Action を 1 つ作り（`unity_clip_guid` / `unity_clip_path`）、対象のデータブロック
   （オブジェクトかシェイプキーの Key）ごとにスロットを作る（Blender 4.4 以降のスロット付き Action）。対象ごとにクリップの名前の NLA トラックを
-  ミュートで足すので、読み込んだ直後の見た目は変わらない。キーはクリップの開始からの秒 × シーンのフレームレートで、ストリップはシーンの開始フレームに置く。
-  ループするクリップ（`m_LoopTime`）は、ストリップの繰り返し（`repeat`）をシーンのフレーム範囲の終わりまでにする（`fbx_motion.loop_strip`）。
+  ミュートで足すので（`nla.add_track`。モデルのテイクと共通）、読み込んだ直後の見た目は変わらない。キーはクリップの開始からの秒 × シーンのフレームレートで、ストリップはシーンの開始フレームに置く。
+  ループするクリップ（`m_LoopTime`）は、ストリップの繰り返し（`repeat`）をシーンのフレーム範囲の終わりまでにする（`nla.loop_strip`）。
   NLA はストリップの範囲の外を評価しないので、F カーブの Cycles モディファイアー（これも付ける。Action を直接再生するとき用）だけではループしない。
   - シェイプキー: 値を 1/100 にしてキーと接線をそのままベジェにする。100 を超える重みは `slider_max` を広げる。
   - 表示: `hide_viewport` / `hide_render` を階段（CONSTANT）で、値が 0.5 未満なら隠す。`m_IsActive` は Unity の階層での子孫にも当てる
@@ -1131,7 +1133,7 @@ Blender の FBX インポーターはテイクごとにテイクの名前の Act
   ときと同じにする）。Action には `unity_take` / `unity_take_model` を残す。
 - **使い回し**: シーンで同じモデルを配置ごとに読み直すときは、最初に読んだときの Action を使い、新しく作られた分は消す。
   前の読み込みが失敗して Action が消えていたら作り直す。
-- **アーマチュアのまとめ**（`merge_motion_rigs`。Models 単位）: メッシュが無く、アーマチュアが 1 体で、トラックを持つモデルを
+- **アーマチュアのまとめ**（`blender/rig_merge.py` の `merge_motion_rigs`。Models 単位）: メッシュが無く、アーマチュアが 1 体で、トラックを持つモデルを
   モーションだけのモデルとし、骨格（ボーンの名前と親の組）が含まれる関係にあり、置き場所（親のワールドの行列）が同じものを
   1 体にまとめる。残すのはボーンがいちばん多く、その中で先に読んだもの。
   - スキンの無い FBX はファイルの既定の姿勢をレストにするので、レストはファイルごとに違う（32 RPG Animations では指のボーンで
@@ -1146,7 +1148,7 @@ Blender の FBX インポーターはテイクごとにテイクの名前の Act
   アーマチュアの数を `clip_notes` に出す。
 - FBX インポーターは、アニメーションを読むかどうかによらずシーンのフレームレートをファイルのものにする（今までと同じ）。
   フレームレートの違う FBX を続けて読むと、先に読んだ FBX のモーションの速さがずれる（未対応）。
-- ループ（`loopTime`）は、`.anim` と同じくストリップの繰り返しにする（`loop_strip`。まとめたアーマチュアに写すときも回数を引き継ぐ）。
+- ループ（`loopTime`）は、`.anim` と同じくストリップの繰り返しにする（`nla.loop_strip`。まとめたアーマチュアに写すときも回数を引き継ぐ。`nla.copy_track`）。
 
 ### 4.8 `blender/textures.py`
 

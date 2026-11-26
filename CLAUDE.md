@@ -12,7 +12,7 @@
   Generic な `.anim`（シェイプキー・表示の切り替え・オブジェクトの Transform）は、ミュートした NLA トラックの Action にする（`core/animation.py`。#209）。
   値が変わらないか 0.1 秒以下で終わる、状態を切り替えるだけのクリップ（Animator のステート用）は読み込まない。
   FBX の中のテイクは、.meta の clipAnimations どおりのクリップにして同じく NLA に並べ、同じ骨格のモーションだけのモデルは
-  レストの違いを変換して 1 体のアーマチュアにまとめる（`blender/fbx_motion.py`。#276）。オプションは Animation（Muted / Active / None）。
+  レストの違いを変換して 1 体のアーマチュアにまとめる（`blender/fbx_motion.py` と `rig_merge.py`。NLA への置き方は両方で `nla.py`。#276）。オプションは Animation（Muted / Active / None）。
 
 ## 設計の要点（詳細は DESIGN.md）
 
@@ -51,7 +51,7 @@
 ```
 unitypackage_loader/      Extension 本体（blender_manifest.toml、Blender 4.5 以降の Extension 形式）
   core/                   bpy 非依存。単体テスト可能。bpy を import しないこと
-  blender/                bpy 依存（importer / options / log / prepare / model_import / session_materials / scene_placement / scene_objects / terrain / unity_meshes / animation / fbx_motion / materials / nodes / textures / toon_group / outline）
+  blender/                bpy 依存（importer / options / log / prepare / model_import / session_materials / scene_placement / scene_objects / terrain / unity_meshes / animation / fbx_motion / rig_merge / nla / materials / nodes / textures / toon_group / outline）
   operators/              File > Import、モデル選択ダイアログ、再構築、アウトライン
   ui/                     Preferences、サイドバー "UPI" タブ
 tests/                    unittest（bpy 不要）＋ Blender 上の統合テスト＋合成パッケージ生成
