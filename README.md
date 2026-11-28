@@ -9,7 +9,7 @@ A Blender Extension that imports `.unitypackage` files directly from File > Impo
 
 - Supported Blender: 4.5 or later (developed on 5.2 LTS, tested on 4.5 LTS and 5.2 LTS)
 - What is imported: FBX / OBJ / glTF / VRM / Collada (Blender 4.5 only; removed in Blender 5.0) / bundled .blend files (opt-in), `.mat` files (lilToon / MToon / Poiyomi / Standard / URP / HDRP / VRChat Mobile (Quest) shaders; others on a best-effort basis using generic rules), referenced textures, and animation as actions on muted NLA tracks: the animation takes inside models (split into Unity's clips; motion-only FBX files with the same skeleton are merged into one armature) and Generic animation clips (`.anim`: blend shapes, object visibility and transforms)
-- What is not imported: shader source code, C# scripts, Humanoid animation clips, animation curves on bones, Animator Controllers, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
+- What is not imported: shader source code, C# scripts, Humanoid animation clips, Animator Controllers, Expression menus, etc. Prefab hierarchies, lights and cameras are reproduced only when a scene is imported.
 - VRM: when the [VRM format](https://extensions.blender.org/add-ons/vrm/) add-on is installed, `.vrm` models are handed to it (MToon materials, humanoid rig, spring bones and expressions are reproduced by the add-on). Without it, the glTF importer is used and materials are rebuilt from the bundled `.mat` files.
 
 ## Installation
@@ -198,10 +198,12 @@ Generic animation clips (`.anim`) in the package become one action per clip. The
 - Blend shape weights (`blendShape.<name>`, 0–100 in Unity) → shape key values (0–1)
 - GameObject active state (`m_IsActive`) and Renderer `m_Enabled` → `hide_viewport` / `hide_render` (deactivating a GameObject also hides its children)
 - Transform position, rotation (quaternion or Euler) and scale → the object's location, rotation and scale, sampled every frame
+- Bone transforms → the pose bone's location, rotation and scale, sampled every frame (components the clip does not animate keep the imported pose)
 
 A clip does not say which model it belongs to, so the importer looks for the imported object under which the most curve
-paths resolve, and treats it as the object the clip is played on (all placements of the same model get the clip).
-Each clip gets an NLA track on every object or shape key it animates. Keys start at the scene's start frame and use the scene's frame rate.
+paths resolve, and treats it as the object the clip is played on (all placements of the same model get the clip; when different
+models match equally well, as in character packs whose skeletons share bone names, the models in folders nearest to the clip get it).
+Each clip gets an NLA track on every object or shape key it animates (bone keys go on the armature's track). Keys start at the scene's start frame and use the scene's frame rate.
 Looping clips (Loop Time in Unity) repeat their strip until the end of the scene's frame range.
 
 Clips that only switch a state are skipped: clips whose values never change, or that end within 0.1 seconds. Unity's
@@ -209,7 +211,7 @@ Animator uses such clips as states and makes the motion with transitions (outfit
 the steering angle of a vehicle, and so on), so they have nothing to play back in Blender.
 
 Not imported (the report lists how many were skipped): state clips (above), Humanoid clips (the body motion is stored as muscle curves, so the whole clip is skipped, including its other curves; the original motion is usually in an FBX in the package, which is imported as above),
-curves on bones, clips that only animate the object they are played on (no path, so the object is unknown), and curves on
+clips that only animate the object they are played on (no path, so the object is unknown), and curves on
 materials or object references. Clips whose paths match no imported object are skipped too. Animator Controllers are not read.
 
 ### Security notes

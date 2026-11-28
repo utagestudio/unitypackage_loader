@@ -6,7 +6,11 @@
 - シェイプキーの値（Unity の 0〜100 → 0〜1）と表示の切り替え（``hide_viewport`` / ``hide_render``）は、キーと接線を
   そのままベジェ（階段は CONSTANT）にする。GameObject の非アクティブは、Unity の階層での子孫にも当てる。
 - Transform は Unity のローカルの値をフレームごとに求め、オブジェクトの行列にしてから位置・回転・スケールのキーにする
-  （行列の対応は ``core/model_space.local_basis``）。ボーンを対象にしたカーブは読み込まない（#270）。
+  （行列の対応は ``core/model_space.local_basis``）。
+- ボーンの Transform も同じく行列にしてから、ポーズボーンの位置・回転・スケールのキーにする（#270）。新旧どちらの FBX インポーターも
+  （このアドオンの呼び方では）ボーンの軸を付け替えないので、ポーズの行列は FBX のノードの行列そのままで、親（親のボーンか
+  アーマチュアのオブジェクト）から見た行列は A⁻¹·L·A になる。ポーズボーンの値への変換は、継承の設定（Maya の FBX では
+  ``inherit_scale`` が NONE になる）を含めて ``Bone.convert_local_to_pose`` に任せる。
 - 対象ごとに、クリップの名前の NLA トラックを足す（``nla.add_track``）。既定はミュートで、読み込んだ直後の見た目は変わらない。
 """
 
@@ -16,7 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Quaternion, Vector
 
 from ..core.animation import (
     KIND_ACTIVE,
@@ -26,12 +30,14 @@ from ..core.animation import (
     AnimationClip,
     Curve,
     bezier_handles,
+    evaluate_many,
     is_state_clip,
     parse_clip,
     sample_times,
     transform_spec,
+    transform_specs,
 )
-from ..core.animation_targets import Binding, TargetObject, TargetTree, bind_paths
+from ..core.animation_targets import Binding, TargetObject, TargetTree, bind_paths, prefer_nearest_models
 from ..core.model_space import ModelUnits, local_basis, local_values
 from ..core.transform import IDENTITY, UNITY_TO_BLENDER, Mat4, inverse_affine
 from .log import warn_skipped
@@ -42,6 +48,10 @@ CLIP_GUID_PROP = "unity_clip_guid"
 # GameObject の行列に、向きや形を足して置いたオブジェクト（Transform のカーブを当てない）
 _ADDED_SHAPE_PROPS = ("unity_terrain", "unity_decal", "unity_light", "unity_camera")
 CLIP_PATH_PROP = "unity_clip_path"
+# ボーンのチャンネルを、値が変わらないものとしてキー 1 つにまとめる幅
+_CONSTANT_EPSILON = 1e-6
+# Keyframe.interpolation の LINEAR の値（foreach_set では列挙の番号で渡す）
+_LINEAR = 1
 
 
 @dataclass
@@ -54,8 +64,7 @@ class ClipStats:
     root_only: list[str] = field(default_factory=list)  # ルート自身だけを動かすクリップ（どのオブジェクトのものか決められない）
     unbound: list[str] = field(default_factory=list)  # 対象のオブジェクトが見つからなかったクリップ
     empty: list[str] = field(default_factory=list)  # 読み込める種類のカーブが無いクリップ
-    bone_only: list[str] = field(default_factory=list)  # ボーンだけを動かすクリップ（#270 まで読み込まない）
-    bone_curves: int = 0  # ボーンを対象にしたカーブ（#270 まで読み込まない）
+    bone_other: int = 0  # ボーンを対象にした Transform 以外のカーブ（GameObject の m_IsActive など。読み込まない）
     missing: int = 0  # 対象が見つからなかったカーブ（シェイプキーが無い、など）
     transform_skipped: int = 0  # 行列の対応が分からないオブジェクトの Transform のカーブ
 
@@ -97,6 +106,7 @@ class ClipImporter:
         self.stats = ClipStats()
         self._units: dict[str, ModelUnits | None] = {}
         self._tree: TargetTree | None = None
+        self._column_cache: dict[tuple, list[float]] = {}  # カーブの値。クリップ 1 つの中だけで使う（build で空にする）
 
     # ------------------------------------------------------------------
 
@@ -129,22 +139,33 @@ class ClipImporter:
             if not bindings:
                 self.stats.unbound.append(entry.pathname)
                 continue
+            bindings = prefer_nearest_models(bindings, entry.pathname, self._binding_model)
             try:
                 result = self.build(entry, clip, bindings)
                 if result == "loaded":
                     self.stats.loaded.append(entry.pathname)
-                elif result == "bones":
-                    self.stats.bone_only.append(entry.pathname)
                 else:
                     self.stats.unbound.append(entry.pathname)
             except Exception as exc:  # noqa: BLE001 - そのクリップだけを外して続ける
                 warn_skipped(self.report.warn, f"could not import animation clip {entry.pathname}", exc)
         return self.stats
 
+    def _binding_model(self, binding: Binding) -> str | None:
+        """結び付けの候補のモデルのアセットのパス（ルートか、行き先のオブジェクトのモデル。分からなければ None）。"""
+        objects = [binding.root] if binding.root is not None else []
+        objects += [target.key for target in binding.targets.values()]
+        for obj in objects:
+            guid = obj.get(MODEL_GUID_PROP) if obj is not None else None
+            if guid:
+                entry = self.pkg.entries.get(str(guid))
+                return entry.pathname if entry is not None else None
+        return None
+
     # ------------------------------------------------------------------
 
     def build(self, entry, clip: AnimationClip, bindings: list[Binding]) -> str:
-        """クリップの Action を作って NLA に並べる。"loaded"、ボーンだけなら "bones"、何も当てられなければ "none"。"""
+        """クリップの Action を作って NLA に並べる。"loaded"、何も当てられなければ "none"。"""
+        self._column_cache.clear()
         action = bpy.data.actions.new(clip.name or entry.name)
         action[CLIP_GUID_PROP] = entry.guid
         action[CLIP_PATH_PROP] = entry.pathname
@@ -166,15 +187,18 @@ class ClipImporter:
         for curve in clip.curves:
             by_path.setdefault(curve.path, []).append(curve)
         tree = self._tree
-        bones = 0
         for binding in bindings:
+            bone_curves: dict[bpy.types.Object, dict[str, list[Curve]]] = {}
             for path, curves in by_path.items():
                 target = binding.targets.get(path)
                 if target is None:
                     self.stats.missing += len(curves)
                     continue
                 if target.bone is not None:
-                    bones += len(curves)
+                    transforms = [c for c in curves if c.kind in TRANSFORM_KINDS]
+                    self.stats.bone_other += len(curves) - len(transforms)
+                    if transforms:
+                        bone_curves.setdefault(target.key, {}).setdefault(target.bone, []).extend(transforms)
                     continue
                 obj = target.key
                 for curve in curves:
@@ -189,10 +213,11 @@ class ClipImporter:
                 transforms = [c for c in curves if c.kind in TRANSFORM_KINDS]
                 if transforms:
                     self._transform(strip, slot_for, obj, transforms, clip)
-        self.stats.bone_curves += bones
+            for armature, by_bone in bone_curves.items():
+                self._bones(strip, slot_for, armature, by_bone, clip)
         if not users:
             bpy.data.actions.remove(action)
-            return "bones" if bones else "none"
+            return "none"
         for datablock, slot in users.items():
             add_track(datablock, clip.name or entry.name, action, slot, self.scene,
                       active=self.session.opts.animation == MODE_ACTIVE, loop=action.use_cyclic)
@@ -298,6 +323,160 @@ class ClipImporter:
                 fcurve.modifiers.new("CYCLES")
             fcurve.update()
 
+    def _bones(self, strip, slot_for, armature, by_bone: dict[str, list[Curve]], clip: AnimationClip) -> None:
+        """アーマチュアのボーンの Transform のカーブを、ポーズボーンの位置・回転・スケールのキーにする。
+
+        親から見たボーンの行列は Q = A⁻¹·L·A（A は ``ModelUnits.basis_a``）。アニメーションしていない成分の値は、読み込んだときの
+        ポーズ（FBX のノードの既定の値）から求める。フレームごとに、動かすボーンとその祖先のポーズの行列を親から順に求め、
+        目標の行列 M_parent·Q を ``Bone.convert_local_to_pose`` でポーズボーンの値（matrix_basis）に直す。
+        """
+        a = self._bone_basis_a(armature)
+        a_inverse = inverse_affine(a) if a is not None else None
+        if a is None or a_inverse is None:
+            self.stats.transform_skipped += sum(len(curves) for curves in by_bone.values())
+            return
+        bones = armature.data.bones
+        animated: dict[str, list[Curve]] = {}
+        for name, curves in by_bone.items():
+            if name in bones:
+                animated[name] = curves
+            else:
+                self.stats.missing += len(curves)
+        if not animated:
+            return
+        needed: set[str] = set()
+        for name in animated:
+            bone = bones[name]
+            while bone is not None and bone.name not in needed:
+                needed.add(bone.name)
+                bone = bone.parent
+        order = sorted((b for b in bones if b.name in needed), key=lambda b: len(b.parent_recursive))
+        pose = armature.pose.bones
+
+        def pose_matrix(bone, basis: Matrix, parent_matrix: Matrix | None, invert: bool = False) -> Matrix:
+            if bone.parent is None or parent_matrix is None:
+                return bone.convert_local_to_pose(basis, bone.matrix_local, invert=invert)
+            return bone.convert_local_to_pose(basis, bone.matrix_local, parent_matrix=parent_matrix,
+                                              parent_matrix_local=bone.parent.matrix_local, invert=invert)
+
+        # 読み込んだときのポーズから、Unity のローカルの値 L₀ = A·Q₀·A⁻¹ を求める（アニメーションしていない成分に使う）
+        a_matrix, a_inverse_matrix = Matrix(a), Matrix(a_inverse)
+        rest_pose: dict[str, Matrix] = {}
+        for bone in order:
+            parent = rest_pose.get(bone.parent.name) if bone.parent is not None else None
+            rest_pose[bone.name] = pose_matrix(bone, pose[bone.name].matrix_basis, parent)
+        rest_values: dict[str, tuple] = {}
+        rest_rotation: dict[str, list[float]] = {}
+        for name in animated:
+            bone = bones[name]
+            parent = rest_pose.get(bone.parent.name) if bone.parent is not None else None
+            local = parent.inverted_safe() @ rest_pose[name] if parent is not None else rest_pose[name]
+            location, rotation, scale = (a_matrix @ local @ a_inverse_matrix).decompose()
+            rest_values[name] = (location, rotation, scale)
+            rest_rotation[name] = [rotation.x, rotation.y, rotation.z, rotation.w]
+
+        slot = slot_for(armature, "OBJECT", node_name(armature))
+        bag = strip.channelbag(slot, ensure=True)
+        all_curves = [c for curves in animated.values() for c in curves]
+        times = sample_times(all_curves, clip.start, clip.stop, self.fps)
+        has = {name: {c.kind for c in curves} for name, curves in animated.items()}
+        specs = {name: self._specs(curves, times, rest_rotation[name]) for name, curves in animated.items()}
+        channels: dict[tuple[str, str, int], list[tuple[float, float]]] = {}
+        previous: dict[str, object] = {}
+        for step, time in enumerate(times):
+            frame = self._frame(time, clip)
+            current: dict[str, Matrix] = {}
+            for bone in order:
+                name = bone.name
+                parent = current.get(bone.parent.name) if bone.parent is not None else None
+                if name not in animated:
+                    current[name] = pose_matrix(bone, pose[name].matrix_basis, parent)
+                    continue
+                spec = specs[name][step]
+                location, rotation, scale = rest_values[name]
+                position = spec["position"]
+                if any(v is not None for v in position):
+                    location = Vector([location[i] if v is None else v for i, v in enumerate(position)])
+                if spec["rotation"][0] is not None:
+                    x, y, z, w = spec["rotation"]
+                    rotation = Quaternion((w, x, y, z))
+                factors = spec["scale"]
+                if any(v is not None for v in factors):
+                    scale = Vector([scale[i] if v is None else v for i, v in enumerate(factors)])
+                local = a_inverse_matrix @ Matrix.LocRotScale(location, rotation, scale) @ a_matrix
+                target = parent @ local if parent is not None else local
+                current[name] = target
+                basis = pose_matrix(bone, target, parent, invert=True)
+                self._bone_channels(channels, pose[name], basis, frame, has[name], previous)
+        groups: dict[str, object] = {g.name: g for g in bag.groups}
+        for (bone_name, data_path, index), points in channels.items():
+            if bag.fcurves.find(data_path, index=index) is not None:
+                continue
+            values = [value for _, value in points]
+            if max(values) - min(values) <= _CONSTANT_EPSILON:
+                points = points[:1]  # 値が変わらないチャンネル（Unity のクリップはスケールなどを定数のカーブで持つ）
+            fcurve = bag.fcurves.new(data_path, index=index)  # 4.5 の fcurves.new は group_name を取らない
+            group = groups.get(bone_name)
+            if group is None:
+                group = groups[bone_name] = bag.groups.new(bone_name)
+            fcurve.group = group
+            fcurve.keyframe_points.add(len(points))
+            fcurve.keyframe_points.foreach_set("co", [v for point in points for v in point])
+            fcurve.keyframe_points.foreach_set("interpolation", [_LINEAR] * len(points))
+            if clip.loop and len(points) > 1:
+                fcurve.modifiers.new("CYCLES")
+            fcurve.update()
+
+    def _specs(self, curves: list[Curve], times: list[float], rest_rotation: list[float]) -> list[dict]:
+        """``transform_specs`` の結果。カーブの値は、同じクリップの中では評価し直さない（同じ骨格のモデルや配置が複数あるとき）。"""
+        key_times = tuple(times)
+        columns = []
+        for curve in curves:
+            key = (id(curve), key_times)
+            column = self._column_cache.get(key)
+            if column is None:
+                column = self._column_cache[key] = evaluate_many(curve.keys, times)
+            columns.append(column)
+        return transform_specs(curves, times, rest_rotation, columns)
+
+    @staticmethod
+    def _bone_channels(channels, pose_bone, basis: Matrix, frame: float, has: set[str], previous: dict) -> None:
+        """ポーズボーンの値 ``basis`` を、F カーブの点として ``channels`` に足す（回転は前のフレームと連続にする）。"""
+        prefix = f'pose.bones["{_escape(pose_bone.name)}"].'
+        location, rotation, scale = basis.decompose()
+        if "position" in has:
+            for i in range(3):
+                channels.setdefault((pose_bone.name, prefix + "location", i), []).append((frame, location[i]))
+        if has & {"rotation", "euler"}:
+            mode = pose_bone.rotation_mode
+            last = previous.get(pose_bone.name)
+            if mode == "QUATERNION":
+                if last is not None and rotation.dot(last) < 0.0:
+                    rotation.negate()
+                previous[pose_bone.name] = rotation
+                for i in range(4):
+                    channels.setdefault((pose_bone.name, prefix + "rotation_quaternion", i), []).append((frame, rotation[i]))
+            elif mode == "AXIS_ANGLE":
+                axis, angle = rotation.to_axis_angle()
+                for i, value in enumerate((angle, *axis)):
+                    channels.setdefault((pose_bone.name, prefix + "rotation_axis_angle", i), []).append((frame, value))
+            else:
+                euler = rotation.to_euler(mode, last) if last is not None else rotation.to_euler(mode, pose_bone.rotation_euler)
+                previous[pose_bone.name] = euler
+                for i in range(3):
+                    channels.setdefault((pose_bone.name, prefix + "rotation_euler", i), []).append((frame, euler[i]))
+        if "scale" in has:
+            for i in range(3):
+                channels.setdefault((pose_bone.name, prefix + "scale", i), []).append((frame, scale[i]))
+
+    def _bone_basis_a(self, armature) -> Mat4 | None:
+        """ボーンの行列の対応に使う A（アーマチュアのモデルの ``ModelUnits.basis_a``）。分からなければ None。"""
+        guid = armature.get(MODEL_GUID_PROP)
+        if not guid:
+            return None
+        units = self._model_units(str(guid))
+        return units.basis_a() if units is not None else None
+
     def _basis_sides(self, obj) -> tuple[Mat4, Mat4] | None:
         """オブジェクトの行列 basis = left·L·right の (left, right)。分からなければ None。
 
@@ -347,13 +526,11 @@ def report_lines(stats: ClipStats) -> Iterable[str]:
         yield f"skipped {len(stats.humanoid)} Humanoid animation clip(s) (muscle curves are not supported)"
     if stats.root_only:
         yield f"skipped {len(stats.root_only)} animation clip(s) that only animate the object they are played on (target unknown)"
-    if stats.bone_only:
-        yield f"skipped {len(stats.bone_only)} animation clip(s) that only animate bones (not supported yet)"
-    if stats.bone_curves:
-        yield f"skipped {stats.bone_curves} animation curve(s) targeting bones (not supported yet)"
+    if stats.bone_other:
+        yield f"skipped {stats.bone_other} animation curve(s) on bones other than Transform (such as GameObject active)"
     if stats.missing:
         yield f"{stats.missing} animation curve(s) had no matching shape key or object"
     if stats.unbound:
         yield f"{len(stats.unbound)} animation clip(s) did not match any imported object"
     if stats.transform_skipped:
-        yield f"skipped {stats.transform_skipped} Transform curve(s) on objects whose Unity transform could not be determined"
+        yield f"skipped {stats.transform_skipped} Transform curve(s) on objects or bones whose Unity transform could not be determined"

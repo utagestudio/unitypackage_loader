@@ -9,18 +9,21 @@ Unity と Blender の階層の違いは次のように吸収する。
 - 名前は完全一致を先に、なければ連番（``.001``）を外した形が 1 つだけのものを使う。
 - Blender の FBX インポーターはスキンメッシュをアーマチュアの子にするが、Unity ではアーマチュアの GameObject と兄弟。
   アーマチュアのオブジェクトの子（ボーンの子でないもの）は、アーマチュアの親の子としても引けるようにする。
-- アーマチュアの下はボーンの名前でたどる（ボーンを対象にしたカーブは #270 まで読み込まない）。
+- アーマチュアの下はボーンの名前でたどる（ボーンの Transform のカーブは #270 でポーズボーンに当てる）。
 - 読み込み側が足した Empty（FBX のルートなど）で一致しなければ、Empty の子を 1 段だけ探す。
+
+同じだけ解決できるルートが別々のモデルにまたがるとき（ボーンの名前が共通のキャラクターのパックなど）は、クリップと
+フォルダが近いモデルのものだけを残す（``prefer_nearest_models``。#270）。同じモデルの複数の配置はすべて残る。
 """
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Iterable, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from .meta import strip_numeric_suffix
 
-__all__ = ["TargetObject", "TargetTree", "Resolved", "Binding", "bind_paths"]
+__all__ = ["TargetObject", "TargetTree", "Resolved", "Binding", "bind_paths", "folder_affinity", "prefer_nearest_models"]
 
 # 対象が決まったとみなす、解決できたパスの割合（ルート自身を指す空のパスは数えない）
 MIN_MATCH_RATIO = 0.5
@@ -295,3 +298,30 @@ def _higher(tree: TargetTree, a: Binding, b: Binding) -> bool:
     if a.root is None:
         return True
     return tree.depth(a.root) < tree.depth(b.root)
+
+
+def folder_affinity(a: str, b: str) -> int:
+    """2 つのアセットのパスの、先頭から共通するフォルダの数（ファイル名は数えない）。"""
+    folders_a = a.split("/")[:-1]
+    folders_b = b.split("/")[:-1]
+    count = 0
+    for x, y in zip(folders_a, folders_b):
+        if x != y:
+            break
+        count += 1
+    return count
+
+
+def prefer_nearest_models(bindings: Sequence[Binding], clip_path: str,
+                          model_path: Callable[[Binding], str | None]) -> list[Binding]:
+    """結び付けの候補が別々のモデルにまたがるとき、クリップとフォルダがいちばん近いモデルのものだけを残す。
+
+    ``model_path`` は候補のモデルのアセットのパス（分からなければ None。その候補は常に残す）。モデルが 1 種類なら
+    （同じモデルを複数置いたシーンなど）そのまま返す。
+    """
+    paths = [model_path(b) for b in bindings]
+    known = {p for p in paths if p}
+    if len(known) <= 1:
+        return list(bindings)
+    best = max(folder_affinity(clip_path, p) for p in known)
+    return [b for b, p in zip(bindings, paths) if not p or folder_affinity(clip_path, p) == best]

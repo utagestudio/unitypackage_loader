@@ -34,6 +34,9 @@
       ],
       "Body": [
         "Wave"
+      ],
+      "Armature": [
+        "Wave"
       ]
     },
     "values": [
@@ -70,6 +73,19 @@
         "seconds": 0,
         "distance_to": "Door",
         "distance": 111.8034
+      },
+      {
+        "track": "Wave",
+        "object": "Armature",
+        "seconds": 0.5,
+        "bone_direction": {
+          "bone": "Spine",
+          "vector": [
+            -0.5,
+            -0.5,
+            0.7071
+          ]
+        }
       }
     ]
   }

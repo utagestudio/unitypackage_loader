@@ -17,13 +17,22 @@ from unitypackage_loader.core.animation import (
     bezier_handles,
     euler_to_quaternion,
     evaluate,
+    evaluate_many,
     is_state_clip,
     parse_clip,
     quaternion_to_euler,
     sample_times,
     transform_spec,
+    transform_specs,
 )
-from unitypackage_loader.core.animation_targets import TargetObject, TargetTree, bind_paths
+from unitypackage_loader.core.animation_targets import (
+    Binding,
+    TargetObject,
+    TargetTree,
+    bind_paths,
+    folder_affinity,
+    prefer_nearest_models,
+)
 from unitypackage_loader.core.model_space import local_basis, local_values, node_basis
 from unitypackage_loader.core.transform import UNITY_TO_BLENDER, chain, inverse_affine, trs
 from tests.test_transform import assert_mat
@@ -207,6 +216,23 @@ class EvaluateTest(unittest.TestCase):
         self.assertTrue(handles[0].constant)
         self.assertAlmostEqual(handles[1].value, 0.5)
 
+    def test_evaluate_many_matches_evaluate(self):
+        # エルミート・weighted・階段（同じ時刻に並んだキー）・範囲の外を混ぜる
+        keys = [Key(0, 0, 0, 2), Key(0.5, 1, 1, INF), Key(0.5, 3, INF, -1, 0.2, 0.6, 2), Key(1.2, 0, 0.5, 0, 0.7, 0.1, 1), Key(2, 2, 0, 0)]
+        times = [-0.5, 0, 0.1, 0.25, 0.5, 0.5, 0.75, 1.2, 1.5, 2, 3]
+        self.assertEqual(evaluate_many(keys, times), [evaluate(keys, t) for t in times])
+        self.assertEqual(evaluate_many([], [0, 1]), [0.0, 0.0])
+
+    def test_transform_specs_match_transform_spec(self):
+        curves = [
+            Curve("A", "m_LocalPosition.y", 4, KIND_POSITION, [Key(0, 1, 0, 0), Key(1, 2, 0, 0)], component=1),
+            Curve("A", "localEulerAnglesRaw.x", 4, KIND_EULER, [Key(0, 0, 0, 0), Key(1, 90, 0, 0)], component=0),
+            Curve("A", "m_LocalScale.z", 4, KIND_SCALE, [Key(0, 1, 0, 0), Key(1, 3, 0, 0)], component=2),
+        ]
+        rest = euler_to_quaternion((10, 20, 30))
+        times = [0, 0.3, 0.6, 1]
+        self.assertEqual(transform_specs(curves, times, rest), [transform_spec(curves, t, rest) for t in times])
+
     def test_sample_times(self):
         curve = Curve("a", "m_LocalPosition.x", 4, KIND_POSITION, [Key(0, 0), Key(0.05, 1), Key(1, 0)])
         times = sample_times([curve], 0.0, 0.1, 30)
@@ -331,3 +357,24 @@ class BindTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NearestModelTest(unittest.TestCase):
+    def test_folder_affinity(self):
+        self.assertEqual(folder_affinity("Assets/Pack/Ghoul/Animations/run.anim", "Assets/Pack/Ghoul/Source/ghoul.fbx"), 3)
+        self.assertEqual(folder_affinity("Assets/Pack/Boss/Animations/run.anim", "Assets/Pack/Ghoul/Source/ghoul.fbx"), 2)
+        self.assertEqual(folder_affinity("run.anim", "Assets/ghoul.fbx"), 0)
+
+    def test_prefers_models_near_the_clip(self):
+        # ボーンの名前が共通のキャラクターのパック: クリップと同じフォルダのモデル（通常版と allinone 版）だけを残す
+        models = {"ghoul": "Assets/Pack/Ghoul/Source/ghoul.fbx", "ghoul_all": "Assets/Pack/Ghoul/Source/ghoul_allinone.fbx",
+                  "boss": "Assets/Pack/Boss/Source/boss.fbx", "unknown": None}
+        bindings = [Binding(key) for key in models]
+        kept = prefer_nearest_models(bindings, "Assets/Pack/Ghoul/Animations/run.anim", lambda b: models[b.root])
+        self.assertEqual([b.root for b in kept], ["ghoul", "ghoul_all", "unknown"])
+
+    def test_one_model_keeps_every_placement(self):
+        # 同じモデルを複数置いたシーンは、モデルが 1 種類なのですべて残す
+        bindings = [Binding("a"), Binding("b")]
+        kept = prefer_nearest_models(bindings, "Assets/Elsewhere/clip.anim", lambda b: "Assets/Models/rig.fbx")
+        self.assertEqual(kept, bindings)

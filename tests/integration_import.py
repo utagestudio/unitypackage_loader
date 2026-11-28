@@ -700,6 +700,12 @@ def check_clips(ctx: Context) -> None:
                 error = max(abs(a - b) for a, b in zip(direction, spec_bone["vector"]))
                 c.true(f"{label} {spec_bone['bone']} direction at {value['seconds']}s", error < 1e-3,
                        f"expected {spec_bone['vector']}, got {[round(v, 4) for v in direction]}")
+            if "bone_head" in value:  # ボーンの頭のワールドの位置（#270）
+                spec_bone = value["bone_head"]
+                _at_clip_time([obj], value["track"], value["seconds"])
+                evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+                head = evaluated.matrix_world @ evaluated.pose.bones[spec_bone["bone"]].head
+                c.near(f"{label} {spec_bone['bone']} head at {value['seconds']}s", head, spec_bone["location"])
             if "rotation_delta" in value:
                 delta = value["rotation_delta"]
                 _at_clip_time([obj], value["track"], delta["from"])

@@ -48,11 +48,13 @@ __all__ = [
     "parse_clip",
     "is_state_clip",
     "evaluate",
+    "evaluate_many",
     "bezier_handles",
     "euler_to_quaternion",
     "quaternion_to_euler",
     "sample_times",
     "transform_spec",
+    "transform_specs",
 ]
 
 CLASS_ANIMATION_CLIP = 74
@@ -462,7 +464,11 @@ def evaluate(keys: Sequence[Key], time: float) -> float:
             lo = mid
         else:
             hi = mid
-    k0, k1 = keys[lo], keys[hi]
+    return _segment_value(keys[lo], keys[hi], time)
+
+
+def _segment_value(k0: Key, k1: Key, time: float) -> float:
+    """k0 → k1 の区間の、``time`` での値（k0.time ≤ time ≤ k1.time）。"""
     dt = k1.time - k0.time
     if dt <= 0.0:
         return k1.value
@@ -480,6 +486,27 @@ def evaluate(keys: Sequence[Key], time: float) -> float:
     h01 = -2 * t3 + 3 * t2
     h11 = t3 - t2
     return h00 * k0.value + h10 * dt * k0.out_slope + h01 * k1.value + h11 * dt * k1.in_slope
+
+
+def evaluate_many(keys: Sequence[Key], times: Sequence[float]) -> list[float]:
+    """昇順の時刻の列での値（``evaluate`` を時刻ごとに呼ぶのと同じ値。キーを前から順にたどる）。"""
+    if not keys:
+        return [0.0] * len(times)
+    first, last = keys[0], keys[-1]
+    result: list[float] = []
+    index = 0  # keys[index].time <= time < keys[index + 1].time を保つ
+    count = len(keys)
+    for time in times:
+        if time <= first.time:
+            result.append(first.value)
+            continue
+        if time >= last.time:
+            result.append(last.value)
+            continue
+        while index + 1 < count and keys[index + 1].time <= time:
+            index += 1
+        result.append(_segment_value(keys[index], keys[index + 1], time))
+    return result
 
 
 @dataclass(frozen=True)
@@ -535,6 +562,8 @@ def sample_times(curves: Iterable[Curve], start: float, stop: float, rate: float
     """Transform をフレームごとに焼くときの時刻（``rate`` 毎秒。キーの時刻も含める）。
 
     数が ``MAX_SAMPLES`` を超えるときは、間隔を広げて ``MAX_SAMPLES`` に収める（キーの時刻は数に入れない）。
+    キーの時刻の数がフレームの数より多い（毎フレームに焼いたモーションなど）ときは、キーの時刻を足さない
+    （フレームごとの値で動きは表せ、時刻の数が倍近くになるのを避ける。#270）。
     """
     rate = rate if rate > 0 else 60.0
     times = {start, stop}
@@ -553,7 +582,8 @@ def sample_times(curves: Iterable[Curve], start: float, stop: float, rate: float
                 keys.add(key.time)
                 if len(keys) > MAX_SAMPLES:
                     break
-    times |= keys
+    if len(keys) <= count + 1:
+        times |= keys
     return sorted(t for t in times if start <= t <= stop)
 
 
@@ -618,13 +648,30 @@ def transform_spec(curves: Iterable[Curve], time: float, rest_rotation: Sequence
     オイラー回転のカーブはクォータニオンにする（アニメーションしていない成分は、元の回転をオイラー角にした値）。
     クォータニオンの一部の成分だけのカーブは、残りを元の回転で埋めてから正規化する。
     """
+    curves = list(curves)
+    return _spec(curves, [evaluate(curve.keys, time) for curve in curves], rest_rotation)
+
+
+def transform_specs(curves: Iterable[Curve], times: Sequence[float], rest_rotation: Sequence[float],
+                    columns: Sequence[Sequence[float]] | None = None) -> list[dict[str, list[float | None]]]:
+    """昇順の時刻の列での ``transform_spec``（カーブごとに ``evaluate_many`` でまとめて評価する）。
+
+    ``columns`` はカーブごとの ``evaluate_many(curve.keys, times)``（評価済みのものを使い回すとき）。
+    """
+    curves = list(curves)
+    if columns is None:
+        columns = [evaluate_many(curve.keys, times) for curve in curves]
+    return [_spec(curves, [column[i] for column in columns], rest_rotation) for i in range(len(times))]
+
+
+def _spec(curves: Sequence[Curve], values: Sequence[float], rest_rotation: Sequence[float]) -> dict[str, list[float | None]]:
+    """カーブとその値から ``transform_spec`` の形を作る。"""
     position: list[float | None] = [None, None, None]
     scale: list[float | None] = [None, None, None]
     rotation: list[float | None] = [None, None, None, None]
     euler: list[float | None] = [None, None, None]
     order = DEFAULT_ROTATION_ORDER
-    for curve in curves:
-        value = evaluate(curve.keys, time)
+    for curve, value in zip(curves, values):
         if curve.kind == KIND_POSITION and curve.component < 3:
             position[curve.component] = value
         elif curve.kind == KIND_SCALE and curve.component < 3:
