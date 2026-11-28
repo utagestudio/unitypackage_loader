@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- BOOTH の商品画像（1200×1200、正方形）の元。?p=1 がサムネイル、2〜4 が説明の画像。ローカルの Chrome でレンダリングする:
-     for p in 1 2 3 4; do google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,1200 --screenshot=_local/booth/image$p.png "file://$PWD/tools/booth_card.html?p=$p"; done
+     for p in 1 2 3 4; do google-chrome --headless=new --hide-scrollbars --virtual-time-budget=8000 --window-size=1200,1200 --screenshot=_local/release/booth/image$p.png "file://$PWD/tools/booth_card.html?p=$p"; done
      リポジトリのルートで実行すること（画像は web/assets/ を相対パスで読む）。フォントは Google Fonts から読むので、オンラインで実行すること。
      デザインは tools/og_card.html に揃えてある。購入アセットが写る画像（use-render / use-props / scene-street）は BOOTH では使わない。 -->
 <html lang="ja">
