@@ -58,7 +58,7 @@ Blender の Preferences > Get Extensions で右上メニューから "Refresh Lo
 配布用の zip は次のコマンドで作ります。
 
 ```sh
-blender --command extension build --source-dir unitypackage_loader --output-dir dist
+blender --command extension build --source-dir unitypackage_loader --output-dir _local/dist
 ```
 
 紹介ページと Extension Repository は、`.github/workflows/pages.yml` が main への push ごとに生成します（Blender の

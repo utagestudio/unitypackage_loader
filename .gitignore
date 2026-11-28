@@ -18,7 +18,6 @@ __pycache__/
 .ruff_cache/
 
 # --- ビルド成果物 / 作業用 ---
-/dist/
 /site/
 /build/
 *.zip
@@ -40,3 +39,4 @@ CLAUDE.local.md
 # --- ルート直下のスクリーンショット等 ---
 /*.png
 /*.jpg
+/mise.toml

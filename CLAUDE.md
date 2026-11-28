@@ -58,7 +58,12 @@ tests/                    unittest（bpy 不要）＋ Blender 上の統合テス
 tools/                    GitHub Pages 用サイトの組み立て（build_site.py）、OGP 画像の元（og_card.html）、extensions.blender.org の featured image とアイコンの元（listing_card.html）、BOOTH の商品画像の元（booth_card.html）、スクリーンショット撮影（shoot_screenshots.py）
 web/                      紹介ページのソース（英語 index.html、日本語 ja/、assets/）。ビルド時に site/ へコピーし {{VERSION}} 等を埋める
 .github/workflows/        Pages への Extension Repository 公開（pages.yml）と、単体テスト・Blender 4.5 / 5.2 での統合テスト（tests.yml）
-_local/                   検証用データ置き場（gitignore。詳細は CLAUDE.local.md）
+_local/                   追跡しないファイルの置き場（gitignore。検証用データの詳細は CLAUDE.local.md）
+  unitypackages/          検証用の .unitypackage（合成パッケージの出力先もここ）
+  expectations.json       実パッケージ用の期待値
+  dist/                   extension build の出力（過去のバージョンの zip も残す）
+  release/                リリース・宣伝の資料（BOOTH・extensions.blender.org の手順と画像、紹介ページの撮影の元、note の原稿）
+  claude/                 Claude が調査・検証で作ったもの（README.md に一覧）
 ```
 
 ## 開発の進め方（守ること）
@@ -70,6 +75,9 @@ _local/                   検証用データ置き場（gitignore。詳細は CL
   コミットしてよいフィクスチャは手書き・生成の合成データ（`tests/make_synthetic_*.py` の生成物と `tests/expectations_synthetic*.json`）だけ。
   アセット名やメッシュ・マテリアル名などを、Issue・PR・コミットメッセージ・ドキュメント・コメントに書くのはかまわない
   （2026-09-14 に方針を変更。それまでの記述は一般化した表現のまま残っている）。
+- **調査・検証で作るファイル**（Unity のプローブ用プロジェクト、比較用の出力、再現スクリプト、メモなど）は
+  `_local/claude/<issue番号>-<短い名前>/` に置き（例: `_local/claude/270-bone-curves/`）、`_local/claude/README.md` の一覧に 1 行足す。
+  `_local/` の直下やリポジトリの直下には作らない。Unity のプロジェクトは調べ終えたら、スクリプト（`Assets/Editor/`）と出力だけ残して消してよい。
 - 実装を変えたら **単体テストと統合テストの両方**を回し、結果の行を実際に確認する（shell の `set -e` はこの環境では当てにならない）。
   統合テストは `python3 tests/run_integration.py` が最後に期待値ファイルごとの合否をまとめて出す。
 - Blender API は 4.5 以降を前提にする（`surface_render_method`、`ShaderNodeMix`、Extension manifest、`ImportHelper.invoke_popup`、FileHandler）。
@@ -111,7 +119,7 @@ blender -b --factory-startup --python tests/integration_import.py -- _local/unit
 blender -b --factory-startup --python tests/integration_import.py
 
 # 配布用 zip / Extension Repository の index.json
-blender -b --factory-startup --command extension build --source-dir unitypackage_loader --output-dir dist
+blender -b --factory-startup --command extension build --source-dir unitypackage_loader --output-dir _local/dist
 blender -b --factory-startup --command extension server-generate --repo-dir=site
 ```
 
@@ -123,7 +131,7 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 
 - バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
-- extensions.blender.org にも同じ `id`・同じ `version` で出す（2026-09-28 に掲載の方針を決めた。手順と審査の要件は `_local/publish_extensions_blender_org.md`）。
+- extensions.blender.org にも同じ `id`・同じ `version` で出す（2026-09-28 に掲載の方針を決めた。手順と審査の要件は `_local/release/publish_extensions_blender_org.md`）。
   main にマージしたら、`extension build` で作った zip を掲載ページから新しいバージョンとしてアップロードする。
   同じアドオンを 2 つの入手先から入れると両方が有効になってクラスを上書きし合うので、README と紹介ページには「どれか 1 つから入れる」と書いておく。
 - お問い合わせ先は Tally のフォーム（日本語 https://tally.so/r/kdVdDR 、英語 https://tally.so/r/KYqY78 。2026-10-04 に追加）と GitHub の Issues の併記。
@@ -134,7 +142,7 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 - BOOTH（https://utagestudio.booth.pm/items/8910607 、2026-09-28 公開）にも同じ zip を置いている（無料版と、中身が同じ応援版 300 円・1,000 円）。
   リリースごとに全バリエーションの zip を差し替え、説明文の「現在のバージョン」と「更新履歴」も直す。BOOTH から入れた人には自動更新が届かないので、fix 版でも差し替える。
   manifest のタグなど extensions.blender.org 向けだけの変更で、利用者から見た動作が変わらない版は差し替えなくてよい（2026-11-08 に「minor 以上のみ」から変更）。
-  説明文の元と手順は `_local/booth/description.txt` と `_local/publish_booth.md`。商品画像は `tools/booth_card.html` から書き出す。
+  説明文の元と手順は `_local/release/booth/description.txt` と `_local/release/publish_booth.md`。商品画像は `tools/booth_card.html` から書き出す。
 - 紹介ページのローカル確認: `blender ... extension build` と `server-generate` を `site/` に出したあと `python3 tools/build_site.py site <base_url>`。
   Google Tag Manager は、環境変数 `GTM_ID`（無ければリポジトリ直下の `.env`。gitignore 対象）に `GTM-XXXX` 形式の ID があるときだけ埋め込む。
   公開時はリポジトリの Settings > Secrets and variables > Actions > Variables の `GTM_ID` を `pages.yml` が渡す（未設定なら埋め込まない）。
@@ -143,13 +151,13 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
   （コマンドは同ファイル冒頭。右側の前後比較は `hero-before.webp` / `hero-after.webp` を読むので、ヒーロー画像を差し替えたら作り直す）。
   使い道の画像は全画面のスクリーンショットから 3:2 で切り出し、1200×800 の WebP にする（1 枚目は `use-edit.webp`、2・3 枚目は F12 でレンダリングした画像から作った `use-render.webp` / `use-props.webp`）。
   背景や小物のアセットは、ライセンス上レンダリング画像の公開だけを行い、ファイル自体は `_local/` から出さない。
-  ヒーローの読み込み前後（`hero-before.webp` / `hero-after.webp`）は、同じカメラで撮った 2 枚のレンダリング（`_local/shots/`）を
+  ヒーローの読み込み前後（`hero-before.webp` / `hero-after.webp`）は、同じカメラで撮った 2 枚のレンダリング（`_local/release/shots/`）を
   同じ範囲で 4:5 にして 960×1200 の WebP にしたもの。左は素の FBX（マテリアル無しの白）、右はこのアドオンで読み込んだ状態。
   スライダーで重ねるので、撮り直すときもカメラと切り出し範囲を揃えること。
-  操作デモは `web/assets/demo.mp4`（音声なし・自動ループ）と、最後のコマから作った poster `demo-poster.webp`。録画の元ファイルは `_local/recording/` に置く。
+  操作デモは `web/assets/demo.mp4`（音声なし・自動ループ）と、最後のコマから作った poster `demo-poster.webp`。録画の元ファイルは `_local/release/recording/` に置く。
   同じ動画を「こんなお悩み」の節と導入の手順 2 で使う。録画が HEVC や音声付きなら、H.264・音声なし・faststart に変換してから置く。
   シーンの節の画像（`web/assets/scene-street.webp`）は、街並みのアセットのシーンを読み込んだ画面に選択ダイアログを重ねて手で撮った
-  スクリーンショット（`_local/shots/`）から、ツールバーと操作パネルを避けて 16:9 で切り出したもの。
+  スクリーンショット（`_local/release/shots/`）から、ツールバーと操作パネルを避けて 16:9 で切り出したもの。
   `tools/shoot_screenshots.py` の `dialog` / `select` / `menu` は、設定のポップアップ・選択ダイアログ・File > Import メニューを撮れる（現在のページでは未使用）。モード比較（`shot-modes.webp`）は
   サイドバーで切り替えた 2 体を手で撮ったスクリーンショットから切り出す。スクリプトで撮る場合も手で撮る場合も、他アドオンが写り込まないよう
   `--factory-startup` の Blender にリポジトリの実体だけを登録する。撮影対象のパッケージは `_local/unitypackages/` に置き、追跡ファイルには名前を書かない。
