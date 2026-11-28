@@ -130,6 +130,14 @@ Blender MCP が接続されている場合は、`addon_utils.disable` → `sys.m
 ## リリース
 
 - バージョンは `unitypackage_loader/blender_manifest.toml` の `version`。付け方は上記「バージョン番号のルール」を参照。
+- **リリース時のタスク**（main にマージして `-dev` を外したあと、ユーザーに頼まれなくても続けて行う）:
+  1. zip の作成: main で `blender -b --factory-startup --command extension build --source-dir unitypackage_loader --output-dir _local/dist`。
+     中の manifest のバージョンと、`__pycache__` などの不要なファイルが入っていないことを確かめる。
+  2. BOOTH 向けのバージョン履歴: `_local/release/booth/description.txt` の「現在のバージョン」、お問い合わせのリンクの `version=`、
+     「更新履歴」の先頭の行（`YYYY-MM-DD <version> <変更点を / で区切る>`）を直す。「できること」「できないこと」も機能の変化に合わせる。
+  3. extensions.blender.org 向けのリリースノート: 前の版からマージした PR を、利用者から見た変化だけ英語で 2〜4 項目にまとめて提案する
+     （リファクタリングは書かない。最後に `Full changelog: https://github.com/utagestudio/unitypackage_loader/pulls?q=is%3Amerged`）。
+     アップロードはユーザーが行い、公開したら `_local/release/publish_extensions_blender_org.md` の進み具合に 1 行足す。
 - main への push で `.github/workflows/pages.yml` が zip と `index.json` を生成し、`web/` の紹介ページと一緒に GitHub Pages に公開する。
 - extensions.blender.org にも同じ `id`・同じ `version` で出す（2026-09-28 に掲載の方針を決めた。手順と審査の要件は `_local/release/publish_extensions_blender_org.md`）。
   main にマージしたら、`extension build` で作った zip を掲載ページから新しいバージョンとしてアップロードする。
