@@ -4,13 +4,14 @@
 
 実在アセットのデータは使わない。
 
-- Models/Rig.fbx: 最上位のノード Face（シェイプキー smile を持つ板）・Hat・Door（子に Knob）・Armature（ボーン Hips → Spine。
+- Models/Rig.fbx: 最上位のノード Face（シェイプキー smile を持つ板）・Hat・Door（子に Knob）・Armature（ボーン Hips → Spine → Head。
   スキンメッシュ Body はアーマチュアの子として書き出す。Unity では Armature と兄弟）。
 - Animations/
   - Smile.anim: Face の blendShape.smile を 0 → 100（1 秒、接線 0）。
   - HatOff.anim: Hat の m_IsActive を 0.5 秒で 1 → 0（階段。1 秒）。
   - DoorOpen.anim: Door のオイラー回転を (0, 0, 0) → (0, 90, 0)（1 秒）、Door/Knob の位置を (0.5, 1, 0)。ループする。
-  - Wave.anim: ボーン Armature/Hips/Spine の回転（読み込まない。#270）と、Body の m_Enabled を 0。
+  - Wave.anim: ボーンの Transform（#270）と、Body の m_Enabled を 0。Hips は位置（WAVE_HIPS_POSITION）と回転（レストの X まわり 90° から、ボーンの軸の Y まわりに 90° ひねる）、
+    Spine はオイラー回転（X まわりに 0 → 90°）とスケール（Y を 1 → 2）。期待値のボーンの向きと位置は、Unity 6 で再生した値。
   - Gesture.anim: Humanoid のマッスル値だけ（読み込まない）。
   - Fist.anim: Humanoid のマッスル値と、Face のシェイプキー（値が変わる）。Humanoid なのでクリップごと読み込まない。
   - Spin.anim: ルート自身（空のパス）の回転だけ（どのオブジェクトのものか決められない）。
@@ -40,6 +41,8 @@ from tests.unity_yaml_writer import HEADER, ROOT_TRANSFORM, instance, mod  # noq
 INF = float("inf")
 ZERO3 = (0, 0, 0)
 ZERO4 = (0, 0, 0, 0)
+# Wave.anim の Hips の位置（0 秒と 1 秒）。Unity での Hips のローカルの位置に合わせる
+WAVE_HIPS_POSITION = ((0, 0, 0.008), (0.002, 0, 0.009))
 
 
 def export_rig_fbx(path: Path) -> None:
@@ -75,6 +78,8 @@ def export_rig_fbx(path: Path) -> None:
     hips.head, hips.tail = (0, 0, 0.8), (0, 0, 1.0)
     spine = bones.new("Spine")
     spine.head, spine.tail, spine.parent = (0, 0, 1.0), (0, 0, 1.3), hips
+    head = bones.new("Head")
+    head.head, head.tail, head.parent = (0, 0, 1.3), (0, 0, 1.5), spine
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.mesh.primitive_cube_add(size=0.4, location=(0, 0, 1.0))
     body = bpy.context.object
@@ -119,7 +124,13 @@ def main() -> None:
     clip("Wave", clip_yaml(
         "Wave",
         float_curves=[("Body", "m_Enabled", 137, [(0, 0, INF, INF)])],
-        vector_curves={"m_RotationCurves": [("Armature/Hips/Spine", [(0, (0, 0, 0, 1), ZERO4, ZERO4), (1, (0, 0.38268343, 0, 0.9238795), ZERO4, ZERO4)])]},
+        vector_curves={
+            "m_RotationCurves": [("Armature/Hips", [(0, (0.70710678, 0, 0, 0.70710678), ZERO4, ZERO4), (1, (0.5, 0.5, 0.5, 0.5), ZERO4, ZERO4)])],
+            "m_EulerCurves": [("Armature/Hips/Spine", [(0, ZERO3, ZERO3, ZERO3), (1, (90, 0, 0), ZERO3, ZERO3)])],
+            "m_ScaleCurves": [("Armature/Hips/Spine", [(0, (1, 1, 1), ZERO3, ZERO3), (1, (1, 2, 1), ZERO3, ZERO3)])],
+            "m_PositionCurves": [("Armature/Hips", [(0, WAVE_HIPS_POSITION[0], ZERO3, ZERO3), (1, WAVE_HIPS_POSITION[1], ZERO3, ZERO3)])]
+            if WAVE_HIPS_POSITION else [],
+        },
         stop_time=1,
     ))
     clip("Gesture", clip_yaml("Gesture", float_curves=[("", "LeftHand.Index.1 Stretched", 95, [(0, -1, 0, 0)]), ("", "RootT.y", 95, [(0, 1, 0, 0)])]))

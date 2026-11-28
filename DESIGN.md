@@ -323,7 +323,7 @@ Material:
 - モデルの中のモーション: FBX のテイクを、.meta の `clipAnimations` どおりのクリップにして NLA に並べる。同じ骨格のモーションだけのモデルは 1 体のアーマチュアにまとめる（§4.7.2。#276）。
 
 ### 読み込まない
-- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、Animator Controller（`.controller`）と Humanoid の `.anim`・ボーンのカーブ（§4.7.1）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
+- シェーダー本体（`.shader` `.cginc`）、C#（`.cs` `.dll`）、Animator Controller（`.controller`）と Humanoid の `.anim`（§4.7.1）、Expression/Parameter アセット、PhysBone 等の MonoBehaviour、prefab 階層（シーンを読み込む場合はモデルの配置と、その上の GameObject、ライト・カメラだけ再現する）、アイコン画像、`preview.png`。
 
 ### マテリアルの対応方針
 Unity と 1:1 は不可能なので、**「Unity マテリアル → シェーダー非依存の中間表現（NormalizedMaterial）→ Blender ノード」** の 2 段変換にし、シェーダーごとの差は「プロファイル」に閉じ込める（§4.5）。
@@ -1091,7 +1091,9 @@ def run(ctx, filepath, opts) -> Report:
 - **対象の決め方**（`core/animation_targets.py`）: クリップは Animator を付けた GameObject からの相対パスしか持たないので、読み込んだ階層
   （パッケージのコレクションの全オブジェクト）で、パスがいちばん多く解決できるオブジェクトをルートとみなす。Models 単位のように
   ルートのオブジェクトが無いときは、コレクションごとの最上位のオブジェクトの集まりをルートの候補にする。解決できたパスが半分に満たなければ付けない。
-  同じだけ解決できるルートはすべて対象にする（シーンに同じモデルを複数置いたとき）。ただし別のルートの子孫は外す（prefab の GameObject と、その下に置いた
+  同じだけ解決できるルートはすべて対象にする（シーンに同じモデルを複数置いたとき）。ただし、それが別々のモデルにまたがるときは、クリップと先頭から共通する
+  フォルダがいちばん多いモデルのものだけを残す（`prefer_nearest_models`。#270。Ghoul Crew は 5 体の骨格のボーン名が共通で、クリップがすべての体に付いていた。
+  `Ghoul-Scavenger/Animations/run.anim` は `Ghoul-Scavenger/Source/` の通常版と allinone 版の 2 体に付く）。また別のルートの子孫は外す（prefab の GameObject と、その下に置いた
   FBX の同じ名前のノードを、両方動かさない。Super Cub の prefab で見つけた）。名前は完全一致 → 連番を外した形が 1 つだけの順で引き、
   Blender の FBX インポーターがアーマチュアの子にしたスキンメッシュは、Unity と同じくアーマチュアの親の子としても引く。アーマチュアの下はボーン名でたどる。
   読み込み側が足した Empty（FBX のルートなど）で一致しなければ、Empty の子を 1 段だけ探す。空のパス（ルート自身）だけのクリップは、
@@ -1110,8 +1112,19 @@ def run(ctx, filepath, opts) -> Report:
     シーン・prefab の GameObject の Empty と Unity の Mesh・組み込みメッシュのオブジェクトが C·L·C⁻¹。A はモデルの `ModelUnits.basis_a` で、
     オブジェクトに残した元のモデルの GUID（`unity_model_guid`）から引く。スキンメッシュ・ボーンの子・ライト・カメラ・Terrain・デカールは
     Unity と親子や形が違うので当てずに数える。アニメーションしない成分は元の値（オイラー角は元の回転を同じ順のオイラー角にした値）を使う。
-  - ボーンのカーブは読み込まない（#270。FBX インポーターがボーンの軸を付け替えるので、レスト姿勢の差の補正が要る）。
-- **レポート**: 読み込んだクリップの数を要約に、読まなかったものの内訳（状態のクリップ、Humanoid、ボーンだけ、ルートだけ、当てはまらない、対象が無いカーブ）を
+  - ボーンの Transform（#270）: 新旧どちらの FBX インポーターも、このアドオンの呼び方（ボーンの軸の付け替えのオプションは既定のまま）では
+    ボーンの軸を付け替えず、ポーズボーンの行列（アーマチュアの空間）は FBX のノードの行列そのもの。3ds Max・Maya・MotionBuilder・Unity FBX Exporter・
+    Blender で作った 10 本の FBX で、新旧のボーンの行列（レストとポーズ）が一致した。インポーターが足したアーマチュア（Maya の FBX の `Armature`）の
+    行列は C·A で、Unity の値が単位行列のノードと同じ。どちらの場合も、親（親のボーンかアーマチュアのオブジェクト）から見たボーンの行列は
+    Q = A⁻¹·L·A になる。フレームごとに、動かすボーンとその祖先のポーズの行列を親から順に求め、目標の行列 M_parent·Q を
+    `Bone.convert_local_to_pose`（invert）でポーズボーンの値にする。継承の設定もここで扱う（新しいインポーターは Maya の Segment Scale Compensate の
+    ボーンを `inherit_scale = NONE` にする）。アニメーションしない成分は、読み込んだときのポーズから L₀ = A·Q₀·A⁻¹ を求めて使う。
+    回転はクォータニオンの符号を前のフレームにそろえ、値が変わらないチャンネルはキー 1 つにする。カーブの値はクリップの中で使い回す
+    （同じ骨格の複数のモデル・配置）。Unity 6 で .anim をサンプリングした各ボーンのワールドの値と突き合わせ、Ghoul Crew の Scavenger（Maya。
+    run / attack）はフレームの時刻で位置・回転とも一致、Thalassophobia のサメ（Blender）はシーンのフレームレートとの補間の差だけ（1.3 mm・0.04°）だった。
+    GameObject の `m_IsActive` などボーンへの Transform 以外のカーブは読まずに数える。
+  - 焼く時刻は、キーの時刻の数がフレームの数より多い（毎フレームに焼いたモーション）ときはフレームだけにする（`sample_times`）。
+- **レポート**: 読み込んだクリップの数を要約に、読まなかったものの内訳（状態のクリップ、Humanoid、ルートだけ、当てはまらない、対象が無いカーブ、ボーンへの Transform 以外のカーブ）を
   `clip_notes` に出す（警告にはしない）。
 - Python から `NlaTrack.mute` を切り替えても依存関係は組み直されず、一度評価したトラックは切り替わらない（NLA エディターでの切り替えでは組み直される）。
   統合テストはコレクションを付け外しして組み直させてから値を確かめる。

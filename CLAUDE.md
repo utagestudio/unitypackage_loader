@@ -8,8 +8,8 @@
 
 - メッシュ（アーマチュア・シェイプキー込み）に、Unity 側のマテリアル設定とテクスチャを反映した状態で読み込む。
 - Unity と Blender のマテリアルは 1:1 に対応しないので「参考にできる値だけ」を反映し、残りはカスタムプロパティに保存する。
-- シェーダー本体、C#、Humanoid のアニメーション・ボーンのカーブ・Animator Controller、Expression メニュー等は読み込まない。
-  Generic な `.anim`（シェイプキー・表示の切り替え・オブジェクトの Transform）は、ミュートした NLA トラックの Action にする（`core/animation.py`。#209）。
+- シェーダー本体、C#、Humanoid のアニメーション・Animator Controller、Expression メニュー等は読み込まない。
+  Generic な `.anim`（シェイプキー・表示の切り替え・オブジェクトとボーンの Transform）は、ミュートした NLA トラックの Action にする（`core/animation.py`。#209 / #270）。
   値が変わらないか 0.1 秒以下で終わる、状態を切り替えるだけのクリップ（Animator のステート用）は読み込まない。
   FBX の中のテイクは、.meta の clipAnimations どおりのクリップにして同じく NLA に並べ、同じ骨格のモーションだけのモデルは
   レストの違いを変換して 1 体のアーマチュアにまとめる（`blender/fbx_motion.py` と `rig_merge.py`。NLA への置き方は両方で `nla.py`。#276）。オプションは Animation（Muted / Active / None）。
